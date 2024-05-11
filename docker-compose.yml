@@ -13,7 +13,7 @@ services:
   frontend:
     build: ./frontend
     ports:
-      - "3000:3000"
+      - "3001:3000"  # изменено с 3000:3000 на 3001:3000
     volumes:
       - ./frontend:/app
     depends_on:
