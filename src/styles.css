@@ -1,0 +1,258 @@
+body, button, input, h1 {
+  font-family: 'Arial', sans-serif;
+}
+
+.MapContainer {
+  height: '100vh'; 
+  width: '100%';
+}
+
+.selected-marker-info {
+  position: absolute;
+  top: 0%; /* или любое другое значение, которое вы предпочитаете */
+  z-index: 900; /* Убедитесь, что это значение выше, чем у карты */
+  background-color: white; /* Добавим фон, чтобы текст был более читаемым */
+  box-shadow: 0 4px 8px rgba(0,0,0,0.5); /* Небольшая тень для лучшей видимости */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%; /* или любая другая ширина, которая вам нужна */
+  
+}
+
+
+.button {
+  background-color: #000000; /* Черный цвет кнопок */
+  border: none;
+  color: white;
+  padding: 15px 32px;
+  text-align: center;
+  text-decoration: none;
+  display: inline-block;
+  font-size: 16px;
+  margin: 4px 2px;
+  cursor: pointer;
+  border-radius: 25px;
+  box-shadow: 0 4px 8px 0 rgba(0,0,0,0.2), 0 6px 20px 0 rgba(0,0,0,0.3);
+  font-weight: bold; /* Жирное начертание текста */
+}
+
+.button:hover {
+  background-color: #333333; /* Светло-черный при наведении */
+}
+
+.background {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  
+  background-size: cover;
+  position: relative;
+}
+
+.link-button {
+  position: absolute;
+  left: 10px;
+  top: 10px;
+  padding: 10px 20px;
+  background: rgba(255, 255, 255, 0.7);
+  text-decoration: none;
+  color: black;
+  font-weight: bold; /* Жирное начертание текста */
+  background-color: white; /* Черный цвет кнопок */
+  border: none;
+  text-align: center;
+  display: inline-block;
+  font-size: 16px;
+  margin: 4px 2px;
+  cursor: pointer;
+  border-radius: 25px;
+  box-shadow: 0 4px 8px 0 rgba(0,0,0,0.2), 0 6px 20px 0 rgba(0,0,0,0.3);
+}
+
+.centered-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  width: 100%; /* Ширина контейнера */
+  height: 100%; /* Высота контейнера, может быть изменена в зависимости от контента */
+}
+
+.input-tags {
+  padding: 10px;
+  margin-top: 10px;
+  margin-bottom: 10px;
+  border: 1px solid #ccc;
+  border-radius: 5px;
+  font-size: 16px;
+  width: 30%; /* Адаптивная ширина */
+}
+
+@media (max-width: 768px) {
+  .button, .input-tags {
+    width: 90%; /* Увеличиваем ширину на малых экранах */
+    padding: 12px; /* Немного увеличиваем паддинг для удобства */
+  }
+
+  .centered-container {
+    padding: 20px; /* Добавляем паддинг для внутреннего контейнера */
+  }
+}
+
+.leaflet-control-attribution {
+  display: none;
+}
+
+.marker-info {
+  display: flex;
+  
+  align-items: flex-start;
+  
+  width: 100%; /* Полная ширина для контейнера кнопок */
+
+  z-index: 1000;
+}
+
+
+.button-container {
+  display: flex;
+  justify-content: space-between; /* Распределяет пространство между кнопками */
+  width: 100%; /* Полная ширина для контейнера кнопок */
+  max-width: 400px; /* Ограничивает максимальную ширину контейнера */
+  margin-top: 20px; /* Отступ сверху */
+}
+
+.overlay-content {
+  position: absolute;
+  top: 60%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2; /* Убедитесь, что контент находится поверх видео */
+}
+
+
+.navigation-menu {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  height: 70px;
+  background-color: #00000080; /* Легкий серый фон для видимости */
+  position: fixed;
+  width: 100%;
+  top: 0;
+  z-index: 1000; /* Убедитесь, что меню всегда наверху */
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1); /* Небольшая тень для лучшей видимости */
+}
+
+.logo {
+  font-size: 24px; /* Больший размер для логотипа */
+  font-weight: bold; /* Жирный шрифт для логотипа */
+
+}
+
+.profile-link {
+  font-size: 20px; /* Размер шрифта для ссылки профиля */
+  color: #ffffff; /* Синий цвет ссылок */
+  text-decoration: none; /* Убрать подчеркивание у ссылок */
+}
+
+
+/* styles.css или в вашем компоненте в <style> тег */
+* {
+  box-sizing: border-box;
+}
+
+*:focus {
+  outline: none;
+}
+
+.login {
+  margin: 200px auto;
+  width: 300px;
+
+}
+.login-screen {
+  background-color: #FFF;
+  padding: 20px;
+  border-radius: 5px;
+  
+}
+
+.app-title {
+  text-align: center;
+  color: #777;
+}
+
+.login-form {
+  text-align: center;
+}
+.control-group {
+  margin-bottom: 10px;
+}
+
+input {
+  text-align: center;
+  background-color: #ECF0F1;
+  border: 2px solid transparent;
+  border-radius: 3px;
+  font-size: 16px;
+  font-weight: 200;
+  padding: 10px 0;
+  width: 250px;
+  transition: border .5s;
+}
+
+input:focus {
+  border: 2px solid #000000;
+  box-shadow: none;
+}
+
+.buttonlogin {
+  width: 250px;
+}
+
+.login-link {
+  font-size: 12px;
+  color: #444;
+  display: block;
+  margin-top: 12px;
+}
+
+
+.profile-page {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  background: #FFF; /* Белый фон для контраста с другими элементами */
+}
+
+.profile-title {
+  color: #333; /* Темно-серый цвет текста */
+  margin-bottom: 20px; /* Отступ ниже заголовка */
+}
+
+
+.logo-menu {
+  display: flex;
+  margin: 0px 15px;
+}
+
+.button_nav {
+  margin: 0px 5px;
+  border-radius:0%;
+}
+
+.profile_nav {
+  display: flex;
+  margin: 0px 15px;
+}
