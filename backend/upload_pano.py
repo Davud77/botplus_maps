@@ -1,5 +1,4 @@
-from flask import Flask, request, jsonify
-from flask_cors import CORS
+from flask import Blueprint, request, jsonify
 from PIL import Image
 import piexif
 import json
@@ -9,8 +8,7 @@ import psycopg2
 from datetime import datetime
 import io
 
-app = Flask(__name__)
-CORS(app, resources={r"/api/*": {"origins": "http://localhost:3000"}})
+upload_blueprint = Blueprint('upload', __name__)
 
 
 def load_db_config():
@@ -66,7 +64,7 @@ def convert_to_degrees(value):
     d, m, s = value
     return d[0] / d[1] + m[0] / m[1] / 60 + s[0] / s[1] / 3600
 
-@app.route('/upload', methods=['POST'])
+@upload_blueprint.route('/upload', methods=['POST'])
 def upload_files():
     uploaded_files = request.files.getlist("files")
     tags = request.form.get("tags", "")
@@ -108,6 +106,4 @@ def upload_files():
     }), 200
 
 
-
-if __name__ == '__main__':
-    app.run(debug=True)
+pass

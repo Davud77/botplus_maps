@@ -1,13 +1,12 @@
-from flask import Flask, jsonify
-from flask_cors import CORS
+from flask import Blueprint, jsonify
 import psycopg2
 import json
 import os
 from minio import Minio
 from datetime import timedelta
 
-app = Flask(__name__)
-CORS(app)  # Включение CORS для доступа к API с любого домена
+# Создаем экземпляр Blueprint
+pano_blueprint = Blueprint('pano', __name__)
 
 # Функция для загрузки конфигурационного файла
 def load_config(filename):
@@ -49,7 +48,7 @@ def create_presigned_url(bucket, object_name):
         return None
 
 # Маршрут API для получения списка панорам
-@app.route('/panoramas', methods=['GET'])
+@pano_blueprint.route('/panoramas', methods=['GET'])
 def get_panoramas():
     conn = connect_db()  # Подключение к базе данных
     cursor = conn.cursor()  # Создание курсора для выполнения запросов
@@ -71,11 +70,4 @@ def get_panoramas():
     finally:
         cursor.close()  # Закрытие курсора
         conn.close()  # Закрытие соединения с базой данных
-
-
-
-
-        
-
-if __name__ == '__main__':
-    app.run(debug=True, port=5000)  # Запуск приложения на порту 5000 с включенным режимом отладки
+pass
