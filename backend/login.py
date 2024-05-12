@@ -1,10 +1,9 @@
-from flask import Flask, request, jsonify
-from flask_cors import CORS  # Импорт CORS
+from flask import Blueprint, request, jsonify
 import psycopg2
 import psycopg2.extras
 
-app = Flask(__name__)
-CORS(app)  # Включение CORS для всего приложения
+# Создаем экземпляр Blueprint
+login_blueprint = Blueprint('login', __name__)
 
 def connect_db():
     conn = psycopg2.connect(
@@ -16,7 +15,7 @@ def connect_db():
     )
     return conn
 
-@app.route('/login', methods=['POST'])
+@login_blueprint.route('/login', methods=['POST'])
 def login():
     username = request.json['username']
     password = request.json['password']
@@ -36,6 +35,3 @@ def login():
     finally:
         cur.close()
         conn.close()
-
-if __name__ == '__main__':
-    app.run(debug=True)
