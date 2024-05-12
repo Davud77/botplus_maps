@@ -1,10 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { MapContainer, LayersControl, ZoomControl, Marker, TileLayer } from 'react-leaflet';
-import { Link } from 'react-router-dom';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import Marzipano from 'marzipano';
-import data from './uploads/list.json';
 import TMSLayers from './TMSLayers';
 import PanoramaViewer from './PanoramaViewer'; // Предполагается, что вынесен в отдельный файл
 import MarkerInfo from './MarkerInfo'; // Предполагается, что вынесен в отдельный файл
@@ -29,22 +26,27 @@ const MapPage = () => {
   const [mapCenter, setMapCenter] = useState([42.9764, 47.5024]);
 
   useEffect(() => {
-    const newMarkers = Object.keys(data).map(key => {
-      const image = data[key];
-      const [lat, lng] = image.metadata.gps;
-      const imageUrl = `/uploads/${key}`;
-      return { lat, lng, tags: image.tags.join(', '), imageUrl };
-    });
-    setMarkers(newMarkers);
+    fetch('http://localhost:5000/panoramas')
+      .then(response => response.json())
+      .then(data => {
+        const newMarkers = data.map(item => ({
+          lat: item.latitude,
+          lng: item.longitude,
+          imageUrl: item.filename, // URL из API для использования в PanoramaViewer
+          tags: item.tags
+        }));
+        setMarkers(newMarkers);
+      })
+      .catch(error => {
+        console.error('Error fetching panoramas:', error);
+        alert('Не удалось загрузить данные о панорамах.');
+      });
   }, []);
 
   const handleMarkerClick = (marker) => {
     setSelectedMarker(marker);
   };
 
-
-  
-// Добавление Header в верхней части страницы
   return (
     <div>
       <Header />  
@@ -56,10 +58,10 @@ const MapPage = () => {
           <TMSLayers />
         </LayersControl>
         <ZoomControl position="bottomright" />
-        {markers.map(marker => (
+        {markers.map((marker, index) => (
           <Marker
             position={[marker.lat, marker.lng]}
-            key={`${marker.lat}-${marker.lng}`}
+            key={`${marker.lat}-${marker.lng}-${index}`} // Добавлен index для уникальности ключа
             icon={selectedMarker && selectedMarker.lat === marker.lat && selectedMarker.lng === marker.lng ? activeIcon : defaultIcon}
             eventHandlers={{ click: () => handleMarkerClick(marker) }}
           />
