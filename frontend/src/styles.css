@@ -111,27 +111,27 @@ body, button, input, h1 {
 }
 
 .centered-container {
+  position: relative;
+  top: 2vh;
   display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
+  flex-direction: row;
+  align-items: flex-start;
+  justify-content: space-around;
   text-align: center;
   width: 100%; /* Ширина контейнера */
-  height: 100%; /* Высота контейнера, может быть изменена в зависимости от контента */
 }
 
 .input-tags {
   padding: 10px;
-  margin-top: 10px;
-  margin-bottom: 10px;
+  margin: 5px;
   border: 1px solid #ccc;
   border-radius: 5px;
   font-size: 16px;
-  width: 30%; /* Адаптивная ширина */
+  height: 70vh; /* Адаптивная ширина */
 }
 
 @media (max-width: 768px) {
-  .button, .input-tags {
+  .button_media, .input-tags {
     width: 90%; /* Увеличиваем ширину на малых экранах */
     padding: 12px; /* Немного увеличиваем паддинг для удобства */
   }
@@ -158,9 +158,8 @@ body, button, input, h1 {
 
 .button-container {
   display: flex;
-  justify-content: space-between; /* Распределяет пространство между кнопками */
+  justify-content: space-evenly; /* Распределяет пространство между кнопками */
   width: 100%; /* Полная ширина для контейнера кнопок */
-  max-width: 400px; /* Ограничивает максимальную ширину контейнера */
   margin-top: 20px; /* Отступ сверху */
 }
 
@@ -200,6 +199,68 @@ body, button, input, h1 {
   color: #ffffff; /* Синий цвет ссылок */
   text-decoration: none; /* Убрать подчеркивание у ссылок */
 }
+
+/* Добавьте это в ваш файл стилей, например styles.css */
+
+/* Добавьте это в ваш файл стилей, например styles.css */
+
+.mini_pano {
+  width: 55vw;
+  height: 55vh;
+  overflow-y: auto; /* Добавляем вертикальную полосу прокрутки */
+  border: 1px solid #ccc; /* Добавляем границу для визуального выделения */
+  padding: 10px; /* Добавляем отступы для удобства */
+  box-sizing: border-box; /* Учитываем padding и border в общей ширине и высоте */
+  border-radius: 5px;
+  margin: 5px;
+}
+
+.mini_log {
+  width: 55vw;
+  height: 15vh;
+  overflow-y: auto; /* Добавляем вертикальную полосу прокрутки */
+  border: 1px solid #ccc; /* Добавляем границу для визуального выделения */
+  padding: 10px; /* Добавляем отступы для удобства */
+  box-sizing: border-box; /* Учитываем padding и border в общей ширине и высоте */
+  border-radius: 5px;
+  margin: 5px;
+}
+
+.mini_log {
+  margin-top: 20px;
+  border-top: 1px solid #ccc;
+  padding-top: 10px;
+}
+
+.mini_log ul {
+  list-style-type: none;
+  padding: 0;
+}
+
+.mini_log li {
+  margin-bottom: 5px;
+  color: #333;
+}
+
+.thumbnail {
+  display: inline-block;
+  margin: 10px;
+  text-align: center;
+}
+
+.thumbnail-image {
+  width: 100px;
+  height: 100px;
+  object-fit: cover;
+  border: 1px solid #ccc;
+}
+
+.thumbnail-name {
+  margin-top: 5px;
+  font-size: 14px;
+  color: #333;
+}
+
 
 
 /* styles.css или в вашем компоненте в <style> тег */
@@ -293,3 +354,5 @@ input:focus {
   display: flex;
   margin: 0px 15px;
 }
+
+

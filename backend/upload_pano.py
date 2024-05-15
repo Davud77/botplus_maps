@@ -10,7 +10,6 @@ import io
 
 upload_blueprint = Blueprint('upload', __name__)
 
-
 def load_db_config():
     dir_path = os.path.dirname(os.path.realpath(__file__))
     config_path = os.path.join(dir_path, 'db_config.json')
@@ -70,13 +69,13 @@ def upload_files():
     tags = request.form.get("tags", "")
     successful_uploads = []
     failed_uploads = []
+    skipped_files = []
 
     for file in uploaded_files:
         try:
             file_path = f"pano/{file.filename}"
             file_content = file.read()
             file_stream = io.BytesIO(file_content)
-            minio_client.put_object("pano", file_path, file_stream, len(file_content))
             file_stream.seek(0)
 
             with Image.open(file_stream) as img:
@@ -84,6 +83,13 @@ def upload_files():
                 if exif_data:
                     exif_dict = piexif.load(img.info['exif'])
                     gps_data = get_gps_coordinates(exif_dict['GPS']) if 'GPS' in exif_dict else (None, None)
+                else:
+                    raise ValueError(f"EXIF data not found for file {file.filename}")
+
+                if gps_data[0] is None or gps_data[1] is None:
+                    raise ValueError(f"Missing GPS data for file {file.filename}")
+
+                minio_client.put_object("pano", file_path, file_stream, len(file_content))
 
             conn = connect_db()
             cur = conn.cursor()
@@ -96,13 +102,16 @@ def upload_files():
             conn.close()
             successful_uploads.append(file.filename)
         except Exception as e:
-            print(f"Не удалось загрузить файл {file.filename}: {str(e)}")
+            error_message = f"Произошла ошибка при загрузке файла {file.filename}: {str(e)}"
+            print(error_message)
             failed_uploads.append(file.filename)
+            skipped_files.append(error_message)
 
     return jsonify({
         "message": "Отчет о загрузке файлов",
         "successful_uploads": successful_uploads,
-        "failed_uploads": failed_uploads
+        "failed_uploads": failed_uploads,
+        "skipped_files": skipped_files
     }), 200
 
 

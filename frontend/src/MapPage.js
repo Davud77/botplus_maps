@@ -10,14 +10,14 @@ import Header from './Header';
 // Определение кастомных иконок для маркеров
 const defaultIcon = new L.Icon({
   iconUrl: '/images/default-icon.png',
-  iconSize: [25, 25],
-  iconAnchor: [12, 12]
+  iconSize: [18, 18],
+  iconAnchor: [9, 9]
 });
 
 const activeIcon = new L.Icon({
   iconUrl: '/images/active-icon.png',
-  iconSize: [30, 30],
-  iconAnchor: [15, 15]
+  iconSize: [20, 20],
+  iconAnchor: [10, 10]
 });
 
 const MapPage = () => {
@@ -61,7 +61,7 @@ const MapPage = () => {
   return (
     <div>
       <Header />  
-      <MapContainer center={mapCenter} zoom={10} style={{ height: '100vh', width: '100%' }} zoomControl={false}>
+      <MapContainer center={mapCenter} zoom={6} style={{ height: '100vh', width: '100%' }} zoomControl={false}>
         <LayersControl position="topright">
           <LayersControl.BaseLayer checked name="OpenStreetMap">
             <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
