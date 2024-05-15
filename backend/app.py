@@ -5,7 +5,7 @@ from get_pano import pano_blueprint
 from upload_pano import upload_blueprint  # Предполагая, что у вас есть upload.py преобразованный в Blueprint
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, resources={r"/*": {"origins": "*"}})  # Разрешить все домены, либо укажите конкретные
 
 # Регистрация всех Blueprints
 app.register_blueprint(login_blueprint)

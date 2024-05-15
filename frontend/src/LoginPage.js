@@ -10,7 +10,7 @@ const LoginPage = () => {
     event.preventDefault();
 
     try {
-      const response = await fetch('http://localhost:5000/login', {
+      const response = await fetch('https://api.botplus.ru/login', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -67,7 +67,7 @@ const LoginPage = () => {
           </div>
 
           <button className="button buttonlogin btn-primary btn-large btn-block" onClick={handleLogin}>Вход</button>
-          <a className="login-link" href="#">Забыли пароль?</a>
+          <a className="login-link" href="https://t.me/localdisk_d">Забыли пароль?</a>
         </div>
       </div>
     </div>

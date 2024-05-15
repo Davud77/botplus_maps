@@ -2,7 +2,7 @@
 import React, { useRef, useEffect } from 'react';
 import Marzipano from 'marzipano';
 
-const PanoramaViewer = ({ imageUrl }) => {
+const PanoramaViewer = ({ imageUrl, height }) => {
   const viewerRef = useRef(null);
 
   useEffect(() => {
@@ -24,7 +24,7 @@ const PanoramaViewer = ({ imageUrl }) => {
     }
   }, [imageUrl]);
 
-  return <div ref={viewerRef} style={{ width: '100%', height: '500px' }} />;
+  return <div className="panorama_canvas" ref={viewerRef} style={{ width: '100%', height }} />;
 };
 
 export default PanoramaViewer;

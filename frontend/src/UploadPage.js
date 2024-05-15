@@ -1,5 +1,4 @@
 import React, { useState, useRef } from 'react';
-import { Link } from 'react-router-dom';
 import Header from './Header'; // Импортируем Header
 
 const UploadPage = () => {
@@ -28,7 +27,7 @@ const UploadPage = () => {
     formData.append("tags", tags);
 
     try {
-      const response = await fetch('http://localhost:5000/upload', {
+      const response = await fetch('https://api.botplus.ru/upload', {
         method: 'POST',
         body: formData,
       });

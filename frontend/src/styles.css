@@ -11,14 +11,13 @@ body, button, input, h1 {
   position: absolute;
   top: 0%; /* или любое другое значение, которое вы предпочитаете */
   z-index: 900; /* Убедитесь, что это значение выше, чем у карты */
-  background-color: white; /* Добавим фон, чтобы текст был более читаемым */
   box-shadow: 0 4px 8px rgba(0,0,0,0.5); /* Небольшая тень для лучшей видимости */
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   width: 100%; /* или любая другая ширина, которая вам нужна */
-  
+  height: 50%;
 }
 
 
@@ -38,8 +37,46 @@ body, button, input, h1 {
   font-weight: bold; /* Жирное начертание текста */
 }
 
+.button_control {
+  background-color: #ffffff; /* Черный цвет кнопок */
+  border: none;
+  color: white;
+  padding: 5px 10px;
+  text-align: center;
+  text-decoration: none;
+  display: inline-block;
+
+  margin: 4px 2px;
+
+  border-radius: 25px;
+
+  font-weight: bold; /* Жирное начертание текста */
+}
+
+.visible_control
+{
+  background-color: #000000; /* Черный цвет кнопок */
+  border: none;
+  color: white;
+  padding: 2px 3px;
+  text-align: center;
+  text-decoration: none;
+  display: inline-block;
+  font-size: 16px;
+  margin: 4px 2px;
+
+  border-radius: 25px;
+
+  z-index: 1000;
+}
+
 .button:hover {
   background-color: #333333; /* Светло-черный при наведении */
+}
+
+.panorama_canvas {
+  width: '100%'; 
+  height: '50vh';
 }
 
 .background {
