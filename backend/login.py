@@ -1,21 +1,34 @@
 from flask import Blueprint, request, jsonify
+from flask_cors import cross_origin
 import psycopg2
 import psycopg2.extras
+import json
+import os
 
 # Создаем экземпляр Blueprint
 login_blueprint = Blueprint('login', __name__)
 
+# Функция для загрузки конфигурации базы данных
+def load_db_config():
+    dir_path = os.path.dirname(os.path.realpath(__file__))  # Получение директории текущего файла
+    config_path = os.path.join(dir_path, 'db_config.json')  # Формирование пути к файлу конфигурации
+    with open(config_path, 'r') as file:  # Открытие файла конфигурации
+        return json.load(file)  # Чтение и возврат данных конфигурации
+
+db_config = load_db_config()  # Загрузка конфигурации базы данных
+
+# Функция для подключения к базе данных
 def connect_db():
-    conn = psycopg2.connect(
-        host='192.168.1.79',
-        port='5432',
-        database='pb_user',
-        user='postgres',
-        password='password'
+    return psycopg2.connect(
+        host=db_config['host'],
+        port=db_config['port'],
+        dbname=db_config['dbname'],
+        user=db_config['user'],
+        password=db_config['password']
     )
-    return conn
 
 @login_blueprint.route('/login', methods=['POST'])
+@cross_origin(supports_credentials=True)  # Разрешить CORS для этого маршрута и поддерживать учетные данные
 def login():
     username = request.json['username']
     password = request.json['password']
@@ -35,3 +48,9 @@ def login():
     finally:
         cur.close()
         conn.close()
+
+if __name__ == '__main__':
+    from flask import Flask
+    app = Flask(__name__)
+    app.register_blueprint(login_blueprint)
+    app.run(debug=True, port=5000)
