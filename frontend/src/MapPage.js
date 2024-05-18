@@ -61,7 +61,7 @@ const MapPage = () => {
   return (
     <div>
       <Header />  
-      <MapContainer center={mapCenter} zoom={6} style={{ height: '100vh', width: '100%' }} zoomControl={false}>
+      <MapContainer className="MapContainer" center={mapCenter} zoom={6} style={{ height: '100vh', width: '100%' }} zoomControl={false}>
         <LayersControl position="topright">
           <LayersControl.BaseLayer checked name="OpenStreetMap">
             <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
@@ -81,12 +81,16 @@ const MapPage = () => {
       {selectedMarker && isVisible && (
         <div className="selected-marker-info" style={{ height: isExpanded ? '100%' : '50%' }}>
           
-          <PanoramaViewer imageUrl={selectedMarker.imageUrl} height={isExpanded ? '89vh' : '50vh'} />
+          <PanoramaViewer imageUrl={selectedMarker.imageUrl} isExpanded={isExpanded} />
+
           <MarkerInfo tags={selectedMarker.tags} latitude={selectedMarker.lat} longitude={selectedMarker.lng} />
           <div className="visible_control">
             <button className="button button_control" onClick={toggleHeight} >
               <img src={isExpanded ? "/images/collapse.png" : "/images/expand.png"} alt={isExpanded ? "Свернуть" : "Развернуть"} />
             </button>
+
+
+            
             <button className="button button_control" onClick={closeInfo}>
               <img src="/images/close.png" alt="Закрыть" />
             </button>
