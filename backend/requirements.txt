@@ -1,0 +1,6 @@
+Flask==2.1.2
+Flask-Cors==3.0.10
+psycopg2-binary==2.9.3
+minio==7.1.2
+Pillow==9.1.0
+piexif==1.1.3

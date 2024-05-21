@@ -1,14 +1,12 @@
+// Файл: src/App.js
 import React from 'react';
-import { BrowserRouter as Router, Route, Routes, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import Home from './Home';
 import UploadPage from './UploadPage';
 import MapPage from './MapPage';
 import LoginPage from './LoginPage';
 import ProfilePage from './ProfilePage';
 import './styles.css';
-
-
-
 
 function App() {
   const isAuthenticated = sessionStorage.getItem('auth');

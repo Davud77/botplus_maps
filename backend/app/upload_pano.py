@@ -11,13 +11,13 @@ import io
 upload_blueprint = Blueprint('upload', __name__)
 
 def load_db_config():
-    dir_path = os.path.dirname(os.path.realpath(__file__))
+    dir_path = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
     config_path = os.path.join(dir_path, 'db_config.json')
     with open(config_path, 'r') as file:
         return json.load(file)
 
 def load_minio_config():
-    dir_path = os.path.dirname(os.path.realpath(__file__))
+    dir_path = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
     config_path = os.path.join(dir_path, 'minio_config.json')
     with open(config_path, 'r') as file:
         return json.load(file)
@@ -50,9 +50,9 @@ def get_gps_coordinates(exif_data):
         if lat_ref != 'N':
             latitude = -latitude
 
-    if piexif.GPSIFD.GPSLongitudeRef and piexif.GPSIFD.GPSLongitude in exif_data:
+    if piexif.GPSIFD.GPSLongitudeRef and piexif.GPSLongitude in exif_data:
         lon_ref = exif_data[piexif.GPSIFD.GPSLongitudeRef].decode()
-        lon = exif_data[piexif.GPSIFD.GPSLongitude]
+        lon = exif_data[piexif.GPSLongitude]
         longitude = convert_to_degrees(lon)
         if lon_ref != 'E':
             longitude = -longitude
@@ -113,6 +113,3 @@ def upload_files():
         "failed_uploads": failed_uploads,
         "skipped_files": skipped_files
     }), 200
-
-
-pass
