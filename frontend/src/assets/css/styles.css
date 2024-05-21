@@ -1,0 +1,317 @@
+/* Общие стили для элементов */
+body, button, input, h1 {
+  font-family: 'Arial', sans-serif;
+}
+
+body {
+  margin: 0;
+}
+
+button {
+  cursor: pointer;
+  border: none;
+  text-align: center;
+  text-decoration: none;
+  display: inline-block;
+  border-radius: 25px;
+  box-shadow: 0 4px 8px 0 rgba(0,0,0,0.2), 0 6px 20px 0 rgba(0,0,0,0.3);
+  font-weight: bold;
+}
+
+button:hover {
+  background-color: #333;
+}
+
+/* Стили для контейнеров и элементов интерфейса */
+.MapContainer {
+  position: absolute;
+  height: 100vh;
+  width: 100%;
+  bottom: 0;
+}
+
+.selected-marker-info {
+  position: absolute;
+  top: 0;
+  z-index: 900;
+  box-shadow: 0 4px 8px rgba(0,0,0,0.5);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 50%;
+  transition: height 0.1s ease-in-out;
+}
+
+.button {
+  background-color: #000;
+  color: white;
+  padding: 15px 32px;
+  font-size: 16px;
+  margin: 4px 2px;
+}
+
+.button_control {
+  z-index: 1000;
+  background-color: #fff;
+  color: white;
+  padding: 5px 10px;
+  margin: 4px 2px;
+}
+
+.visible_control {
+  background-color: #000;
+  color: white;
+  padding: 2px 3px;
+  font-size: 16px;
+  margin: 4px 2px;
+  z-index: 1000;
+}
+
+.panorama_canvas {
+  width: 100%;
+  height: 50vh;
+}
+
+.background {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  background-size: cover;
+  position: relative;
+}
+
+.link-button {
+  position: absolute;
+  left: 10px;
+  top: 10px;
+  padding: 10px 20px;
+  background: rgba(255, 255, 255, 0.7);
+  color: black;
+  font-weight: bold;
+  font-size: 16px;
+  margin: 4px 2px;
+  cursor: pointer;
+  border-radius: 25px;
+}
+
+.centered-container {
+  position: relative;
+  top: 2vh;
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  justify-content: space-around;
+  text-align: center;
+  width: 100%;
+}
+
+.input-tags {
+  padding: 10px;
+  margin: 5px;
+  border: 1px solid #ccc;
+  border-radius: 5px;
+  font-size: 16px;
+  height: 70vh;
+}
+
+@media (max-width: 768px) {
+  .button_media, .input-tags {
+    width: 90%;
+    padding: 12px;
+  }
+
+  .centered-container {
+    padding: 20px;
+  }
+}
+
+.leaflet-control-attribution {
+  display: none;
+}
+
+.marker-info {
+  display: flex;
+  align-items: flex-start;
+  width: 100%;
+  z-index: 1000;
+}
+
+.button-container {
+  display: flex;
+  justify-content: space-evenly;
+  width: 100%;
+  margin-top: 20px;
+}
+
+.overlay-content {
+  position: absolute;
+  top: 60%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+}
+
+.navigation-menu {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  height: 70px;
+  background-color: #00000080;
+  position: fixed;
+  width: 100%;
+  top: 0;
+  z-index: 1000;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.logo {
+  font-size: 24px;
+  font-weight: bold;
+}
+
+.profile-link {
+  font-size: 20px;
+  color: #fff;
+  text-decoration: none;
+}
+
+.mini_pano, .mini_log {
+  width: 55vw;
+  padding: 10px;
+  box-sizing: border-box;
+  border: 1px solid #ccc;
+  border-radius: 5px;
+  margin: 5px;
+}
+
+.mini_pano {
+  height: 55vh;
+  overflow-y: auto;
+}
+
+.mini_log {
+  height: 15vh;
+  overflow-y: auto;
+  margin-top: 20px;
+  border-top: 1px solid #ccc;
+  padding-top: 10px;
+}
+
+.mini_log ul {
+  list-style-type: none;
+  padding: 0;
+}
+
+.mini_log li {
+  margin-bottom: 5px;
+  color: #333;
+}
+
+.thumbnail {
+  display: inline-block;
+  margin: 10px;
+  text-align: center;
+}
+
+.thumbnail-image {
+  width: 100px;
+  height: 100px;
+  object-fit: cover;
+  border: 1px solid #ccc;
+}
+
+.thumbnail-name {
+  margin-top: 5px;
+  font-size: 14px;
+  color: #333;
+}
+
+/* Стили для формы авторизации */
+.login {
+  margin: 200px auto;
+  width: 300px;
+}
+
+.login-screen {
+  background-color: #FFF;
+  padding: 20px;
+  border-radius: 5px;
+}
+
+.app-title {
+  text-align: center;
+  color: #777;
+}
+
+.login-form {
+  text-align: center;
+}
+
+.control-group {
+  margin-bottom: 10px;
+}
+
+input {
+  text-align: center;
+  background-color: #ECF0F1;
+  border: 2px solid transparent;
+  border-radius: 3px;
+  font-size: 16px;
+  font-weight: 200;
+  padding: 10px 0;
+  width: 250px;
+  transition: border .5s;
+}
+
+input:focus {
+  border: 2px solid #000;
+  box-shadow: none;
+}
+
+.buttonlogin {
+  width: 250px;
+}
+
+.login-link {
+  font-size: 12px;
+  color: #444;
+  display: block;
+  margin-top: 12px;
+}
+
+/* Стили для страницы профиля */
+.profile-page {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  background: #FFF;
+}
+
+.profile-title {
+  color: #333;
+  margin-bottom: 20px;
+}
+
+.logo-menu {
+  display: flex;
+  margin: 0 15px;
+}
+
+.button_nav {
+  margin: 0 5px;
+  border-radius: 0;
+}
+
+.profile_nav {
+  display: flex;
+  margin: 0 15px;
+}

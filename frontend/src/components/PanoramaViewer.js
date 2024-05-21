@@ -3,7 +3,7 @@ import Marzipano from 'marzipano';
 
 const PanoramaViewer = ({ imageUrl, isExpanded }) => {
   const viewerRef = useRef(null);
-  const viewerInstanceRef = useRef(null); // Ссылка на инстанс Marzipano.Viewer
+  const viewerInstanceRef = useRef(null);
 
   useEffect(() => {
     if (viewerRef.current && imageUrl) {
@@ -19,10 +19,13 @@ const PanoramaViewer = ({ imageUrl, isExpanded }) => {
       });
 
       scene.switchTo();
-      viewerInstanceRef.current = viewer; // Сохраняем ссылку на экземпляр viewer для последующего доступа
+      viewerInstanceRef.current = viewer;
 
       return () => {
-        viewer.destroy();
+        const currentViewer = viewerInstanceRef.current;
+        if (currentViewer) {
+          currentViewer.destroy();
+        }
         viewerInstanceRef.current = null;
       };
     }
@@ -39,13 +42,14 @@ const PanoramaViewer = ({ imageUrl, isExpanded }) => {
       }
     });
 
-    if (viewerRef.current) {
-      resizeObserver.observe(viewerRef.current);
+    const currentViewerRef = viewerRef.current;
+    if (currentViewerRef) {
+      resizeObserver.observe(currentViewerRef);
     }
 
     return () => {
-      if (viewerRef.current) {
-        resizeObserver.unobserve(viewerRef.current);
+      if (currentViewerRef) {
+        resizeObserver.unobserve(currentViewerRef);
       }
     };
   }, []);

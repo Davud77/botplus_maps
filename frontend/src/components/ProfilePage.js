@@ -1,13 +1,15 @@
 import React from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import Header from './Header'; // Убедитесь, что путь до компонента верный
+import Header from './Header';
+import useAuth from '../hooks/useAuth';
 
 const ProfilePage = () => {
   const navigate = useNavigate();
+  const { logout } = useAuth();
 
   const handleLogout = () => {
-    sessionStorage.removeItem('auth'); // Удаляем флаг аутентификации из sessionStorage
-    navigate('/login'); // Перенаправляем пользователя на страницу входа
+    logout();
+    navigate('/login');
   };
 
   return (

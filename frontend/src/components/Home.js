@@ -1,5 +1,5 @@
 import React from 'react';
-import Header from './Header'; // Убедитесь, что путь до компонента верный
+import Header from './Header';
 
 const Home = () => {
   return (

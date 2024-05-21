@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import Header from './Header'; // Импортируем Header
+import Header from './Header';
 
 const UploadPage = () => {
   const [files, setFiles] = useState([]);
@@ -9,7 +9,6 @@ const UploadPage = () => {
   const fileInputRef = useRef(null);
 
   const onFileChange = (event) => {
-    // Фильтрация выбранных файлов, чтобы включать только .jpg
     const filteredFiles = Array.from(event.target.files).filter(file => file.type === "image/jpeg");
     if (filteredFiles.length !== event.target.files.length) {
       setLogMessages(prevMessages => [...prevMessages, 'Можно загружать только файлы с расширением .jpg']);
@@ -39,7 +38,7 @@ const UploadPage = () => {
         ...prevMessages,
         `Загрузка завершена. Успешно: ${result.successful_uploads.length}, Ошибок: ${result.failed_uploads.length}`
       ]);
-      setSkippedFiles(result.skipped_files || []); // Устанавливаем пустой массив, если skipped_files undefined
+      setSkippedFiles(result.skipped_files || []);
     } catch (error) {
       console.error('Ошибка при загрузке:', error);
       setLogMessages(prevMessages => [...prevMessages, 'Произошла ошибка при загрузке файлов.']);
@@ -52,8 +51,7 @@ const UploadPage = () => {
 
   return (
     <div className="background">
-      <Header /> {/* Добавляем Header в начало страницы */}
-
+      <Header />
       <div className="centered-container">
         <div className="upload_container">
           <h1>Массовая загрузка панорам</h1>

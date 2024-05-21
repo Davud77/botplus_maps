@@ -1,31 +1,22 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { login as loginApi } from '../utils/api';
+import useAuth from '../hooks/useAuth';
 
 const LoginPage = () => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const navigate = useNavigate();
+  const { login } = useAuth();
 
   const handleLogin = async (event) => {
     event.preventDefault();
 
     try {
-      const response = await fetch('https://api.botplus.ru/login', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ username, password })
-      });
-
-      const data = await response.json();
-      if (response.ok) {
-        // Асинхронное сохранение состояния аутентификации
-        await new Promise((resolve) => {
-          sessionStorage.setItem('auth', true);
-          resolve();
-        });
-        navigate('/'); // Перенаправление на главную страницу после успешного сохранения
+      const data = await loginApi(username, password);
+      if (data.status === 'success') {
+        login();
+        navigate('/');
       } else {
         alert(data.message || 'Неверное имя пользователя или пароль');
       }
