@@ -60,13 +60,16 @@ const MapPage = () => {
           </div>
         </div>
       )}
+      <div className="MapContainerCanvas">
+        <MapContainerCanvas 
+          markers={markers}
+          selectedMarker={selectedMarker}
+          handleMarkerClick={handleMarkerClick}
+          mapCenter={mapCenter}
+        />
+
+      </div>
       
-      <MapContainerCanvas 
-        markers={markers}
-        selectedMarker={selectedMarker}
-        handleMarkerClick={handleMarkerClick}
-        mapCenter={mapCenter}
-      />
     </div>
   );
 };

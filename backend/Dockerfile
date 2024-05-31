@@ -1,6 +1,12 @@
-FROM python:3.8-slim
+# backend/Dockerfile
+
+FROM python:3.10-slim
+
 WORKDIR /app
-COPY . /app
-RUN pip install flask psycopg2-binary flask-cors minio Pillow piexif
-EXPOSE 5000
-CMD ["python", "app.py"]
+
+COPY requirements.txt requirements.txt
+RUN pip install -r requirements.txt
+
+COPY . .
+
+CMD ["python", "run.py"]
