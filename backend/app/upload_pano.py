@@ -43,16 +43,18 @@ def connect_db():
 
 def get_gps_coordinates(exif_data):
     latitude = longitude = None
-    if piexif.GPSIFD.GPSLatitudeRef and piexif.GPSIFD.GPSLatitude in exif_data:
-        lat_ref = exif_data[piexif.GPSIFD.GPSLatitudeRef].decode()
-        lat = exif_data[piexif.GPSIFD.GPSLatitude]
+    gps_ifd = exif_data.get('GPS', {})
+
+    if piexif.GPSIFD.GPSLatitude in gps_ifd and piexif.GPSIFD.GPSLatitudeRef in gps_ifd:
+        lat_ref = gps_ifd[piexif.GPSIFD.GPSLatitudeRef].decode()
+        lat = gps_ifd[piexif.GPSIFD.GPSLatitude]
         latitude = convert_to_degrees(lat)
         if lat_ref != 'N':
             latitude = -latitude
 
-    if piexif.GPSIFD.GPSLongitudeRef and piexif.GPSLongitude in exif_data:
-        lon_ref = exif_data[piexif.GPSIFD.GPSLongitudeRef].decode()
-        lon = exif_data[piexif.GPSLongitude]
+    if piexif.GPSIFD.GPSLongitude in gps_ifd and piexif.GPSIFD.GPSLongitudeRef in gps_ifd:
+        lon_ref = gps_ifd[piexif.GPSIFD.GPSLongitudeRef].decode()
+        lon = gps_ifd[piexif.GPSIFD.GPSLongitude]
         longitude = convert_to_degrees(lon)
         if lon_ref != 'E':
             longitude = -longitude
@@ -82,7 +84,7 @@ def upload_files():
                 exif_data = img._getexif()
                 if exif_data:
                     exif_dict = piexif.load(img.info['exif'])
-                    gps_data = get_gps_coordinates(exif_dict['GPS']) if 'GPS' in exif_dict else (None, None)
+                    gps_data = get_gps_coordinates(exif_dict) if 'GPS' in exif_dict else (None, None)
                 else:
                     raise ValueError(f"EXIF data not found for file {file.filename}")
 

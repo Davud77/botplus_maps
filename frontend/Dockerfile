@@ -1,20 +1,26 @@
 # Используем официальный образ Node.js
 FROM node:18
 
-# Создаем рабочую директорию
+# Устанавливаем рабочую директорию
 WORKDIR /app
 
-# Копируем файлы package.json и package-lock.json
-COPY package.json package-lock.json ./
+# Копируем package.json и package-lock.json
+COPY package*.json ./
 
 # Устанавливаем зависимости
 RUN npm install
 
-# Копируем остальные файлы проекта
+# Устанавливаем дополнительные зависимости для разработки
+RUN npm install -D webpack-cli @babel/preset-react
+
+# Копируем все файлы в контейнер
 COPY . .
 
-# Указываем порт, на котором будет запущен сервер
+# Проверяем содержимое папки public
+RUN ls -l /app/public
+
+# Открываем порт
 EXPOSE 3000
 
-# Запускаем команду для старта приложения
+# Указываем команду запуска
 CMD ["npm", "start"]

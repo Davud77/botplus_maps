@@ -8,7 +8,7 @@ services:
     volumes:
       - ./frontend:/app
     ports:
-      - "3000:3000"
+      - "3080:3000"
     depends_on:
       - backend
 
@@ -19,7 +19,7 @@ services:
     volumes:
       - ./backend:/app
     ports:
-      - "5000:5000"
+      - "5080:5000"
     depends_on:
       - db
 

@@ -15,4 +15,4 @@ def create_app():
 
     return app
 
-app = create_app()  # Добавьте эту строку, чтобы создать экземпляр приложения
+app = create_app()
