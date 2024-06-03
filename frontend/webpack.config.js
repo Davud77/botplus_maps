@@ -2,37 +2,37 @@ const path = require('path');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
 
 module.exports = {
-  mode: 'development', // Установите 'development' или 'production'
+  mode: 'development',
   entry: './src/index.js',
   output: {
     path: path.resolve(__dirname, 'dist'),
     filename: 'bundle.js',
-    publicPath: '/', // Добавлено для корректной работы URL
+    publicPath: '/',
   },
   devServer: {
     host: '0.0.0.0',
-    allowedHosts: 'all',  // это позволит принимать запросы с любых хостов
+    allowedHosts: 'all',
     port: 3000,
     headers: {
       'Access-Control-Allow-Origin': '*',
     },
-    historyApiFallback: true, // Добавлено для поддержки маршрутизации в React
+    historyApiFallback: true,
     proxy: {
       '/api': {
         target: 'http://backend:5000',
         changeOrigin: true,
-        ws: true, // Прокси для WebSocket
+        ws: true,
       },
       '/ws': {
         target: 'wss://botplus.ru',
         ws: true,
         secure: true,
         changeOrigin: true,
-        pathRewrite: {'^/ws': ''}, // Добавлено для устранения множественных /ws
+        pathRewrite: {'^/ws': ''},
       },
     },
-    hot: true,
-    liveReload: true,
+    hot: false, // Отключить HMR
+    liveReload: false, // Отключить live reload
     client: {
       overlay: {
         errors: true,
@@ -40,10 +40,10 @@ module.exports = {
       },
       logging: 'info',
       webSocketURL: {
-        hostname: 'botplus.ru',
+        hostname: 'localhost', // Изменено для отладки
+        port: '3000',
         pathname: '/ws',
-        port: '443', // Изменено на строку '443' для HTTPS
-        protocol: 'wss',
+        protocol: 'ws',
       },
     },
     setupMiddlewares: (middlewares, devServer) => {
@@ -72,6 +72,10 @@ module.exports = {
       {
         test: /\.css$/,
         use: ['style-loader', 'css-loader'],
+      },
+      {
+        test: /\.(png|jpe?g|gif|svg)$/i,
+        type: 'asset/resource',
       },
     ],
   },

@@ -1,4 +1,3 @@
-// Файл: src/MapPage.js
 import React, { useState, useEffect, useCallback } from 'react';
 import PanoramaViewer from './PanoramaViewer';
 import MarkerInfo from './MarkerInfo';
@@ -14,7 +13,12 @@ const MapPage = () => {
 
   useEffect(() => {
     fetch('https://api.botplus.ru/panoramas')
-      .then(response => response.json())
+      .then(response => {
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        return response.json();
+      })
       .then(data => {
         const newMarkers = data.map(item => ({
           lat: item.latitude,
@@ -67,9 +71,7 @@ const MapPage = () => {
           handleMarkerClick={handleMarkerClick}
           mapCenter={mapCenter}
         />
-
       </div>
-      
     </div>
   );
 };
