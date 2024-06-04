@@ -9,7 +9,7 @@ const MapPage = () => {
   const [selectedMarker, setSelectedMarker] = useState(null);
   const [mapCenter] = useState([55, 47]);
   const [isExpanded, setIsExpanded] = useState(false);
-  const [isVisible, setIsVisible] = useState(true);
+  const [isVisible, setIsVisible] = useState(false);
 
   useEffect(() => {
     fetch('https://api.botplus.ru/panoramas')
@@ -70,6 +70,7 @@ const MapPage = () => {
           selectedMarker={selectedMarker}
           handleMarkerClick={handleMarkerClick}
           mapCenter={mapCenter}
+          isVisible={isVisible}
         />
       </div>
     </div>

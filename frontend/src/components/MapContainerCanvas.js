@@ -17,25 +17,27 @@ const activeIcon = new L.Icon({
   iconAnchor: [10, 10]
 });
 
-const MapContainerCanvas = ({ markers, selectedMarker, handleMarkerClick, mapCenter }) => {
+const MapContainerCanvas = ({ markers, selectedMarker, handleMarkerClick, mapCenter, isVisible }) => {
   return (
-    <MapContainer center={mapCenter} zoom={5} style={{ height: '100vh', width: '100%' }} zoomControl={false}>
-      <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-      <MarkerClusterGroup
-        disableClusteringAtZoom={18} // Отключить кластеризацию на уровне приближения 10 и выше
-        maxClusterRadius={50} // Радиус кластеризации в пикселях
-      >
-        {markers.map((marker, index) => (
-          <Marker
-            position={[marker.lat, marker.lng]}
-            key={`${marker.lat}-${marker.lng}-${index}`}
-            icon={selectedMarker && selectedMarker.lat === marker.lat && selectedMarker.lng === marker.lng ? activeIcon : defaultIcon}
-            eventHandlers={{ click: () => handleMarkerClick(marker) }}
-          />
-        ))}
-      </MarkerClusterGroup>
-      <ZoomControl position="bottomright" />
-    </MapContainer>
+    <div style={{ height: isVisible ? '50vh' : '100vh', width: '100%' }}>
+      <MapContainer center={mapCenter} zoom={5} style={{ height: '100%', width: '100%' }} zoomControl={false}>
+        <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+        <MarkerClusterGroup
+          disableClusteringAtZoom={18} // Отключить кластеризацию на уровне приближения 10 и выше
+          maxClusterRadius={50} // Радиус кластеризации в пикселях
+        >
+          {markers.map((marker, index) => (
+            <Marker
+              position={[marker.lat, marker.lng]}
+              key={`${marker.lat}-${marker.lng}-${index}`}
+              icon={selectedMarker && selectedMarker.lat === marker.lat && selectedMarker.lng === marker.lng ? activeIcon : defaultIcon}
+              eventHandlers={{ click: () => handleMarkerClick(marker) }}
+            />
+          ))}
+        </MarkerClusterGroup>
+        <ZoomControl position="bottomright" />
+      </MapContainer>
+    </div>
   );
 };
 
