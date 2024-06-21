@@ -6,9 +6,10 @@ import MapPage from './components/MapPage';
 import LoginPage from './components/LoginPage';
 import ProfilePage from './components/ProfilePage';
 import './assets/css/styles.css';
+import { useAuth } from './contexts/AuthContext';
 
 function App() {
-  const isAuthenticated = sessionStorage.getItem('auth');
+  const { isAuthenticated } = useAuth();
 
   return (
     <Router>

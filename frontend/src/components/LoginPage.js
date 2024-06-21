@@ -6,11 +6,13 @@ import useAuth from '../hooks/useAuth';
 const LoginPage = () => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
   const navigate = useNavigate();
   const { login } = useAuth();
 
   const handleLogin = async (event) => {
     event.preventDefault();
+    setError(''); // Сброс ошибки перед новой попыткой входа
 
     try {
       const data = await loginApi(username, password);
@@ -18,10 +20,10 @@ const LoginPage = () => {
         login();
         navigate('/');
       } else {
-        alert(data.message || 'Неверное имя пользователя или пароль');
+        setError(data.message || 'Неверное имя пользователя или пароль');
       }
     } catch (error) {
-      alert('Ошибка при подключении к серверу: ' + error.message);
+      setError('Ошибка при подключении к серверу: ' + error.message);
     }
   };
 
@@ -56,6 +58,8 @@ const LoginPage = () => {
             />
             <label className="login-field-icon fui-lock" htmlFor="login-pass"></label>
           </div>
+
+          {error && <div className="error-message">{error}</div>} {/* Показываем сообщение об ошибке */}
 
           <button className="button buttonlogin btn-primary btn-large btn-block" onClick={handleLogin}>Вход</button>
           <a className="login-link" href="https://t.me/localdisk_d">Забыли пароль?</a>

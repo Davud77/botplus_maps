@@ -1,9 +1,16 @@
-import React, { createContext, useState, useContext } from 'react';
+import React, { createContext, useState, useContext, useEffect } from 'react';
 
 const AuthContext = createContext();
 
 export const AuthProvider = ({ children }) => {
-  const [isAuthenticated, setIsAuthenticated] = useState(sessionStorage.getItem('auth') || false);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+
+  useEffect(() => {
+    const auth = sessionStorage.getItem('auth');
+    if (auth) {
+      setIsAuthenticated(true);
+    }
+  }, []);
 
   const login = () => {
     sessionStorage.setItem('auth', true);
