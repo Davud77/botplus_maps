@@ -1,9 +1,12 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import Marzipano from 'marzipano';
+import '../assets/css/styles.css';
+
 
 const PanoramaViewer = ({ imageUrl, isExpanded }) => {
   const viewerRef = useRef(null);
   const viewerInstanceRef = useRef(null);
+  const [showPointInfo, setShowPointInfo] = useState(false);
 
   useEffect(() => {
     if (viewerRef.current && imageUrl) {
@@ -54,12 +57,31 @@ const PanoramaViewer = ({ imageUrl, isExpanded }) => {
     };
   }, []);
 
+  const handlePointInfoClick = () => {
+    setShowPointInfo(!showPointInfo);
+  };
+
   return (
     <div ref={viewerRef} style={{
       width: '100%',
       height: isExpanded ? '100vh' : '50vh',
       transition: 'height 0.5s ease'
-    }} />
+    }}>
+      <button className="pointinfo" onClick={handlePointInfoClick}>
+        <svg xmlns="http://www.w3.org/2000/svg" height="30px" viewBox="0 0 24 24" width="30px" fill="#ffffff">
+          <path d="M0 0h24v24H0V0z" fill="none"/>
+          <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 15c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/>
+        </svg>
+      </button>
+      {showPointInfo && (
+        <div className="layers-menu">
+          {/* Ваше содержимое для окна pointinfo */}
+          <h2>Информация о точке</h2>
+          <p>Здесь можно разместить любую информацию или настройки</p>
+          
+        </div>
+      )}
+    </div>
   );
 };
 

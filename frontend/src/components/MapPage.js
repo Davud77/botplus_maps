@@ -1,6 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import PanoramaViewer from './PanoramaViewer';
-import MarkerInfo from './MarkerInfo';
+
 import Header from './Header';
 import MapContainerCanvas from './MapContainerCanvas';
 
@@ -28,7 +28,7 @@ const MapPage = () => {
       {selectedMarker && isVisible && (
         <div className="selected-marker-info" style={{ height: isExpanded ? '100%' : '50%' }}>
           <PanoramaViewer imageUrl={selectedMarker.imageUrl} isExpanded={isExpanded} />
-          <MarkerInfo tags={selectedMarker.tags} latitude={selectedMarker.lat} longitude={selectedMarker.lng} />
+          
           <div className="visible_control">
             <button className="button button_control" onClick={toggleHeight}>
               <img src={isExpanded ? "/images/collapse.png" : "/images/expand.png"} alt={isExpanded ? "Свернуть" : "Развернуть"} />
