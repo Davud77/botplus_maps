@@ -88,10 +88,14 @@ const MapContainerCanvas = ({ selectedMarker, handleMarkerClick, isVisible }) =>
   };
 
   const handleCopyCoordinates = () => {
-    const coords = `${contextMenu.lat.toFixed(6)}, ${contextMenu.lng.toFixed(6)}`;
-    navigator.clipboard.writeText(coords)
-      .catch(err => console.error('Failed to copy coordinates:', err));
-    setContextMenu({ ...contextMenu, visible: false });
+    if (contextMenu.lat != null && contextMenu.lng != null) {
+      const coords = `${contextMenu.lat.toFixed(6)}, ${contextMenu.lng.toFixed(6)}`;
+      navigator.clipboard.writeText(coords)
+        .catch(err => console.error('Failed to copy coordinates:', err));
+      setContextMenu({ ...contextMenu, visible: false });
+    } else {
+      console.error('Coordinates are null');
+    }
   };
 
   const hideContextMenu = () => {
