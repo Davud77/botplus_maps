@@ -330,3 +330,51 @@ input:focus {
   display: flex;
   margin: 0 15px;
 }
+
+.search-container {
+  position: absolute;
+  top: 80px;
+  left: 14px;
+  background-color: rgb(0, 0, 0);
+  padding: 4px;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  transition: width 0.3s ease-in-out;
+  width: 40px;
+  border-radius: 5px;
+}
+
+.search-container.expanded {
+  width: 300px;
+  border-radius: 4px;
+}
+
+.search-input {
+  padding: 4px;
+  font-size: 16px;
+  width: 0;
+  opacity: 0;
+  transition: width 0.3s ease-in-out, opacity 0.3s ease-in-out;
+}
+
+.search-container.expanded .search-input {
+  width: 250px;
+  opacity: 1;
+  margin: 4px;
+}
+
+.search-button {
+  padding: 4px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+
+/* Стили для контекстного меню */
+.context-menu {
+  position: absolute;
+  z-index: 1000;
+}

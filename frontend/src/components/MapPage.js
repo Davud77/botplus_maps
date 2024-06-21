@@ -1,38 +1,13 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import PanoramaViewer from './PanoramaViewer';
 import MarkerInfo from './MarkerInfo';
 import Header from './Header';
 import MapContainerCanvas from './MapContainerCanvas';
 
 const MapPage = () => {
-  const [markers, setMarkers] = useState([]);
   const [selectedMarker, setSelectedMarker] = useState(null);
-  const [mapCenter] = useState([55, 47]);
   const [isExpanded, setIsExpanded] = useState(false);
   const [isVisible, setIsVisible] = useState(false);
-
-  useEffect(() => {
-    fetch('https://api.botplus.ru/panoramas')
-      .then(response => {
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        return response.json();
-      })
-      .then(data => {
-        const newMarkers = data.map(item => ({
-          lat: item.latitude,
-          lng: item.longitude,
-          imageUrl: item.filename,
-          tags: item.tags
-        }));
-        setMarkers(newMarkers);
-      })
-      .catch(error => {
-        console.error('Error fetching panoramas:', error);
-        alert('Не удалось загрузить данные о панорамах.');
-      });
-  }, []);
 
   const handleMarkerClick = useCallback((marker) => {
     setSelectedMarker(marker);
@@ -66,10 +41,8 @@ const MapPage = () => {
       )}
       <div className="MapContainerCanvas">
         <MapContainerCanvas 
-          markers={markers}
           selectedMarker={selectedMarker}
           handleMarkerClick={handleMarkerClick}
-          mapCenter={mapCenter}
           isVisible={isVisible}
         />
       </div>
