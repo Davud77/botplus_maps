@@ -5,6 +5,7 @@ import { Marker } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import Search from './Search';
+import TMSLayers from './TMSLayers';
 
 const defaultIcon = new L.Icon({
   iconUrl: '/images/default-icon.png',
@@ -22,13 +23,7 @@ const ContextMenu = ({ contextMenu, handleCopyCoordinates }) => {
   if (!contextMenu.visible) return null;
 
   return (
-    <div
-      className="context-menu"
-      style={{
-        top: `${contextMenu.y}px`,
-        left: `${contextMenu.x}px`
-      }}
-    >
+    <div className="context-menu" style={{ top: `${contextMenu.y}px`, left: `${contextMenu.x}px` }}>
       <button onClick={handleCopyCoordinates}>Скопировать координаты</button>
     </div>
   );
@@ -51,6 +46,7 @@ const MapContainerCanvas = ({ selectedMarker, handleMarkerClick, isVisible }) =>
   const [markers, setMarkers] = useState([]);
   const [mapCenter, setMapCenter] = useState([55, 47]);
   const [contextMenu, setContextMenu] = useState({ visible: false, x: 0, y: 0, lat: 0, lng: 0 });
+  const [baseLayer, setBaseLayer] = useState('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png');
 
   const mapRef = useRef(null);
 
@@ -114,10 +110,14 @@ const MapContainerCanvas = ({ selectedMarker, handleMarkerClick, isVisible }) =>
     }
   };
 
+  const handleLayerChange = (layerUrl) => {
+    setBaseLayer(layerUrl);
+  };
+
   return (
     <div style={{ height: isVisible ? '50vh' : '100vh', width: '100%', position: 'relative' }}>
       <MapContainer center={mapCenter} zoom={5} style={{ height: '100%', width: '100%' }} zoomControl={false} ref={mapRef} maxZoom={22}>
-        <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" maxZoom={22} />
+        <TileLayer url={baseLayer} maxZoom={22} />
         <MarkerClusterGroup
           disableClusteringAtZoom={18}
           maxClusterRadius={50}
@@ -136,6 +136,7 @@ const MapContainerCanvas = ({ selectedMarker, handleMarkerClick, isVisible }) =>
       </MapContainer>
       <ContextMenu contextMenu={contextMenu} handleCopyCoordinates={handleCopyCoordinates} />
       <Search handleSearch={handleSearch} />
+      <TMSLayers handleLayerChange={handleLayerChange} />
     </div>
   );
 };
