@@ -6,19 +6,17 @@ export const AuthProvider = ({ children }) => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
 
   useEffect(() => {
-    const auth = sessionStorage.getItem('auth');
-    if (auth) {
-      setIsAuthenticated(true);
-    }
+    const auth = localStorage.getItem('auth') === 'true';
+    setIsAuthenticated(auth);
   }, []);
 
   const login = () => {
-    sessionStorage.setItem('auth', true);
+    localStorage.setItem('auth', 'true');
     setIsAuthenticated(true);
   };
 
   const logout = () => {
-    sessionStorage.removeItem('auth');
+    localStorage.removeItem('auth');
     setIsAuthenticated(false);
   };
 

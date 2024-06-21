@@ -21,7 +21,7 @@ module.exports = {
       '/api': {
         target: 'http://backend:5000',
         changeOrigin: true,
-        ws: true,
+        ws: false, // Отключить поддержку WebSocket
       },
       '/ws': {
         target: 'wss://botplus.ru',

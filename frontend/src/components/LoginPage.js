@@ -12,7 +12,7 @@ const LoginPage = () => {
 
   const handleLogin = async (event) => {
     event.preventDefault();
-    setError(''); // Сброс ошибки перед новой попыткой входа
+    setError('');
 
     try {
       const data = await loginApi(username, password);
@@ -59,7 +59,7 @@ const LoginPage = () => {
             <label className="login-field-icon fui-lock" htmlFor="login-pass"></label>
           </div>
 
-          {error && <div className="error-message">{error}</div>} {/* Показываем сообщение об ошибке */}
+          {error && <div className="error-message">{error}</div>}
 
           <button className="button buttonlogin btn-primary btn-large btn-block" onClick={handleLogin}>Вход</button>
           <a className="login-link" href="https://t.me/localdisk_d">Забыли пароль?</a>
