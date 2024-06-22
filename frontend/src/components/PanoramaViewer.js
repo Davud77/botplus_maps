@@ -1,38 +1,47 @@
 import React, { useRef, useEffect, useState } from 'react';
 import Marzipano from 'marzipano';
-import PointInfo from './PointInfo'; // Импортируем PointInfo
+import PointInfo from './PointInfo';
 import '../assets/css/styles.css';
 
-const PanoramaViewer = ({ imageUrl, isExpanded }) => {
+const PanoramaViewer = ({ markerId, isExpanded }) => {
   const viewerRef = useRef(null);
   const viewerInstanceRef = useRef(null);
   const [showPointInfo, setShowPointInfo] = useState(false);
+  const [pointData, setPointData] = useState(null);
 
   useEffect(() => {
-    if (viewerRef.current && imageUrl) {
-      const viewer = new Marzipano.Viewer(viewerRef.current);
-      const source = Marzipano.ImageUrlSource.fromString(imageUrl);
-      const geometry = new Marzipano.EquirectGeometry([{ width: 4000 }]);
-      const limiter = Marzipano.RectilinearView.limit.traditional(4096, 120 * Math.PI / 180);
-      const view = new Marzipano.RectilinearView({ yaw: Math.PI }, limiter);
-      const scene = viewer.createScene({
-        source: source,
-        geometry: geometry,
-        view: view
-      });
+    if (markerId) {
+      fetch(`https://api.botplus.ru/panorama_info?id=${markerId}`)
+        .then(response => response.json())
+        .then(data => {
+          setPointData(data);
+          if (viewerRef.current && data.filename) {
+            const viewer = new Marzipano.Viewer(viewerRef.current);
+            const source = Marzipano.ImageUrlSource.fromString(data.filename);
+            const geometry = new Marzipano.EquirectGeometry([{ width: 4000 }]);
+            const limiter = Marzipano.RectilinearView.limit.traditional(4096, 120 * Math.PI / 180);
+            const view = new Marzipano.RectilinearView({ yaw: Math.PI }, limiter);
+            const scene = viewer.createScene({
+              source: source,
+              geometry: geometry,
+              view: view
+            });
 
-      scene.switchTo();
-      viewerInstanceRef.current = viewer;
-
-      return () => {
-        const currentViewer = viewerInstanceRef.current;
-        if (currentViewer) {
-          currentViewer.destroy();
-        }
-        viewerInstanceRef.current = null;
-      };
+            scene.switchTo();
+            viewerInstanceRef.current = viewer;
+          }
+        })
+        .catch(error => console.error('Error fetching point info:', error));
     }
-  }, [imageUrl]);
+
+    return () => {
+      const currentViewer = viewerInstanceRef.current;
+      if (currentViewer) {
+        currentViewer.destroy();
+      }
+      viewerInstanceRef.current = null;
+    };
+  }, [markerId]);
 
   useEffect(() => {
     const resizeObserver = new ResizeObserver(() => {
@@ -73,7 +82,7 @@ const PanoramaViewer = ({ imageUrl, isExpanded }) => {
           <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 15c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/>
         </svg>
       </button>
-      {showPointInfo && <PointInfo />}
+      {showPointInfo && <PointInfo data={pointData} />}
     </div>
   );
 };

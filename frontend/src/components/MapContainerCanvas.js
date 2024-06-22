@@ -26,10 +26,9 @@ const MapContainerCanvas = ({ selectedMarker, handleMarkerClick, isVisible }) =>
       })
       .then(data => {
         const newMarkers = data.map(item => ({
+          id: item.id,
           lat: item.latitude,
-          lng: item.longitude,
-          imageUrl: item.filename,
-          tags: item.tags
+          lng: item.longitude
         }));
         setMarkers(newMarkers);
       })

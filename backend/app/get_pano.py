@@ -32,26 +32,18 @@ def connect_db():
         password=db_config['password']
     )
 
-def create_presigned_url(bucket, object_name):
-    try:
-        return minio_client.presigned_get_object(bucket, object_name, expires=timedelta(hours=12))
-    except Exception as e:
-        print("Ошибка при создании подписанного URL:", e)
-        return None
-
 @pano_blueprint.route('/panoramas', methods=['GET'])
 def get_panoramas():
     conn = connect_db()
     cursor = conn.cursor()
     try:
-        cursor.execute("SELECT filename, latitude, longitude, tags FROM panolist")
+        cursor.execute("SELECT id, latitude, longitude FROM panolist")
         records = cursor.fetchall()
         panoramas = [
             {
-                'filename': create_presigned_url('pano', 'pano/' + row[0]),
+                'id': row[0],
                 'latitude': row[1],
-                'longitude': row[2],
-                'tags': row[3]
+                'longitude': row[2]
             }
             for row in records
         ]
