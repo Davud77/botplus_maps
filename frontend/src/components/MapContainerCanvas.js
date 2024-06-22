@@ -1,46 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { MapContainer, TileLayer, ZoomControl, useMapEvents } from 'react-leaflet';
+import { MapContainer, TileLayer, ZoomControl } from 'react-leaflet';
 import MarkerClusterGroup from 'react-leaflet-cluster';
 import { Marker } from 'react-leaflet';
-import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import Search from './Search';
 import TMSLayers from './TMSLayers';
-
-const defaultIcon = new L.Icon({
-  iconUrl: '/images/default-icon.png',
-  iconSize: [18, 18],
-  iconAnchor: [9, 9]
-});
-
-const activeIcon = new L.Icon({
-  iconUrl: '/images/active-icon.png',
-  iconSize: [20, 20],
-  iconAnchor: [10, 10]
-});
-
-const ContextMenu = ({ contextMenu, handleCopyCoordinates }) => {
-  if (!contextMenu.visible) return null;
-
-  return (
-    <div className="context-menu" style={{ top: `${contextMenu.y}px`, left: `${contextMenu.x}px` }}>
-      <button onClick={handleCopyCoordinates}>Скопировать координаты</button>
-    </div>
-  );
-};
-
-const MapEventHandlers = ({ setView }) => {
-  useMapEvents({
-    contextmenu: (event) => {
-      const { latlng, containerPoint } = event;
-      setView(latlng.lat, latlng.lng, containerPoint.x, containerPoint.y);
-    },
-    click: () => {
-      setView(null, null, null, null);
-    }
-  });
-  return null;
-};
+import { ContextMenu, MapEventHandlers, handleRightClick, handleCopyCoordinates } from './ContextMenu';
+import { defaultIcon, activeIcon } from './icons';
 
 const MapContainerCanvas = ({ selectedMarker, handleMarkerClick, isVisible }) => {
   const [markers, setMarkers] = useState([]);
@@ -73,30 +39,8 @@ const MapContainerCanvas = ({ selectedMarker, handleMarkerClick, isVisible }) =>
       });
   }, []);
 
-  const handleRightClick = (lat, lng, x, y) => {
-    setContextMenu({
-      visible: true,
-      x: x,
-      y: y,
-      lat: lat,
-      lng: lng
-    });
-  };
-
-  const handleCopyCoordinates = () => {
-    if (contextMenu.lat != null && contextMenu.lng != null) {
-      const coords = `${contextMenu.lat.toFixed(6)}, ${contextMenu.lng.toFixed(6)}`;
-      navigator.clipboard.writeText(coords)
-        .catch(err => console.error('Failed to copy coordinates:', err));
-      setContextMenu({ ...contextMenu, visible: false });
-    } else {
-      console.error('Coordinates are null');
-    }
-  };
-
-  const hideContextMenu = () => {
-    setContextMenu({ ...contextMenu, visible: false });
-  };
+  const rightClickHandler = handleRightClick(setContextMenu);
+  const copyCoordinatesHandler = handleCopyCoordinates(contextMenu, setContextMenu);
 
   const handleSearch = (searchInput) => {
     const coords = searchInput.split(',').map(coord => parseFloat(coord.trim()));
@@ -132,9 +76,9 @@ const MapContainerCanvas = ({ selectedMarker, handleMarkerClick, isVisible }) =>
           ))}
         </MarkerClusterGroup>
         <ZoomControl position="bottomright" />
-        <MapEventHandlers setView={handleRightClick} />
+        <MapEventHandlers setView={rightClickHandler} />
       </MapContainer>
-      <ContextMenu contextMenu={contextMenu} handleCopyCoordinates={handleCopyCoordinates} />
+      <ContextMenu contextMenu={contextMenu} handleCopyCoordinates={copyCoordinatesHandler} />
       <Search handleSearch={handleSearch} />
       <TMSLayers handleLayerChange={handleLayerChange} />
     </div>
