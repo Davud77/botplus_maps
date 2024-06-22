@@ -1,18 +1,52 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { MapContainer, TileLayer, ZoomControl } from 'react-leaflet';
+import { MapContainer, TileLayer, ZoomControl, useMapEvents } from 'react-leaflet';
 import MarkerClusterGroup from 'react-leaflet-cluster';
 import { Marker } from 'react-leaflet';
+import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import Search from './Search';
 import TMSLayers from './TMSLayers';
-import { ContextMenu, MapEventHandlers, handleRightClick, handleCopyCoordinates } from './ContextMenu';
-import { defaultIcon, activeIcon } from './icons';
+
+const defaultIcon = new L.Icon({
+  iconUrl: '/images/default-icon.png',
+  iconSize: [18, 18],
+  iconAnchor: [9, 9]
+});
+
+const activeIcon = new L.Icon({
+  iconUrl: '/images/active-icon.png',
+  iconSize: [20, 20],
+  iconAnchor: [10, 10]
+});
+
+const ContextMenu = ({ contextMenu, handleCopyCoordinates }) => {
+  if (!contextMenu.visible) return null;
+
+  return (
+    <div className="context-menu" style={{ top: `${contextMenu.y}px`, left: `${contextMenu.x}px` }}>
+      <button onClick={handleCopyCoordinates}>Скопировать координаты</button>
+    </div>
+  );
+};
+
+const MapEventHandlers = ({ setView }) => {
+  useMapEvents({
+    contextmenu: (event) => {
+      const { latlng, containerPoint } = event;
+      setView(latlng.lat, latlng.lng, containerPoint.x, containerPoint.y);
+    },
+    click: () => {
+      setView(null, null, null, null);
+    }
+  });
+  return null;
+};
 
 const MapContainerCanvas = ({ selectedMarker, handleMarkerClick, isVisible }) => {
   const [markers, setMarkers] = useState([]);
   const [mapCenter, setMapCenter] = useState([55, 47]);
   const [contextMenu, setContextMenu] = useState({ visible: false, x: 0, y: 0, lat: 0, lng: 0 });
-  const [baseLayer, setBaseLayer] = useState('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png');
+  const [baseLayer, setBaseLayer] = useState('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png');
 
   const mapRef = useRef(null);
 
@@ -26,9 +60,10 @@ const MapContainerCanvas = ({ selectedMarker, handleMarkerClick, isVisible }) =>
       })
       .then(data => {
         const newMarkers = data.map(item => ({
-          id: item.id,
           lat: item.latitude,
-          lng: item.longitude
+          lng: item.longitude,
+          imageUrl: item.filename,
+          tags: item.tags
         }));
         setMarkers(newMarkers);
       })
@@ -38,8 +73,30 @@ const MapContainerCanvas = ({ selectedMarker, handleMarkerClick, isVisible }) =>
       });
   }, []);
 
-  const rightClickHandler = handleRightClick(setContextMenu);
-  const copyCoordinatesHandler = handleCopyCoordinates(contextMenu, setContextMenu);
+  const handleRightClick = (lat, lng, x, y) => {
+    setContextMenu({
+      visible: true,
+      x: x,
+      y: y,
+      lat: lat,
+      lng: lng
+    });
+  };
+
+  const handleCopyCoordinates = () => {
+    if (contextMenu.lat != null && contextMenu.lng != null) {
+      const coords = `${contextMenu.lat.toFixed(6)}, ${contextMenu.lng.toFixed(6)}`;
+      navigator.clipboard.writeText(coords)
+        .catch(err => console.error('Failed to copy coordinates:', err));
+      setContextMenu({ ...contextMenu, visible: false });
+    } else {
+      console.error('Coordinates are null');
+    }
+  };
+
+  const hideContextMenu = () => {
+    setContextMenu({ ...contextMenu, visible: false });
+  };
 
   const handleSearch = (searchInput) => {
     const coords = searchInput.split(',').map(coord => parseFloat(coord.trim()));
@@ -75,9 +132,9 @@ const MapContainerCanvas = ({ selectedMarker, handleMarkerClick, isVisible }) =>
           ))}
         </MarkerClusterGroup>
         <ZoomControl position="bottomright" />
-        <MapEventHandlers setView={rightClickHandler} />
+        <MapEventHandlers setView={handleRightClick} />
       </MapContainer>
-      <ContextMenu contextMenu={contextMenu} handleCopyCoordinates={copyCoordinatesHandler} />
+      <ContextMenu contextMenu={contextMenu} handleCopyCoordinates={handleCopyCoordinates} />
       <Search handleSearch={handleSearch} />
       <TMSLayers handleLayerChange={handleLayerChange} />
     </div>
