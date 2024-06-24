@@ -11,6 +11,7 @@ services:
       - "3080:3000"
     depends_on:
       - backend
+    restart: always
 
   backend:
     build:
@@ -22,15 +23,18 @@ services:
       - "5080:5000"
     depends_on:
       - db
+    restart: always
 
   db:
-    image: postgres:latest
+    image: postgis/postgis:latest
     volumes:
       - postgres-data:/var/lib/postgresql/data
     environment:
-      POSTGRES_DB: pb_user
+      POSTGRES_DB: botplus
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: password
+    network_mode: host
+    restart: always
 
 volumes:
   postgres-data:
