@@ -19,7 +19,10 @@ const ProfilePage = () => {
         <h1 className="profile-title">Профиль пользователя</h1>
         <div className="profile-actions">
           <Link to="/upload">
-            <button className="button">Загрузить</button>
+            <button className="button">Загрузить панорамы</button>
+          </Link>
+          <Link to="/uploadortho">
+            <button className="button">Загрузить ортофотопланы</button>
           </Link>
           <button className="button" onClick={handleLogout}>Выйти</button>
         </div>

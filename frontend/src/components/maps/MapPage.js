@@ -1,6 +1,6 @@
 import React, { useState, useCallback } from 'react';
-import PanoramaViewer from './PanoramaViewer';
-import Header from './Header';
+import PanoramaViewer from './panoLayer/PanoramaViewer';
+import Header from '../Header';
 import MapContainerCanvas from './MapContainerCanvas';
 
 const MapPage = () => {

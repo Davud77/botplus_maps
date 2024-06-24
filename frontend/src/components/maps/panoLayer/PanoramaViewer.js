@@ -1,7 +1,7 @@
 import React, { useRef, useEffect, useState } from 'react';
 import Marzipano from 'marzipano';
 import PointInfo from './PointInfo';
-import '../assets/css/styles.css';
+import '../../../assets/css/styles.css';
 
 const PanoramaViewer = ({ markerId, isExpanded }) => {
   const viewerRef = useRef(null);
