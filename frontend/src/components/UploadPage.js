@@ -3,9 +3,10 @@ import Header from './Header';
 
 const UploadPage = () => {
   const [files, setFiles] = useState([]);
-  const [tags, setTags] = useState('');
+  const [tags, setTags] = useState([]);
   const [skippedFiles, setSkippedFiles] = useState([]);
   const [logMessages, setLogMessages] = useState([]);
+  const [inputValue, setInputValue] = useState('');
   const fileInputRef = useRef(null);
 
   const onFileChange = (event) => {
@@ -16,8 +17,22 @@ const UploadPage = () => {
     setFiles(filteredFiles);
   };
 
-  const onTagsChange = (event) => {
-    setTags(event.target.value);
+  const onInputChange = (event) => {
+    setInputValue(event.target.value);
+  };
+
+  const onInputKeyDown = (event) => {
+    if (event.key === 'Enter' || event.key === ',' || event.key === '.') {
+      event.preventDefault();
+      if (inputValue.trim()) {
+        setTags([...tags, inputValue.trim()]);
+        setInputValue('');
+      }
+    }
+  };
+
+  const removeTag = (indexToRemove) => {
+    setTags(tags.filter((_, index) => index !== indexToRemove));
   };
 
   const onFileUpload = async () => {
@@ -25,13 +40,17 @@ const UploadPage = () => {
     files.forEach(file => {
       formData.append("files", file);
     });
-    formData.append("tags", tags);
+    formData.append("tags", tags.join(', '));
 
     try {
       const response = await fetch('https://api.botplus.ru/upload', {
         method: 'POST',
         body: formData,
       });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
 
       const result = await response.json();
       setLogMessages(prevMessages => [
@@ -41,7 +60,7 @@ const UploadPage = () => {
       setSkippedFiles(result.skipped_files || []);
     } catch (error) {
       console.error('Ошибка при загрузке:', error);
-      setLogMessages(prevMessages => [...prevMessages, 'Произошла ошибка при загрузке файлов.']);
+      setLogMessages(prevMessages => [...prevMessages, `Произошла ошибка при загрузке файлов: ${error.message}`]);
     }
   };
 
@@ -50,19 +69,28 @@ const UploadPage = () => {
   };
 
   return (
-    <div className="background">
+    <div className="contend">
       <Header />
       <div className="centered-container">
-        <div className="upload_container">
+        <div className="tag-container">
           <h1>Массовая загрузка панорам</h1>
-          <textarea
-            value={tags}
-            onChange={onTagsChange}
-            placeholder="Введите теги через запятую"
-            rows="4"
-            cols="50"
-            className="input-tags"
-          />
+          <div className="tags-input-container">
+            {tags.map((tag, index) => (
+              <div key={index} className="tag-item">
+                <span>{tag}</span>
+                <button onClick={() => removeTag(index)}>x</button>
+              </div>
+            ))}
+            <textarea
+              value={inputValue}
+              onChange={onInputChange}
+              onKeyDown={onInputKeyDown}
+              placeholder={tags.length === 0 && inputValue.length === 0 ? "Введите теги через запятую" : ""}
+              rows="1"
+              cols="50"
+              className="input-tags"
+            />
+          </div>
           <div className="button-container">
             <input
               type="file"
@@ -73,7 +101,6 @@ const UploadPage = () => {
               style={{ display: 'none' }}
             />
             <button className="button" onClick={handleFileInputClick}>Выбрать файлы</button>
-            <button onClick={onFileUpload} className="button">Загрузить</button>
           </div>
         </div>
         <div className="mini">
@@ -90,29 +117,8 @@ const UploadPage = () => {
               </div>
             ))}
           </div>
-          <h1>Логи загрузки</h1>
-          <div className="mini_log">
-            {logMessages.length > 0 && (
-              <div>
-                <ul>
-                  {logMessages.map((message, index) => (
-                    <li key={index}>{message}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-            {skippedFiles.length > 0 && (
-              <div>
-                <h2>Пропущенные файлы:</h2>
-                <ul>
-                  {skippedFiles.map((file, index) => (
-                    <li key={index}>{file}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </div>
         </div>
+        <button onClick={onFileUpload} className="button">Загрузить</button>
       </div>
     </div>
   );

@@ -1,0 +1,38 @@
+.navigation-menu {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  height: 70px;
+  background-color: #00000080;
+  position: fixed;
+  width: 100%;
+  top: 0;
+  z-index: 1000;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.logo {
+  font-size: 24px;
+  font-weight: bold;
+}
+
+.profile-link {
+  font-size: 20px;
+  color: #fff;
+  text-decoration: none;
+}
+
+.logo-menu {
+  display: flex;
+  margin: 0 15px;
+}
+
+.button_nav {
+  margin: 0 5px;
+  border-radius: 0;
+}
+
+.profile_nav {
+  display: flex;
+  margin: 0 15px;
+}

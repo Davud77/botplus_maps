@@ -1,0 +1,76 @@
+body, button, input, h1 {
+  font-family: 'Arial', sans-serif;
+}
+
+body {
+  margin: 0;
+}
+
+button {
+  cursor: pointer;
+  border: none;
+  text-align: center;
+  text-decoration: none;
+  display: inline-block;
+  border-radius: 25px;
+  box-shadow: 0 4px 8px 0 rgba(0,0,0,0.2), 0 6px 20px 0 rgba(0,0,0,0.3);
+  font-weight: bold;
+}
+
+button:hover {
+  background-color: #333;
+}
+
+.button {
+  background-color: #000;
+  color: white;
+  padding: 15px 32px;
+  font-size: 16px;
+  margin: 4px 2px;
+}
+
+.button_control {
+  z-index: 1000;
+  background-color: #fff;
+  color: white;
+  padding: 5px 10px;
+  margin: 4px 2px;
+}
+
+.visible_control {
+  background-color: #000;
+  color: white;
+  padding: 2px 3px;
+  font-size: 16px;
+  margin: 4px 2px;
+  z-index: 1000;
+  border-radius: 30px;
+}
+
+input {
+  text-align: center;
+  background-color: #ECF0F1;
+  border: 2px solid transparent;
+  border-radius: 3px;
+  font-size: 16px;
+  font-weight: 200;
+  padding: 10px 0;
+  width: 250px;
+  transition: border .5s;
+}
+
+input:focus {
+  border: 2px solid #000;
+  box-shadow: none;
+}
+
+@media (max-width: 768px) {
+  .button_media, .input-tags {
+    width: 90%;
+    padding: 12px;
+  }
+}
+
+.leaflet-control-attribution {
+  display: none;
+}

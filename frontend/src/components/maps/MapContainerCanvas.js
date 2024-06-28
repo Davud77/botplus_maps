@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { MapContainer, TileLayer, ZoomControl } from 'react-leaflet';
+import { MapContainer, TileLayer, ZoomControl, ImageOverlay } from 'react-leaflet';
 import MarkerClusterGroup from 'react-leaflet-cluster';
-import { Marker, ImageOverlay } from 'react-leaflet';
+import { Marker } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import Search from '../maps/Search';
 import BaseLayer from '../maps/baseLayer/baseLayer';
@@ -21,56 +21,10 @@ const MapContainerCanvas = ({ selectedMarker, handleMarkerClick, isVisible }) =>
 
   const mapRef = useRef(null);
 
-  useEffect(() => {
-    if (showPanoLayer) {
-      fetch('https://api.botplus.ru/panoramas')
-        .then(response => {
-          if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-          }
-          return response.json();
-        })
-        .then(data => {
-          const newMarkers = data.map(item => ({
-            id: item.id,
-            lat: item.latitude,
-            lng: item.longitude
-          }));
-          setMarkers(newMarkers);
-        })
-        .catch(error => {
-          console.error('Error fetching panoramas:', error);
-          alert('Не удалось загрузить данные о панорамах.');
-        });
-    } else {
-      setMarkers([]);
-    }
-  }, [showPanoLayer]);
-
-  useEffect(() => {
-    if (showOrthoLayer) {
-      fetch('https://api.botplus.ru/orthophotos')
-        .then(response => {
-          if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-          }
-          return response.json();
-        })
-        .then(data => {
-          setOrthoImages(data);
-        })
-        .catch(error => {
-          console.error('Error fetching orthophotos:', error);
-          alert('Не удалось загрузить данные об ортофотопланах.');
-        });
-    } else {
-      setOrthoImages([]);
-    }
-  }, [showOrthoLayer]);
-
   const rightClickHandler = handleRightClick(setContextMenu);
   const copyCoordinatesHandler = handleCopyCoordinates(contextMenu, setContextMenu);
 
+  // Обработчик поиска координат
   const handleSearch = (searchInput) => {
     const coords = searchInput.split(',').map(coord => parseFloat(coord.trim()));
     if (coords.length === 2 && !isNaN(coords[0]) && !isNaN(coords[1])) {
@@ -83,16 +37,21 @@ const MapContainerCanvas = ({ selectedMarker, handleMarkerClick, isVisible }) =>
     }
   };
 
+  // Обработчик изменения базового слоя карты
   const handleLayerChange = (layerUrl) => {
     setBaseLayer(layerUrl);
   };
 
-  const togglePanoLayer = () => {
+  // Переключатель слоя панорам
+  const togglePanoLayer = (newMarkers) => {
     setShowPanoLayer(!showPanoLayer);
+    setMarkers(newMarkers);
   };
 
-  const toggleOrthoLayer = () => {
+  // Переключатель слоя ортофотопланов
+  const toggleOrthoLayer = (newOrthoImages) => {
     setShowOrthoLayer(!showOrthoLayer);
+    setOrthoImages(newOrthoImages);
   };
 
   return (
@@ -114,7 +73,10 @@ const MapContainerCanvas = ({ selectedMarker, handleMarkerClick, isVisible }) =>
         {showOrthoLayer && orthoImages.map((image, index) => (
           <ImageOverlay
             key={index}
-            bounds={image.bounds}
+            bounds={[
+              [image.bounds.south, image.bounds.west],
+              [image.bounds.north, image.bounds.east]
+            ]}
             url={image.url}
           />
         ))}
