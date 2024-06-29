@@ -50,7 +50,7 @@ def get_panorama_info():
     try:
         cursor.execute("""
             SELECT id, filename, latitude, longitude, tags, upload_date, user_id, file_size, file_type,
-                   full_pano_width_pixels, full_pano_height_pixels, first_photo_date, model, gps_altitude, fov
+                   full_pano_width_pixels, full_pano_height_pixels, first_photo_date, model, altitude, fov
             FROM panolist
             WHERE id = %s
         """, (pano_id,))
@@ -70,7 +70,7 @@ def get_panorama_info():
                 'full_pano_height_pixels': record[10],
                 'first_photo_date': record[11],
                 'model': record[12],
-                'gps_altitude': record[13],
+                'altitude': record[13],
                 'fov': record[14]
             }
             return jsonify(panorama)

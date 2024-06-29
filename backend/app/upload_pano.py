@@ -86,10 +86,10 @@ def upload_files():
                     exif_dict = piexif.load(img.info['exif'])
                     gps_data = get_gps_coordinates(exif_dict) if 'GPS' in exif_dict else (None, None)
                 else:
-                    raise ValueError(f"EXIF data not found for file {file.filename}")
+                    raise ValueError("Файл без EXIF")
 
                 if gps_data[0] is None or gps_data[1] is None:
-                    raise ValueError(f"Missing GPS data for file {file.filename}")
+                    raise ValueError("Файл без GPS координат")
 
                 minio_client.put_object("pano", file_path, file_stream, len(file_content))
 
@@ -104,7 +104,7 @@ def upload_files():
             conn.close()
             successful_uploads.append(file.filename)
         except Exception as e:
-            error_message = f"Произошла ошибка при загрузке файла {file.filename}: {str(e)}"
+            error_message = f"Ошибка: {str(e)}"
             print(error_message)
             failed_uploads.append(file.filename)
             skipped_files.append(error_message)

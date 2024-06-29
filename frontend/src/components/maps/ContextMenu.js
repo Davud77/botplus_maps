@@ -6,7 +6,7 @@ const ContextMenu = ({ contextMenu, handleCopyCoordinates }) => {
 
   return (
     <div className="context-menu" style={{ top: `${contextMenu.y}px`, left: `${contextMenu.x}px` }}>
-      <button onClick={handleCopyCoordinates}>Скопировать координаты</button>
+      <button onClick={handleCopyCoordinates} className="button_white">Скопировать координаты</button>
     </div>
   );
 };

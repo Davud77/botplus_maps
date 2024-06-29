@@ -21,6 +21,30 @@ button:hover {
   background-color: #333;
 }
 
+
+.button_white {
+  cursor: pointer;
+  border: none;
+  text-align: center;
+  text-decoration: none;
+  display: inline-block;
+  border-radius: 25px;
+  box-shadow: 0 4px 8px 0 rgba(0,0,0,0.2), 0 6px 20px 0 rgba(0,0,0,0.3);
+  font-weight: bold;
+  height: 30px;
+  padding: 0px 8px;
+}
+
+.button_white:hover {
+  background-color: #c5c5c5;
+}
+
+
+
+
+
+
+
 .button {
   background-color: #000;
   color: white;
