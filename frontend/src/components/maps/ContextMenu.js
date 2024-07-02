@@ -11,7 +11,7 @@ const ContextMenu = ({ contextMenu, handleCopyCoordinates }) => {
   );
 };
 
-const MapEventHandlers = ({ setView }) => {
+const MapEventHandlers = ({ setView, setContextMenu }) => {
   useMapEvents({
     contextmenu: (event) => {
       const { latlng, containerPoint } = event;
@@ -19,6 +19,7 @@ const MapEventHandlers = ({ setView }) => {
     },
     click: () => {
       setView(null, null, null, null);
+      setContextMenu({ visible: false, x: 0, y: 0, lat: 0, lng: 0 });
     }
   });
   return null;

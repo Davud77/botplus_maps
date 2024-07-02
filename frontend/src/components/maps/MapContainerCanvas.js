@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { MapContainer, TileLayer, ZoomControl, ImageOverlay } from 'react-leaflet';
+import { MapContainer, TileLayer, ZoomControl, ImageOverlay, useMapEvents } from 'react-leaflet';
 import MarkerClusterGroup from 'react-leaflet-cluster';
 import { Marker } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -18,6 +18,7 @@ const MapContainerCanvas = ({ selectedMarker, handleMarkerClick, isVisible }) =>
   const [showPanoLayer, setShowPanoLayer] = useState(false);
   const [showOrthoLayer, setShowOrthoLayer] = useState(false);
   const [orthoImages, setOrthoImages] = useState([]);
+  const [isSearchExpanded, setIsSearchExpanded] = useState(false);
 
   const mapRef = useRef(null);
 
@@ -54,6 +55,18 @@ const MapContainerCanvas = ({ selectedMarker, handleMarkerClick, isVisible }) =>
     setOrthoImages(newOrthoImages);
   };
 
+  // Обработчик кликов на карту
+  const MapClickHandler = () => {
+    useMapEvents({
+      click: () => {
+        if (isSearchExpanded) {
+          setIsSearchExpanded(false);
+        }
+      }
+    });
+    return null;
+  };
+
   return (
     <div style={{ height: isVisible ? '50vh' : '100vh', width: '100%', position: 'relative' }}>
       <MapContainer center={mapCenter} zoom={5} style={{ height: '100%', width: '100%' }} zoomControl={false} ref={mapRef} maxZoom={22}>
@@ -81,10 +94,11 @@ const MapContainerCanvas = ({ selectedMarker, handleMarkerClick, isVisible }) =>
           />
         ))}
         <ZoomControl position="bottomright" />
-        <MapEventHandlers setView={rightClickHandler} />
+        <MapClickHandler />
+        <MapEventHandlers setView={rightClickHandler} setContextMenu={setContextMenu} />
       </MapContainer>
       <ContextMenu contextMenu={contextMenu} handleCopyCoordinates={copyCoordinatesHandler} />
-      <Search handleSearch={handleSearch} />
+      <Search handleSearch={handleSearch} isExpanded={isSearchExpanded} setIsExpanded={setIsSearchExpanded} />
       <BaseLayer handleLayerChange={handleLayerChange} />
       <PanoLayer togglePanoLayer={togglePanoLayer} />
       <OrthoLayer toggleOrthoLayer={toggleOrthoLayer} />

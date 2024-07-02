@@ -1,29 +1,28 @@
 import React, { useState } from 'react';
 
-const Search = ({ handleSearch }) => {
+const Search = ({ handleSearch, isExpanded, setIsExpanded }) => {
   const [searchInput, setSearchInput] = useState('');
-  const [expanded, setExpanded] = useState(false);
 
   const handleSearchChange = (event) => {
     setSearchInput(event.target.value);
   };
 
   const handleButtonClick = () => {
-    if (expanded) {
+    if (isExpanded) {
       handleSearch(searchInput);
     } else {
-      setExpanded(true);
+      setIsExpanded(true);
     }
   };
 
   const handleBlur = () => {
     if (searchInput === '') {
-      setExpanded(false);
+      setIsExpanded(false);
     }
   };
 
   return (
-    <div className={`search-container ${expanded ? 'expanded' : ''}`}>
+    <div className={`search-container ${isExpanded ? 'expanded' : ''}`}>
       <input
         type="text"
         value={searchInput}
@@ -31,7 +30,7 @@ const Search = ({ handleSearch }) => {
         placeholder="Координаты в формате 59.333189, 57.128906"
         className="search-input"
         onBlur={handleBlur}
-        style={{ display: expanded ? 'block' : 'none' }}
+        style={{ display: isExpanded ? 'block' : 'none' }}
       />
       <button onClick={handleButtonClick} className="search-button">
         <svg
