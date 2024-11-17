@@ -2,26 +2,17 @@ from flask import Blueprint, request, jsonify
 from flask_cors import cross_origin
 import psycopg2
 import psycopg2.extras
-import json
 import os
 
 login_blueprint = Blueprint('login', __name__)
 
-def load_db_config():
-    dir_path = os.path.dirname(os.path.realpath(__file__))
-    config_path = os.path.join(dir_path, '../db_config.json')
-    with open(config_path, 'r') as file:
-        return json.load(file)
-
-db_config = load_db_config()
-
 def connect_db():
     return psycopg2.connect(
-        host=db_config['host'],
-        port=db_config['port'],
-        dbname=db_config['dbname'],
-        user=db_config['user'],
-        password=db_config['password']
+        host=os.environ.get('DB_HOST', 'localhost'),
+        port=os.environ.get('DB_PORT', '5432'),
+        dbname=os.environ.get('DB_NAME', 'botplus'),
+        user=os.environ.get('DB_USER', 'postgres'),
+        password=os.environ.get('DB_PASSWORD', 'password')
     )
 
 @login_blueprint.route('/login', methods=['POST'])

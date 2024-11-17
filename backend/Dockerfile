@@ -1,21 +1,19 @@
-FROM python:3.10-slim
+FROM python:3.11-slim-bullseye
 
-# Install system dependencies for GDAL and build tools
 RUN apt-get update && apt-get install -y \
+    build-essential \
+    libpq-dev \
     gdal-bin \
     libgdal-dev \
-    build-essential \
-    && apt-get clean
-
-# Set environment variables for GDAL
-ENV CPLUS_INCLUDE_PATH=/usr/include/gdal
-ENV C_INCLUDE_PATH=/usr/include/gdal
+    python3-gdal \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
 COPY requirements.txt requirements.txt
 
-# Upgrade pip and install Python packages
+# Обновление pip и установка Python-зависимостей
 RUN pip install --upgrade pip
 RUN pip install -r requirements.txt
 

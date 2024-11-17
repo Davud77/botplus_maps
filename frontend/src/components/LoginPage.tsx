@@ -1,16 +1,17 @@
-import React, { useState } from 'react';
+// src/components/LoginPage.tsx
+import React, { useState, FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { login as loginApi } from '../utils/api';
-import useAuth from '../hooks/useAuth';
+import { useAuth } from '../hooks/useAuth';
 
-const LoginPage = () => {
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
+const LoginPage: React.FC = () => {
+  const [username, setUsername] = useState<string>('');
+  const [password, setPassword] = useState<string>('');
+  const [error, setError] = useState<string>('');
   const navigate = useNavigate();
   const { login } = useAuth();
 
-  const handleLogin = async (event) => {
+  const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError('');
 
@@ -22,7 +23,7 @@ const LoginPage = () => {
       } else {
         setError(data.message || 'Неверное имя пользователя или пароль');
       }
-    } catch (error) {
+    } catch (error: any) {
       setError('Ошибка при подключении к серверу: ' + error.message);
     }
   };
@@ -34,7 +35,7 @@ const LoginPage = () => {
           <h1>Авторизация</h1>
         </div>
 
-        <div className="login-form">
+        <form className="login-form" onSubmit={handleLogin}>
           <div className="control-group">
             <input
               type="text"
@@ -61,9 +62,9 @@ const LoginPage = () => {
 
           {error && <div className="error-message">{error}</div>}
 
-          <button className="button buttonlogin btn-primary btn-large btn-block" onClick={handleLogin}>Вход</button>
+          <button type="submit" className="button buttonlogin btn-primary btn-large btn-block">Вход</button>
           <a className="login-link" href="https://t.me/localdisk_d">Забыли пароль?</a>
-        </div>
+        </form>
       </div>
     </div>
   );

@@ -1,12 +1,13 @@
-import React, { useState } from 'react';
+// src/components/UploadOrtho.tsx
+import React, { useState, ChangeEvent } from 'react';
 import axios from 'axios';
 
-const UploadOrtho = () => {
-  const [selectedFile, setSelectedFile] = useState(null);
-  const [uploadStatus, setUploadStatus] = useState('');
+const UploadOrtho: React.FC = () => {
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [uploadStatus, setUploadStatus] = useState<string>('');
 
-  const handleFileChange = (event) => {
-    setSelectedFile(event.target.files[0]);
+  const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
+    setSelectedFile(event.target.files?.[0] || null);
   };
 
   const handleFileUpload = async () => {
@@ -25,7 +26,7 @@ const UploadOrtho = () => {
         }
       });
       setUploadStatus(response.data.message);
-    } catch (error) {
+    } catch (error: any) {
       setUploadStatus(`Error: ${error.response ? error.response.data.error : error.message}`);
     }
   };

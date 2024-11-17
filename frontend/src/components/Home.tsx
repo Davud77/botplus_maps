@@ -1,7 +1,8 @@
+// src/components/Home.tsx
 import React from 'react';
 import Header from './Header';
 
-const Home = () => {
+const Home: React.FC = () => {
   return (
     <div className="background full-screen-video">
       <Header />

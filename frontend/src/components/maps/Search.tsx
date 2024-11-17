@@ -1,9 +1,17 @@
+// src/components/maps/Search.tsx
+
 import React, { useState } from 'react';
 
-const Search = ({ handleSearch, isExpanded, setIsExpanded }) => {
-  const [searchInput, setSearchInput] = useState('');
+interface SearchProps {
+  handleSearch: (searchInput: string) => void;
+  isExpanded: boolean;
+  setIsExpanded: React.Dispatch<React.SetStateAction<boolean>>;
+}
 
-  const handleSearchChange = (event) => {
+const Search: React.FC<SearchProps> = ({ handleSearch, isExpanded, setIsExpanded }) => {
+  const [searchInput, setSearchInput] = useState<string>('');
+
+  const handleSearchChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     setSearchInput(event.target.value);
   };
 

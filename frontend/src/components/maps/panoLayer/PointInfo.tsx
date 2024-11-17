@@ -1,6 +1,29 @@
+// src/components/maps/panoLayer/PointInfo.tsx
+
 import React from 'react';
 
-const PointInfo = ({ data }) => {
+interface PointData {
+  filename: string;
+  latitude: number;
+  longitude: number;
+  tags: string;
+  upload_date: string;
+  user_id: number;
+  file_size: number;
+  file_type: string;
+  full_pano_width_pixels: number;
+  full_pano_height_pixels: number;
+  first_photo_date: string;
+  model: string;
+  gps_altitude: number;
+  fov: number;
+}
+
+interface PointInfoProps {
+  data: PointData | null;
+}
+
+const PointInfo: React.FC<PointInfoProps> = ({ data }) => {
   if (!data) {
     return <div>Loading...</div>;
   }

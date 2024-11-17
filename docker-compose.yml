@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   frontend:
     build:
@@ -8,7 +6,7 @@ services:
     volumes:
       - ./frontend:/app
     ports:
-      - "3080:3000"
+      - "3000:3000"
     depends_on:
       - backend
     restart: always
@@ -23,18 +21,43 @@ services:
       - "5080:5000"
     depends_on:
       - db
+      - minio
+    environment:
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_USER=postgres
+      - DB_PASSWORD=password
+      - DB_NAME=botplus
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=ваш_access_key   # Замените на ваш реальный ключ доступа
+      - MINIO_SECRET_KEY=ваш_secret_key   # Замените на ваш реальный секретный ключ
+      - MINIO_SECURE=False
     restart: always
 
   db:
     image: postgis/postgis:latest
     volumes:
       - postgres-data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
     environment:
       POSTGRES_DB: botplus
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: password
-    network_mode: host
+    restart: always
+
+  minio:
+    image: minio/minio:latest
+    volumes:
+      - minio-data:/data
+    environment:
+      MINIO_ACCESS_KEY: ваш_access_key   # Замените на ваш реальный ключ доступа
+      MINIO_SECRET_KEY: ваш_secret_key   # Замените на ваш реальный секретный ключ
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
     restart: always
 
 volumes:
   postgres-data:
+  minio-data:

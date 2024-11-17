@@ -1,6 +1,10 @@
 import React, { useState } from 'react';
 
-const BaseLayer = ({ handleLayerChange }) => {
+interface BaseLayerProps {
+  handleLayerChange: (layerUrl: string) => void;
+}
+
+const BaseLayer: React.FC<BaseLayerProps> = ({ handleLayerChange }) => {
   const layers = [
     { name: "OSM", url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", image: "/images/OSM.png" },
     { name: "Google Satellite", url: "https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}", image: "/images/GoogleSatellite.png" },

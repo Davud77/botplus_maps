@@ -1,3 +1,4 @@
+// src/App.tsx
 import React, { useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import Home from './components/Home';
@@ -5,11 +6,11 @@ import UploadPano from './components/UploadPano';
 import MapPage from './components/maps/MapPage';
 import LoginPage from './components/LoginPage';
 import ProfilePage from './components/ProfilePage';
-import UploadOrtho from './components/UploadOrtho'; // Импортируем новый компонент
+import UploadOrtho from './components/UploadOrtho';
 import './assets/css/styles.css';
-import { useAuth } from './contexts/AuthContext';
+import { useAuth } from './hooks/useAuth';
 
-function App() {
+const App: React.FC = () => {
   const { isAuthenticated, login } = useAuth();
 
   useEffect(() => {
@@ -27,10 +28,10 @@ function App() {
         <Route path="/upload" element={isAuthenticated ? <UploadPano /> : <Navigate replace to="/login" />} />
         <Route path="/map" element={isAuthenticated ? <MapPage /> : <Navigate replace to="/login" />} />
         <Route path="/profile" element={isAuthenticated ? <ProfilePage /> : <Navigate replace to="/login" />} />
-        <Route path="/uploadortho" element={isAuthenticated ? <UploadOrtho /> : <Navigate replace to="/login" />} /> {/* Добавляем маршрут */}
+        <Route path="/uploadortho" element={isAuthenticated ? <UploadOrtho /> : <Navigate replace to="/login" />} />
       </Routes>
     </Router>
   );
-}
+};
 
 export default App;

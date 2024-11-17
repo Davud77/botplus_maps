@@ -1,9 +1,10 @@
+// src/components/ProfilePage.tsx
 import React from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import Header from './Header';
-import useAuth from '../hooks/useAuth';
+import { useAuth } from '../hooks/useAuth';
 
-const ProfilePage = () => {
+const ProfilePage: React.FC = () => {
   const navigate = useNavigate();
   const { logout } = useAuth();
 

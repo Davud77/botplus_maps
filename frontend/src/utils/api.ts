@@ -1,6 +1,12 @@
-const API_URL = 'https://api.botplus.ru';
+// src/utils/api.ts
+const API_URL = 'http://localhost:5080';
 
-export const login = async (username, password) => {
+interface LoginResponse {
+  status: string;
+  message?: string;
+}
+
+export const login = async (username: string, password: string): Promise<LoginResponse> => {
   const response = await fetch(`${API_URL}/login`, {
     method: 'POST',
     headers: {
@@ -16,12 +22,12 @@ export const login = async (username, password) => {
   return response.json();
 };
 
-export const fetchPanoramas = async () => {
+export const fetchPanoramas = async (): Promise<any> => {
   const response = await fetch(`${API_URL}/panoramas`);
   return response.json();
 };
 
-export const uploadFiles = async (formData) => {
+export const uploadFiles = async (formData: FormData): Promise<any> => {
   const response = await fetch(`${API_URL}/upload`, {
     method: 'POST',
     body: formData,

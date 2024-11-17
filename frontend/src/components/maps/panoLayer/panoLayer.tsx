@@ -1,7 +1,17 @@
 import React, { useState, useEffect } from 'react';
 
-const PanoLayer = ({ togglePanoLayer }) => {
-  const [markers, setMarkers] = useState([]);
+interface MarkerType {
+  id: string;
+  lat: number;
+  lng: number;
+}
+
+interface PanoLayerProps {
+  togglePanoLayer: (newMarkers: MarkerType[]) => void;
+}
+
+const PanoLayer: React.FC<PanoLayerProps> = ({ togglePanoLayer }) => {
+  const [markers, setMarkers] = useState<MarkerType[]>([]);
 
   useEffect(() => {
     fetch('https://api.botplus.ru/panoramas')
@@ -11,11 +21,11 @@ const PanoLayer = ({ togglePanoLayer }) => {
         }
         return response.json();
       })
-      .then(data => {
-        const newMarkers = data.map(item => ({
+      .then((data: any[]) => {
+        const newMarkers = data.map((item: any) => ({
           id: item.id,
           lat: item.latitude,
-          lng: item.longitude
+          lng: item.longitude,
         }));
         setMarkers(newMarkers);
       })

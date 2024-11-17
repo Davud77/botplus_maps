@@ -1,25 +1,37 @@
-import React, { useState, useRef } from 'react';
+// src/components/UploadPano.tsx
+import React, { useState, useRef, ChangeEvent, KeyboardEvent, DragEvent } from 'react';
 import Header from './Header';
 
-const UploadPano = () => {
-  const [files, setFiles] = useState([]);
-  const [tags, setTags] = useState([]);
-  const [inputValue, setInputValue] = useState('');
-  const fileInputRef = useRef(null);
-  const [fileStatuses, setFileStatuses] = useState({});
-  const [isDragging, setIsDragging] = useState(false);
-  const [filter, setFilter] = useState('all');
+interface FileStatus {
+  status: 'selected' | 'uploading' | 'success' | 'failed';
+  log: string;
+}
+
+interface FileStatuses {
+  [key: string]: FileStatus;
+}
+
+type FilterType = 'all' | 'success' | 'failed' | 'selected';
+
+const UploadPano: React.FC = () => {
+  const [files, setFiles] = useState<File[]>([]);
+  const [tags, setTags] = useState<string[]>([]);
+  const [inputValue, setInputValue] = useState<string>('');
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [fileStatuses, setFileStatuses] = useState<FileStatuses>({});
+  const [isDragging, setIsDragging] = useState<boolean>(false);
+  const [filter, setFilter] = useState<FilterType>('all');
 
   const BATCH_SIZE = 50;
 
-  const onFileChange = (event) => {
-    const newFiles = Array.from(event.target.files).filter(file => file.type === "image/jpeg");
-    if (newFiles.length !== event.target.files.length) {
+  const onFileChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const newFiles = Array.from(event.target.files ?? []).filter((file): file is File => file.type === "image/jpeg");
+    if (newFiles.length !== (event.target.files?.length ?? 0)) {
       alert('Можно загружать только файлы с расширением .jpg');
     }
     setFiles(prevFiles => [...prevFiles, ...newFiles]);
     setFileStatuses(prevStatuses => {
-      const newStatuses = {};
+      const newStatuses: FileStatuses = {};
       newFiles.forEach(file => {
         newStatuses[file.name] = { status: 'selected', log: '' };
       });
@@ -27,11 +39,11 @@ const UploadPano = () => {
     });
   };
 
-  const onInputChange = (event) => {
+  const onInputChange = (event: ChangeEvent<HTMLTextAreaElement>) => {
     setInputValue(event.target.value);
   };
 
-  const onInputKeyDown = (event) => {
+  const onInputKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === 'Enter' || event.key === ',' || event.key === '.') {
       event.preventDefault();
       if (inputValue.trim()) {
@@ -41,11 +53,11 @@ const UploadPano = () => {
     }
   };
 
-  const removeTag = (indexToRemove) => {
+  const removeTag = (indexToRemove: number) => {
     setTags(tags.filter((_, index) => index !== indexToRemove));
   };
 
-  const uploadFilesBatch = async (batch) => {
+  const uploadFilesBatch = async (batch: File[]) => {
     const formData = new FormData();
     batch.forEach(file => {
       formData.append("files", file);
@@ -67,19 +79,19 @@ const UploadPano = () => {
       }
 
       const result = await response.json();
-      result.successful_uploads.forEach(filename => {
+      result.successful_uploads.forEach((filename: string) => {
         setFileStatuses(prevStatuses => ({
           ...prevStatuses,
           [filename]: { status: 'success', log: 'Успешно загружен' }
         }));
       });
-      result.failed_uploads.forEach((filename, index) => {
+      result.failed_uploads.forEach((filename: string, index: number) => {
         setFileStatuses(prevStatuses => ({
           ...prevStatuses,
           [filename]: { status: 'failed', log: result.skipped_files[index] }
         }));
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error('Ошибка при загрузке:', error);
       batch.forEach(file => {
         setFileStatuses(prevStatuses => ({
@@ -91,7 +103,7 @@ const UploadPano = () => {
   };
 
   const onFileUpload = async () => {
-    const batches = [];
+    const batches: File[][] = [];
     for (let i = 0; i < files.length; i += BATCH_SIZE) {
       batches.push(files.slice(i, i + BATCH_SIZE));
     }
@@ -102,10 +114,10 @@ const UploadPano = () => {
   };
 
   const handleFileInputClick = () => {
-    fileInputRef.current.click();
+    fileInputRef.current?.click();
   };
 
-  const getThumbnailClass = (status) => {
+  const getThumbnailClass = (status: string | undefined) => {
     switch (status) {
       case 'selected':
         return 'thumbnail';
@@ -120,7 +132,7 @@ const UploadPano = () => {
     }
   };
 
-  const handleDragOver = (event) => {
+  const handleDragOver = (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
     setIsDragging(true);
   };
@@ -129,16 +141,16 @@ const UploadPano = () => {
     setIsDragging(false);
   };
 
-  const handleDrop = (event) => {
+  const handleDrop = (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
     setIsDragging(false);
-    const newFiles = Array.from(event.dataTransfer.files).filter(file => file.type === "image/jpeg");
+    const newFiles = Array.from(event.dataTransfer.files).filter((file): file is File => file.type === "image/jpeg");
     if (newFiles.length !== event.dataTransfer.files.length) {
       alert('Можно загружать только файлы с расширением .jpg');
     }
     setFiles(prevFiles => [...prevFiles, ...newFiles]);
     setFileStatuses(prevStatuses => {
-      const newStatuses = {};
+      const newStatuses: FileStatuses = {};
       newFiles.forEach(file => {
         newStatuses[file.name] = { status: 'selected', log: '' };
       });
@@ -159,7 +171,7 @@ const UploadPano = () => {
     setFileStatuses({});
   };
 
-  const countFilesByStatus = (status) => {
+  const countFilesByStatus = (status: string) => {
     return files.filter(file => fileStatuses[file.name]?.status === status).length;
   };
 
@@ -181,16 +193,16 @@ const UploadPano = () => {
               onChange={onInputChange}
               onKeyDown={onInputKeyDown}
               placeholder={tags.length === 0 && inputValue.length === 0 ? "Введите теги через запятую" : ""}
-              rows="1"
-              cols="50"
+              rows={1}
+              cols={50}
               className="input-tags"
             />
           </div>
         </div>
-        <div 
-          className={`mini_pano ${isDragging ? 'dragging' : ''}`} 
-          onDragOver={handleDragOver} 
-          onDragLeave={handleDragLeave} 
+        <div
+          className={`mini_pano ${isDragging ? 'dragging' : ''}`}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
           onDrop={handleDrop}
         >
           <input

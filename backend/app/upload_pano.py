@@ -1,7 +1,6 @@
 from flask import Blueprint, request, jsonify
 from PIL import Image
 import piexif
-import json
 import os
 from minio import Minio
 import psycopg2
@@ -10,36 +9,21 @@ import io
 
 upload_blueprint = Blueprint('upload', __name__)
 
-def load_db_config():
-    dir_path = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
-    config_path = os.path.join(dir_path, 'db_config.json')
-    with open(config_path, 'r') as file:
-        return json.load(file)
-
-def load_minio_config():
-    dir_path = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
-    config_path = os.path.join(dir_path, 'minio_config.json')
-    with open(config_path, 'r') as file:
-        return json.load(file)
-
-db_config = load_db_config()
-minio_config = load_minio_config()
-
-minio_client = Minio(
-    minio_config['url'].split('//')[1],
-    access_key=minio_config['accessKey'],
-    secret_key=minio_config['secretKey'],
-    secure=minio_config['url'].startswith('https')
-)
-
 def connect_db():
     return psycopg2.connect(
-        host=db_config['host'],
-        port=db_config['port'],
-        dbname=db_config['dbname'],
-        user=db_config['user'],
-        password=db_config['password']
+        host=os.environ.get('DB_HOST', 'localhost'),
+        port=os.environ.get('DB_PORT', '5432'),
+        dbname=os.environ.get('DB_NAME', 'botplus'),
+        user=os.environ.get('DB_USER', 'postgres'),
+        password=os.environ.get('DB_PASSWORD', 'password')
     )
+
+minio_client = Minio(
+    os.environ.get('MINIO_ENDPOINT', 'localhost:9000'),
+    access_key=os.environ.get('MINIO_ACCESS_KEY', 'minioadmin'),
+    secret_key=os.environ.get('MINIO_SECRET_KEY', 'minioadmin'),
+    secure=os.environ.get('MINIO_SECURE', 'False').lower() == 'true'
+)
 
 def get_gps_coordinates(exif_data):
     latitude = longitude = altitude = None
