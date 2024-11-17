@@ -1,6 +1,5 @@
-// src/App.tsx
 import React, { useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Home from './components/Home';
 import UploadPano from './components/UploadPano';
 import MapPage from './components/maps/MapPage';
@@ -21,16 +20,39 @@ const App: React.FC = () => {
   }, [login]);
 
   return (
-    <Router>
+    <BrowserRouter
+      future={{
+        v7_startTransition: true,
+        v7_relativeSplatPath: true, // Изменено здесь
+      }}
+    >
       <Routes>
-        <Route path="/" element={isAuthenticated ? <Home /> : <Navigate replace to="/login" />} />
-        <Route path="/login" element={isAuthenticated ? <Navigate replace to="/" /> : <LoginPage />} />
-        <Route path="/upload" element={isAuthenticated ? <UploadPano /> : <Navigate replace to="/login" />} />
-        <Route path="/map" element={isAuthenticated ? <MapPage /> : <Navigate replace to="/login" />} />
-        <Route path="/profile" element={isAuthenticated ? <ProfilePage /> : <Navigate replace to="/login" />} />
-        <Route path="/uploadortho" element={isAuthenticated ? <UploadOrtho /> : <Navigate replace to="/login" />} />
+        <Route
+          path="/"
+          element={isAuthenticated ? <Home /> : <Navigate replace to="/login" />}
+        />
+        <Route
+          path="/login"
+          element={isAuthenticated ? <Navigate replace to="/" /> : <LoginPage />}
+        />
+        <Route
+          path="/upload"
+          element={isAuthenticated ? <UploadPano /> : <Navigate replace to="/login" />}
+        />
+        <Route
+          path="/map"
+          element={isAuthenticated ? <MapPage /> : <Navigate replace to="/login" />}
+        />
+        <Route
+          path="/profile"
+          element={isAuthenticated ? <ProfilePage /> : <Navigate replace to="/login" />}
+        />
+        <Route
+          path="/uploadortho"
+          element={isAuthenticated ? <UploadOrtho /> : <Navigate replace to="/login" />}
+        />
       </Routes>
-    </Router>
+    </BrowserRouter>
   );
 };
 

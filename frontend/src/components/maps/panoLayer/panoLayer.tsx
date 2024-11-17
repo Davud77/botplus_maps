@@ -14,7 +14,7 @@ const PanoLayer: React.FC<PanoLayerProps> = ({ togglePanoLayer }) => {
   const [markers, setMarkers] = useState<MarkerType[]>([]);
 
   useEffect(() => {
-    fetch('https://api.botplus.ru/panoramas')
+    fetch('http://localhost:5080/panoramas')
       .then(response => {
         if (!response.ok) {
           throw new Error(`HTTP error! status: ${response.status}`);

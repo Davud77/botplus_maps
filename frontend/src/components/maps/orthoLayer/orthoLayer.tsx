@@ -20,7 +20,7 @@ const OrthoLayer: React.FC<OrthoLayerProps> = ({ toggleOrthoLayer }) => {
   const [orthoImages, setOrthoImages] = useState<OrthoImageType[]>([]);
 
   useEffect(() => {
-    fetch('https://api.botplus.ru/orthophotos')
+    fetch('http://localhost:5080/orthophotos')
       .then((response) => {
         if (!response.ok) {
           throw new Error(`HTTP error! status: ${response.status}`);

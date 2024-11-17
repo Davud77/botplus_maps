@@ -8,4 +8,56 @@ CREATE TABLE public.users (
 -- Вставка пользователя по умолчанию
 INSERT INTO public.users (username, password) VALUES ('Гость', 'Гость');
 
+-- Создание таблицы панорам
+CREATE TABLE public.panolist (
+    id SERIAL PRIMARY KEY,
+    filename VARCHAR(255) NOT NULL,
+    latitude DOUBLE PRECISION NOT NULL,
+    longitude DOUBLE PRECISION NOT NULL,
+    tags VARCHAR(255),
+    upload_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    user_id INTEGER REFERENCES public.users(id),
+    file_size DOUBLE PRECISION,
+    file_type VARCHAR(50),
+    full_pano_width_pixels INTEGER,
+    full_pano_height_pixels INTEGER,
+    first_photo_date TIMESTAMP,
+    model VARCHAR(255),
+    gps_altitude DOUBLE PRECISION,
+    fov DOUBLE PRECISION
+);
+
+-- Вставка тестовых данных в таблицу panolist (опционально)
+INSERT INTO public.panolist (
+    filename,
+    latitude,
+    longitude,
+    tags,
+    upload_date,
+    user_id,
+    file_size,
+    file_type,
+    full_pano_width_pixels,
+    full_pano_height_pixels,
+    first_photo_date,
+    model,
+    gps_altitude,
+    fov
+) VALUES (
+    'example.jpg',
+    55.7558,
+    37.6173,
+    'пример,тест',
+    CURRENT_TIMESTAMP,
+    1,
+    2.5,
+    'image/jpeg',
+    4000,
+    2000,
+    '2023-11-17 12:00:00',
+    'Canon EOS 5D Mark IV',
+    200.0,
+    90.0
+);
+
 -- Создайте другие таблицы, если необходимо
