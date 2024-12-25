@@ -6,6 +6,7 @@ from datetime import timedelta
 
 get_ortho_blueprint = Blueprint('get_ortho', __name__)
 
+
 def connect_db():
     return psycopg2.connect(
         host=os.environ.get('DB_HOST', 'localhost'),

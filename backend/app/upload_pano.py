@@ -6,8 +6,10 @@ from minio import Minio
 import psycopg2
 from datetime import datetime
 import io
+from flask_cors import CORS  # Добавлено
 
 upload_blueprint = Blueprint('upload', __name__)
+CORS(upload_blueprint, resources={r"/upload/*": {"origins": "*"}})  # Добавлено
 
 def connect_db():
     return psycopg2.connect(
@@ -54,13 +56,16 @@ def convert_to_degrees(value):
     return d[0] / d[1] + m[0] / m[1] / 60 + s[0] / s[1] / 3600
 
 def sanitize_string(value):
-    """ Remove NUL characters from strings """
+    """ Удаляет NUL-символы из строк """
     if isinstance(value, bytes):
         value = value.decode('utf-8', 'ignore')
     return value.replace('\x00', '')
 
-@upload_blueprint.route('/upload', methods=['POST'])
+@upload_blueprint.route('/upload', methods=['POST', 'OPTIONS'])  # Добавлено 'OPTIONS'
 def upload_files():
+    if request.method == 'OPTIONS':
+        return '', 200  # Обработка предварительного запроса OPTIONS
+
     uploaded_files = request.files.getlist("files")
     tags = request.form.get("tags", "")
     user_id = request.form.get("user_id", 1)  # Получаем user_id из формы, если есть
@@ -89,7 +94,7 @@ def upload_files():
                 if gps_data[0] is None or gps_data[1] is None:
                     raise ValueError("Файл без GPS координат")
 
-                # Extract additional EXIF fields
+                # Извлечение дополнительных полей EXIF
                 file_size = len(file_content)
                 file_type = file.mimetype
                 full_pano_width_pixels = img.width
@@ -109,11 +114,24 @@ def upload_files():
                 if focal_length:
                     focal_length = focal_length[0] / focal_length[1] if isinstance(focal_length, tuple) else focal_length
 
-                # Upload the file to Minio with the new filename
-                file_stream.seek(0)
-                minio_client.put_object("pano", new_filename, file_stream, len(file_content))
+                # Проверка существования бакета и его создание при необходимости
+                bucket_name = 'pano'
+                if not minio_client.bucket_exists(bucket_name):
+                    minio_client.make_bucket(bucket_name)
 
-                # Prepare the geom value
+                # Загрузка файла в MinIO с метаданными
+                file_stream.seek(0)
+                minio_client.put_object(
+                    bucket_name,
+                    new_filename,
+                    file_stream,
+                    length=file_size,
+                    metadata={
+                        "x-amz-meta-keywords": tags  # Сохранение тегов в пользовательских метаданных
+                    }
+                )
+
+                # Подготовка значения geom
                 geom = f"POINT Z({gps_data[1]} {gps_data[0]} {gps_data[2] if gps_data[2] else 0})"
 
             cur.execute(
@@ -131,7 +149,7 @@ def upload_files():
             conn.commit()
             successful_uploads.append(original_filename)
         except Exception as e:
-            error_message = f"Ошибка: {str(e)}"
+            error_message = f"Ошибка при обработке файла {original_filename}: {str(e)}"
             print(error_message)
             failed_uploads.append(original_filename)
             skipped_files.append(error_message)

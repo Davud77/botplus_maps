@@ -23,8 +23,10 @@ CREATE TABLE public.panolist (
     full_pano_height_pixels INTEGER,
     first_photo_date TIMESTAMP,
     model VARCHAR(255),
-    gps_altitude DOUBLE PRECISION,
-    fov DOUBLE PRECISION
+    altitude DOUBLE PRECISION,
+    fov DOUBLE PRECISION,
+    focal_length DOUBLE PRECISION,
+    geom GEOMETRY(PointZ, 4326)
 );
 
 -- Вставка тестовых данных в таблицу panolist (опционально)
@@ -41,8 +43,10 @@ INSERT INTO public.panolist (
     full_pano_height_pixels,
     first_photo_date,
     model,
-    gps_altitude,
-    fov
+    altitude,
+    fov,
+    focal_length,
+    geom
 ) VALUES (
     'example.jpg',
     55.7558,
@@ -57,7 +61,9 @@ INSERT INTO public.panolist (
     '2023-11-17 12:00:00',
     'Canon EOS 5D Mark IV',
     200.0,
-    90.0
+    90.0,
+    50.0,
+    ST_GeomFromText('POINT Z(37.6173 55.7558 200.0)', 4326)
 );
 
 -- Создайте другие таблицы, если необходимо

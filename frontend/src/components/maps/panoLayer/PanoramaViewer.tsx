@@ -1,5 +1,4 @@
 // src/components/maps/panoLayer/PanoramaViewer.tsx
-
 import React, { useRef, useEffect, useState } from 'react';
 import Marzipano from 'marzipano';
 import PointInfo from './PointInfo';
@@ -17,14 +16,30 @@ const PanoramaViewer: React.FC<PanoramaViewerProps> = ({ markerId, isExpanded })
   const [pointData, setPointData] = useState<any>(null);
 
   useEffect(() => {
+    let objectUrl: string | null = null; // Чтобы потом освобождать Blob
+
     if (markerId) {
-      fetch(`https://api.botplus.ru/panorama_info?id=${markerId}`)
+      // 1) Получаем общую информацию о панораме
+      fetch(`http://localhost:5080/pano_info/${markerId}`)
         .then((response) => response.json())
         .then((data) => {
           setPointData(data);
-          if (viewerRef.current && data.filename) {
+          // 2) Затем делаем запрос на файл (download)
+          //    /pano_info/<markerId>/download
+          return fetch(`http://localhost:5080/pano_info/${markerId}/download`);
+        })
+        .then((fileResponse) => {
+          // Превращаем ответ в Blob (бинарный файл)
+          return fileResponse.blob();
+        })
+        .then((blob) => {
+          // 3) Создаём локальную blob-ссылку
+          objectUrl = URL.createObjectURL(blob);
+
+          // 4) Инициализируем Marzipano
+          if (viewerRef.current) {
             const viewer = new Marzipano.Viewer(viewerRef.current);
-            const source = Marzipano.ImageUrlSource.fromString(data.filename);
+            const source = Marzipano.ImageUrlSource.fromString(objectUrl);
             const geometry = new Marzipano.EquirectGeometry([{ width: 4000 }]);
             const limiter = Marzipano.RectilinearView.limit.traditional(
               4096,
@@ -36,23 +51,30 @@ const PanoramaViewer: React.FC<PanoramaViewerProps> = ({ markerId, isExpanded })
               geometry: geometry,
               view: view,
             });
-
             scene.switchTo();
             viewerInstanceRef.current = viewer;
           }
         })
-        .catch((error) => console.error('Error fetching point info:', error));
+        .catch((error) => console.error('Error fetching panorama info or file:', error));
     }
 
     return () => {
+      // Очистка: уничтожить Marzipano Viewer, освободить Blob
       const currentViewer = viewerInstanceRef.current;
       if (currentViewer) {
         currentViewer.destroy();
       }
       viewerInstanceRef.current = null;
+
+      // Если был создан objectUrl — освободим
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+        objectUrl = null;
+      }
     };
   }, [markerId]);
 
+  // Слежение за ресайзом
   useEffect(() => {
     const resizeObserver = new ResizeObserver(() => {
       if (viewerInstanceRef.current && viewerRef.current) {
@@ -90,7 +112,7 @@ const PanoramaViewer: React.FC<PanoramaViewerProps> = ({ markerId, isExpanded })
       }}
     >
       <button className="pointinfo" onClick={handlePointInfoClick}>
-        {/* Ваш SVG-код */}
+        {/* Ваш SVG-код или иконка */}
       </button>
       {showPointInfo && <PointInfo data={pointData} />}
     </div>

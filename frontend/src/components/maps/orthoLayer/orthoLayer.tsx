@@ -32,7 +32,6 @@ const OrthoLayer: React.FC<OrthoLayerProps> = ({ toggleOrthoLayer }) => {
       })
       .catch((error) => {
         console.error('Error fetching orthophotos:', error);
-        alert('Не удалось загрузить данные об ортофотопланах.');
       });
   }, []);
 

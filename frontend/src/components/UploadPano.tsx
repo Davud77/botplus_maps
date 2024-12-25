@@ -69,7 +69,7 @@ const UploadPano: React.FC = () => {
     formData.append("tags", tags.join(', '));
 
     try {
-      const response = await fetch('https://api.botplus.ru/upload', {
+      const response = await fetch('http://localhost:5080/upload', {
         method: 'POST',
         body: formData,
       });
