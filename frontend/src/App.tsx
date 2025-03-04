@@ -1,56 +1,50 @@
-import React, { useEffect } from 'react';
+// src/App.tsx
+import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Home from './components/Home';
-import UploadPano from './components/UploadPano';
 import MapPage from './components/maps/MapPage';
 import LoginPage from './components/LoginPage';
 import ProfilePage from './components/ProfilePage';
 import UploadOrtho from './components/UploadOrtho';
-import './assets/css/styles.css';
+import UploadPano from './components/UploadPano';
 import { useAuth } from './hooks/useAuth';
+import './assets/css/styles.css';
 
 const App: React.FC = () => {
-  const { isAuthenticated, login } = useAuth();
+  const { isAuthenticated, isLoading } = useAuth();
 
-  useEffect(() => {
-    const auth = localStorage.getItem('auth') === 'true';
-    if (auth) {
-      login();
-    }
-  }, [login]);
+  if (isLoading) {
+    return <div className="loading-screen">Проверка авторизации...</div>;
+  }
 
   return (
-    <BrowserRouter
-      future={{
-        v7_startTransition: true,
-        v7_relativeSplatPath: true, // Изменено здесь
-      }}
-    >
+    <BrowserRouter>
       <Routes>
         <Route
           path="/"
-          element={isAuthenticated ? <Home /> : <Navigate replace to="/login" />}
+          element={isAuthenticated ? <Home /> : <Navigate to="/login" replace />}
         />
         <Route
           path="/login"
-          element={isAuthenticated ? <Navigate replace to="/" /> : <LoginPage />}
-        />
-        <Route
-          path="/upload"
-          element={isAuthenticated ? <UploadPano /> : <Navigate replace to="/login" />}
+          element={isAuthenticated ? <Navigate to="/" replace /> : <LoginPage />}
         />
         <Route
           path="/map"
-          element={isAuthenticated ? <MapPage /> : <Navigate replace to="/login" />}
+          element={isAuthenticated ? <MapPage /> : <Navigate to="/login" replace />}
         />
         <Route
           path="/profile"
-          element={isAuthenticated ? <ProfilePage /> : <Navigate replace to="/login" />}
+          element={isAuthenticated ? <ProfilePage /> : <Navigate to="/login" replace />}
+        />
+        <Route
+          path="/upload"
+          element={isAuthenticated ? <UploadPano /> : <Navigate to="/login" replace />}
         />
         <Route
           path="/uploadortho"
-          element={isAuthenticated ? <UploadOrtho /> : <Navigate replace to="/login" />}
+          element={isAuthenticated ? <UploadOrtho /> : <Navigate to="/login" replace />}
         />
+        <Route path="*" element={<Navigate to={isAuthenticated ? "/" : "/login"} replace />} />
       </Routes>
     </BrowserRouter>
   );

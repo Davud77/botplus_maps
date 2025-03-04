@@ -1,0 +1,220 @@
+/* ============================= */
+/*      uploadOrtho.css         */
+/* ============================= */
+
+.tag-container {
+  margin: 30px;
+}
+
+.mini {
+  margin: 30px;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* Основной контейнер с файлами */
+.mini_pano {
+  display: flex;
+  height: 55vh;
+  overflow-y: auto;
+  flex-direction: column;
+  padding: 20px;
+  border-radius: var(--radius-base);
+  border: 1px solid var(--color-border);
+  background-color: var(--color-surface);
+  position: relative;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+.mini_pano::-webkit-scrollbar {
+  width: 8px;
+}
+.mini_pano::-webkit-scrollbar-thumb {
+  background-color: var(--color-primary);
+  border-radius: 4px;
+}
+.mini_pano::-webkit-scrollbar-thumb:hover {
+  background-color: var(--color-primary-dark);
+}
+.mini_pano::-webkit-scrollbar-track {
+  background: var(--color-surface-alt);
+}
+
+/* Лог */
+.mini_log {
+  height: 15vh;
+  overflow-y: auto;
+  margin-top: 20px;
+  border-top: 1px solid var(--color-border);
+  padding-top: 10px;
+  border-radius: var(--radius-base);
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  padding-left: 25px;
+}
+.mini_log::-webkit-scrollbar {
+  width: 8px;
+}
+.mini_log::-webkit-scrollbar-thumb {
+  background-color: var(--color-primary);
+  border-radius: 4px;
+}
+.mini_log::-webkit-scrollbar-thumb:hover {
+  background-color: var(--color-primary-dark);
+}
+.mini_log::-webkit-scrollbar-track {
+  background: var(--color-surface-alt);
+}
+.mini_log ul {
+  list-style-type: none;
+  padding: 0;
+}
+.mini_log li {
+  margin-bottom: 5px;
+  color: var(--color-text);
+}
+
+/* Карточка файла */
+.thumbnail {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px;
+  margin-bottom: 10px;
+  background: var(--color-surface-alt);
+  border-radius: var(--radius-base);
+  transition: all 0.3s ease;
+}
+
+.thumbnail:hover {
+  background: var(--color-hover);
+}
+
+.thumbnail-image {
+  width: 80px;
+  height: 80px;
+  object-fit: cover;
+  border-radius: 8px;
+  margin-right: 15px;
+}
+
+.thumbnail-name {
+  flex: 1;
+  color: var(--color-text);
+  font-size: 14px;
+}
+
+.thumbnail button {
+  background: var(--color-danger);
+  color: var(--color-text);
+  border: none;
+  border-radius: 50%;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: opacity 0.3s ease;
+}
+
+.thumbnail button:hover {
+  opacity: 0.8;
+}
+
+/* Шапка (с кнопками фильтров/очистки/загрузки) */
+.mini_header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.mini_header h3 {
+  margin: 0;
+  color: var(--color-text);
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.functions {
+  display: flex;
+  gap: 10px;
+}
+
+.functions button {
+  padding: 8px 16px;
+  border-radius: var(--radius-base);
+  border: none;
+  background: var(--color-surface-alt);
+  color: var(--color-text);
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+}
+
+.functions button:hover {
+  background: var(--color-hover);
+}
+
+/* Зона Drag'n'Drop */
+.drag-drop-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 120px;
+  width: 98%;
+  margin: 0 auto;
+  margin-bottom: 10px;
+  border: 2px dashed var(--color-border);
+  border-radius: var(--radius-base);
+  cursor: pointer;
+  position: relative;
+  text-align: center;
+  transition: all 0.3s ease;
+}
+
+.drag-drop-container.dragging {
+  border-color: var(--color-primary);
+  background-color: rgba(255, 255, 255, 0.05);
+  transform: scale(1.02);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.drag-drop-container p {
+  font-size: 16px;
+  color: var(--color-text);
+  pointer-events: none;
+  margin: 0 20px;
+  transition: color 0.3s ease;
+}
+
+.drag-drop-container.dragging p {
+  color: var(--color-primary);
+}
+
+@keyframes pulse {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.05);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.drag-drop-container.dragging {
+  animation: pulse 1.5s infinite;
+}
+
+/* Кнопки, инпуты, прочее можно дополнительно улучшить */
+button {
+  font-size: 14px;
+  line-height: 1.2;
+}
+
+/* ============================= */
+/*    Конец uploadOrtho.css     */
+/* ============================= */

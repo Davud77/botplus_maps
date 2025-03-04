@@ -13,6 +13,8 @@ interface FileStatuses {
 
 type FilterType = 'all' | 'success' | 'failed' | 'selected';
 
+const API_URL = 'https://api.botplus.ru';
+
 const UploadPano: React.FC = () => {
   const [files, setFiles] = useState<File[]>([]);
   const [tags, setTags] = useState<string[]>([]);
@@ -69,7 +71,7 @@ const UploadPano: React.FC = () => {
     formData.append("tags", tags.join(', '));
 
     try {
-      const response = await fetch('http://localhost:5080/upload', {
+      const response = await fetch(`${API_URL}/upload`, {
         method: 'POST',
         body: formData,
       });

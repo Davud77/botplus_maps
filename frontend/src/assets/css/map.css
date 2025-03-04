@@ -1,3 +1,7 @@
+/* ============================= */
+/*           map.css            */
+/* ============================= */
+
 .MapContainer {
   position: absolute;
   height: 100vh;
@@ -7,16 +11,13 @@
 
 .selected-marker-info {
   position: absolute;
-  top: 0;
-  z-index: 900;
-  box-shadow: 0 4px 8px rgba(0,0,0,0.5);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  height: 50%;
-  transition: height 0.1s ease-in-out;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background-color: var(--color-surface);
+  transition: height var(--transition-fast);
+  z-index: 1000;
+  overflow: hidden;
 }
 
 .MapContainerCanvas {
@@ -29,161 +30,468 @@
   align-items: center;
   justify-content: center;
   width: 100%;
-  transition: height 0.1s ease-in-out;
+  transition: height var(--transition-fast) ease-in-out;
+  background-color: var(--color-surface);
 }
 
-.search-container {
-  position: absolute;
-  top: 80px;
-  left: 14px;
-  background-color: rgb(0, 0, 0);
-  padding: 4px;
+/* Лого */
+.logo {
   z-index: 1000;
-  display: flex;
-  align-items: center;
-  transition: width 0.3s ease-in-out;
+}
+.logo-image {
   width: 40px;
-  border-radius: 5px;
-}
-
-.search-container.expanded {
-  width: 300px;
-  border-radius: 4px;
-}
-
-.search-input {
-  padding: 4px;
-  font-size: 16px;
-  width: 0;
-  opacity: 0;
-  transition: width 0.3s ease-in-out, opacity 0.3s ease-in-out;
-}
-
-.search-container.expanded .search-input {
-  width: 250px;
-  opacity: 1;
-  margin: 4px;
-}
-
-.search-button {
-  padding: 4px;
-  border: none;
-  background: none;
-  cursor: pointer;
-  font-size: 14px;
-}
-
-.context-menu {
-  position: absolute;
-  z-index: 1000;
-}
-
-.pointinfo {
-  position: fixed;
-  top: 80px;
-  right: 14px;
-  z-index: 1000;
-  background-color: rgb(0, 0, 0);
-  padding: 10px;
-  cursor: pointer;
-  border-radius: 5px;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
+/* "first-box" около лого, где поиск и т.д. */
+.first-box {
+  display: flex;
+  margin: 0 10px;
+  z-index: 1000;
+  border-radius: var(--radius-base);
+  background-color: var(--color-surface);
+  align-items: center;
+  height: 45px; /* Выравниваем высоту с .map-buttons */
+}
+
+/* Кнопки, которые справа/слева от карты */
+.map-buttons {
+  height: 45px;
+  position: relative;
+  z-index: 1002;
+  border-radius: var(--radius-base);
+  background-color: var(--color-surface);
+  display: flex;
+  margin: 0 10px;
+  padding: 0 5px;
+  align-items: center;
+}
+
+.layers-button {
+  padding: 8px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--color-text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px; /* Фиксируем ширину кнопки */
+  height: 40px; /* Фиксируем высоту кнопки */
+  border-radius: var(--radius-base);
+  transition: background-color var(--transition-fast);
+}
+
+.layers-button:hover {
+  background-color: var(--color-hover);
+}
+
+.layers-button:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.layers-button:focus {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.layers-button img {
+  width: 24px;
+  height: 24px;
+  pointer-events: none;
+}
+
+.layers-button .ortho-icon {
+  filter: invert(1); /* Инвертируем только иконку ортофото */
+}
+
+/* Поисковый контейнер */
+.search-container {
+  position: relative;
+  background-color: var(--color-surface);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  border-radius: var(--radius-base);
+  transition: width var(--transition-fast) ease-in-out;
+  padding: 0;
+  height: 45px !important; /* Добавляем !important для приоритета */
+}
+.search-container.expanded {
+  width: 300px;
+}
+.search-input {
+  padding: 12px 16px;
+  font-size: 16px;
+  width: 250px;
+  color: var(--color-text);
+  background-color: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-base); /* Используем базовый радиус */
+  transition: all var(--transition-fast);
+  height: 100%;
+  line-height: 1.5;
+  outline: none;
+}
+.search-input:focus {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px rgba(33, 150, 243, 0.2); /* Тонкая тень при фокусе */
+}
+.search-input::placeholder {
+  color: var(--color-text-light);
+  opacity: 0.7;
+}
+.search-button {
+  padding: 8px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--color-text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px; /* Фиксируем ширину кнопки */
+  height: 40px; /* Фиксируем высоту кнопки */
+}
+
+/* Заголовок карты */
+.map-header {
+  width: 100%;
+  display: flex;
+  margin: 15px 0px;
+  position: absolute;
+  justify-content: space-between;
+  align-items: center;
+  flex-direction: row;
+}
+
+/* Блок для кнопок, иконок (например, профиль, закрыть панораму и т.д.) */
+.end-box {
+  display: flex;
+  align-items: center;
+  margin-right: 15px;
+}
+
+/* layers-menu, чтобы оно не занимало всю страницу */
+.layers-menu {
+  display: none;
+  position: fixed;
+  top: 80px; /* Увеличиваем отступ сверху */
+  right: 20px;
+  background: rgba(32, 33, 36, 0.95);
+  border-radius: var(--radius-base);
+  padding: 20px;
+  width: 295px;
+  color: #fff;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  backdrop-filter: blur(10px);
+  z-index: 1000;
+}
+.layers-menu.visible {
+  display: block; /* Показываем при нажатии на кнопку */
+}
+
 .layers-header {
-  padding-top: 50px;
   display: flex;
   justify-content: space-between;
   align-items: center;
+  margin-bottom: 25px;
 }
 
 .layers-title {
   margin: 0;
-  color: #ffffff;
+  font-size: 18px;
+  font-weight: 500;
 }
 
 .close-button {
   background: none;
   border: none;
   cursor: pointer;
-  padding: 0;
+  padding: 8px;
+  transition: opacity var(--transition-fast);
+}
+.close-button:hover {
+  opacity: 0.8;
 }
 
-.layers-button {
-  position: absolute;
-  top: 80px;
-  right: 14px;
-  z-index: 1000;
-  background-color: rgb(0, 0, 0);
-  padding: 10px;
-  cursor: pointer;
-  border-radius: 5px;
-}
-
-.layers-menu {
-  position: fixed;
-  top: 0;
-  left: -500px;
-  width: 320px;
-  height: 100%;
-  background-color: rgb(0, 0, 0);
-  border-right: 1px solid #464646;
-  padding: 20px;
-  box-shadow: 2px 0 5px rgba(0, 0, 0, 0.1);
-  transition: left 0.3s ease;
-  z-index: 1000;
-}
-
-.layers-menu.visible {
-  left: 0;
-}
-
+/* Сетка для списка слоёв/preview */
 .layers-grid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-top: 20px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
 }
-
 .layer-item {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
+  position: relative;
+  border: 1px solid #444;
+  border-radius: 4px;
+  overflow: hidden;
   cursor: pointer;
+  transition: transform var(--transition-fast);
 }
-
+.layer-item:hover {
+  transform: scale(1.03);
+}
 .layer-image-container {
   position: relative;
-  width: 100px;
-  height: 100px;
-  border-radius: 8px;
+  width: 100%;
+  height: 80px;
   overflow: hidden;
 }
-
 .layer-image {
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
-
 .layer-gradient {
   position: absolute;
-  top: 0;
+  bottom: 0;
   left: 0;
-  width: 100%;
-  height: 100%;
-  background: linear-gradient(to bottom, rgba(0, 0, 0, 0) 0%, rgba(0, 0, 0, 0.7) 100%);
-  pointer-events: none;
+  right: 0;
+  height: 40%;
+  background: linear-gradient(transparent, rgba(0,0,0,0.7));
 }
-
 .layer-name {
   position: absolute;
-  bottom: 5px;
-  left: 5px;
+  bottom: 4px;
+  left: 8px;
   color: #fff;
   font-size: 14px;
-  font-weight: bold;
-  text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.7);
+}
+
+/* Панель слоёв в правом верхнем углу (ортопланы, и т.п.) */
+.panel-section {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.info-card {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-base);
+  padding: 16px;
+  transition: background var(--transition-fast);
+}
+.info-card:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.content-wrapper {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.select-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 400;
+  color: #9aa0a6;
+}
+
+.count-badge {
+  background: #8ab4f8;
+  color: #202124;
+  padding: 4px 10px;
+  border-radius: 16px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.action-button {
+  width: 100%;
+  background: rgba(138, 180, 248, 0.1);
+  border: 1px solid #8ab4f8;
+  color: #8ab4f8;
+  padding: 8px 16px;
+  border-radius: var(--radius-base);
+  cursor: pointer;
+  font-size: 13px;
+  transition: all var(--transition-fast);
+}
+.action-button:hover {
+  background: rgba(138, 180, 248, 0.2);
+  border-color: #aecbfa;
+}
+
+.pano-buttons {
+  display: flex;
+  gap: 8px;
+  background-color: var(--color-surface);
+  border-radius: var(--radius-base);
+  padding: 8px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+
+.pano-button {
+  background-color: var(--color-surface-alt);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-base);
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+}
+
+.pano-button:hover {
+  background-color: var(--color-hover);
+}
+
+.map-profile-button {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  z-index: 1000;
+}
+
+/* Кнопка переключения ортофото */
+.ortho-toggle-button {
+  position: relative; /* Меняем на relative для встраивания в ряд */
+  z-index: 1000;
+  background-color: var(--color-surface-alt);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-base);
+  padding: 8px 16px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all var(--transition-fast);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  margin-left: 8px; /* Добавляем отступ от других кнопок */
+}
+
+.ortho-toggle-button:hover {
+  background-color: var(--color-hover);
+  border-color: var(--color-primary);
+}
+
+
+.ortho-cards-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ortho-panel-content {
+  flex: 1;
+  overflow-y: auto;
+  padding-right: 8px;
+}
+
+.ortho-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background-color: var(--color-surface-alt);
+  border-radius: var(--radius-base);
+  margin-bottom: 8px;
+}
+
+.ortho-card-image-wrapper {
+  width: 100%;
+  height: 120px;
+  overflow: hidden;
+  border-radius: var(--radius-base);
+}
+
+.ortho-card-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.ortho-panel h3 {
+  margin-bottom: 12px;
+  font-size: 16px;
+  color: var(--color-text);
+}
+
+/* Элементы внутри панели */
+.ortho-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px;
+  margin-bottom: 8px;
+  background-color: var(--color-surface-alt);
+  border-radius: var(--radius-base);
+  transition: background-color var(--transition-fast);
+}
+
+.ortho-item:hover {
+  background-color: var(--color-hover);
+}
+
+/* Кнопка удаления */
+.ortho-item button {
+  background-color: var(--color-danger);
+  color: var(--color-text);
+  border: none;
+  border-radius: var(--radius-base);
+  padding: 6px 12px;
+  cursor: pointer;
+  transition: opacity var(--transition-fast);
+}
+
+.ortho-item button:hover {
+  opacity: 0.8;
+}
+
+/* ============================= */
+/*       Конец map.css          */
+/* ============================= */
+
+.selection-panel {
+  position: absolute;
+  top: 80px; /* Увеличиваем отступ сверху */
+  right: 20px;
+  background-color: var(--color-surface);
+  border-radius: var(--radius-base);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+  padding: 12px;
+  z-index: 1001;
+}
+
+.select-button {
+  background-color: var(--color-surface-alt);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-base);
+  padding: 8px 16px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.select-button:hover {
+  background-color: var(--color-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+}
+
+.select-button:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.select-button:focus {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.select-button img {
+  width: 24px;
+  height: 24px;
+  pointer-events: none;
 }

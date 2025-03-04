@@ -1,8 +1,7 @@
-// src/components/LoginPage.tsx
 import React, { useState, FormEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { login as loginApi } from '../utils/api';
+import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
+import axios from 'axios';
 
 const LoginPage: React.FC = () => {
   const [username, setUsername] = useState<string>('');
@@ -16,14 +15,18 @@ const LoginPage: React.FC = () => {
     setError('');
 
     try {
-      const data = await loginApi(username, password);
-      if (data.status === 'success') {
+      const response = await axios.post('https://api.botplus.ru/login', {
+        username,
+        password,
+      });
+      if (response.data.status === 'success') {
         login();
         navigate('/');
       } else {
-        setError(data.message || 'Неверное имя пользователя или пароль');
+        setError(response.data.message || 'Неверное имя пользователя или пароль');
       }
     } catch (error: any) {
+      console.error('Ошибка подключения:', error);
       setError('Ошибка при подключении к серверу: ' + error.message);
     }
   };
@@ -42,7 +45,7 @@ const LoginPage: React.FC = () => {
               className="login-field"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              placeholder="username"
+              placeholder="Имя пользователя"
               id="login-name"
             />
             <label className="login-field-icon fui-user" htmlFor="login-name"></label>
@@ -54,7 +57,7 @@ const LoginPage: React.FC = () => {
               className="login-field"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="password"
+              placeholder="Пароль"
               id="login-pass"
             />
             <label className="login-field-icon fui-lock" htmlFor="login-pass"></label>
@@ -62,8 +65,18 @@ const LoginPage: React.FC = () => {
 
           {error && <div className="error-message">{error}</div>}
 
-          <button type="submit" className="button buttonlogin btn-primary btn-large btn-block">Вход</button>
-          <a className="login-link" href="https://t.me/localdisk_d">Забыли пароль?</a>
+          <button type="submit" className="buttonlogin btn-primary btn-large btn-block">
+            Войти
+          </button>
+          <a className="login-link" href="https://t.me/localdisk_d">
+            Забыли пароль?
+          </a>
+          <p className="register-prompt">
+            Нет аккаунта?{' '}
+            <Link to="/register" className="register-link">
+              Регистрация
+            </Link>
+          </p>
         </form>
       </div>
     </div>

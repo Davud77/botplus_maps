@@ -1,3 +1,7 @@
+/* ============================= */
+/*         upload.css           */
+/* ============================= */
+
 .tag-container {
   margin: 30px;
 }
@@ -6,39 +10,49 @@
   margin: 30px;
 }
 
+/* Превью с панорамами */
 .mini_pano, .mini_log {
   display: flex;
-  height: 55vh;
-  overflow-y: auto;
   flex-direction: column;
   padding: 0 25px;
-  border-radius: 5px;
+  border-radius: var(--radius-base);
   position: relative;
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  overflow-y: auto;
 }
 
-.mini_pano::-webkit-scrollbar, .mini_log::-webkit-scrollbar {
-  width: 8px;
-}
-
-.mini_pano::-webkit-scrollbar-thumb, .mini_log::-webkit-scrollbar-thumb {
-  background-color: #888;
-  border-radius: 4px;
-}
-
-.mini_pano::-webkit-scrollbar-thumb:hover, .mini_log::-webkit-scrollbar-thumb:hover {
-  background-color: #555;
-}
-
-.mini_pano::-webkit-scrollbar-track, .mini_log::-webkit-scrollbar-track {
-  background: #f1f1f1;
+.mini_pano {
+  height: 55vh;
+  background-color: var(--color-surface);
 }
 
 .mini_log {
   height: 15vh;
-  overflow-y: auto;
   margin-top: 20px;
-  border-top: 1px solid #ccc;
+  border-top: 1px solid var(--color-border);
   padding-top: 10px;
+}
+
+.mini_pano::-webkit-scrollbar,
+.mini_log::-webkit-scrollbar {
+  width: 8px;
+}
+
+.mini_pano::-webkit-scrollbar-thumb,
+.mini_log::-webkit-scrollbar-thumb {
+  background-color: var(--color-primary);
+  border-radius: 4px;
+}
+
+.mini_pano::-webkit-scrollbar-thumb:hover,
+.mini_log::-webkit-scrollbar-thumb:hover {
+  background-color: var(--color-primary-dark);
+}
+
+.mini_pano::-webkit-scrollbar-track,
+.mini_log::-webkit-scrollbar-track {
+  background: var(--color-surface-alt);
 }
 
 .mini_log ul {
@@ -48,28 +62,29 @@
 
 .mini_log li {
   margin-bottom: 5px;
-  color: #333;
+  color: var(--color-text);
 }
 
 .thumbnail {
   display: flex;
   margin: 5px;
   text-align: center;
-  border: 1px solid #ccc;
-  border-radius: 5px;
-  background-color: white;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-base);
+  background-color: var(--color-surface-alt);
+  transition: background-color var(--transition-fast);
 }
 
 .thumbnail.uploading {
-  background-color: #87d1ff36;
+  background-color: rgba(135, 209, 255, 0.1);
 }
 
 .thumbnail.success {
-  background-color: #00ff4836;
+  background-color: rgba(0, 255, 72, 0.1);
 }
 
 .thumbnail.failed {
-  background-color: #ff000036;
+  background-color: rgba(255, 0, 0, 0.1);
 }
 
 .thumbnail-image {
@@ -77,35 +92,38 @@
   object-fit: cover;
   border-radius: 10px;
   padding: 5px;
+  background-color: var(--color-surface-alt);
 }
 
-.thumbnail-name {
-  margin: 5px;
-  font-size: 14px;
-  color: #333;
+.thumbnail-name, .thumbnail-log {
+  color: var(--color-text);
 }
 
 .input-tags {
   padding: 10px;
   margin: 5px;
   border: none;
-  border-radius: 5px;
+  border-radius: var(--radius-base);
   font-size: 16px;
   height: 6vh;
   outline: none;
   flex-grow: 1;
+  background-color: var(--color-surface-alt);
+  color: var(--color-text);
 }
 
 .centered-container {
-  position: absolute;
+  position: relative;
   top: 80px;
   text-align: center;
   width: 100%;
+  background-color: var(--color-surface);
 }
 
 .button-container {
   display: flex;
-  justify-content: center;
+  justify-content: space-evenly;
+  width: 100%;
   margin-top: 20px;
 }
 
@@ -114,13 +132,13 @@
   flex-wrap: wrap;
   align-items: center;
   padding: 5px;
-  border: 1px solid #ccc;
-  border-radius: 5px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-base);
 }
 
 .tag-item {
-  background-color: #000000;
-  border-radius: 5px;
+  background-color: var(--color-primary);
+  border-radius: var(--radius-base);
   padding: 5px 1px 5px 5px;
   margin: 5px;
   display: flex;
@@ -133,24 +151,25 @@
   margin-left: 5px;
   cursor: pointer;
   font-weight: bold;
-  color: #ffffff;
+  color: var(--color-text);
 }
 
 span {
-  color: #ffffff;
+  color: var(--color-text);
 }
 
 .mini_pano .mini_header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  background-color: #ffffff;
+  background-color: var(--color-surface);
   position: sticky;
   top: 0;
   z-index: 10;
 }
 
-.filters button, .functions button {
+.filters button,
+.functions button {
   margin: 5px;
 }
 
@@ -160,17 +179,18 @@ span {
   align-items: center;
   height: 100%;
   width: 98%;
-  border: 2px dashed #707070;
-  border-radius: 5px;
+  border: 2px dashed var(--color-border);
+  border-radius: var(--radius-base);
   cursor: pointer;
   margin: 0 auto;
+  background-color: var(--color-surface-alt);
 }
 
 .drag-drop-container p {
   font-size: 20px;
-  color: #707070;
+  color: var(--color-text);
 }
 
 .mini_pano.dragging .drag-drop-container {
-  border-color: #87d1ff36;
+  border-color: var(--color-primary);
 }

@@ -1,5 +1,3 @@
-// src/components/maps/MapContainerCanvas.tsx
-
 import React, { useState, useRef, useEffect } from 'react';
 import {
   MapContainer,
@@ -12,33 +10,35 @@ import {
 import MarkerClusterGroup from 'react-leaflet-cluster';
 import { Marker } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
+
+// <-- Если Search.tsx лежит в той же папке "maps"
 import Search from './Search';
-import BaseLayer from './baseLayer/baseLayer';
+
+// <-- Если BaseLayer.tsx лежит в папке "maps/baseLayer"
+import BaseLayer from './baseLayer/BaseLayer';
+
+// <-- Если ContextMenu.tsx лежит в папке "maps"
 import {
   ContextMenu,
   MapEventHandlers,
-  handleRightClick,
   handleCopyCoordinates,
 } from './ContextMenu';
+
+// <-- Если icons лежит в src/icons
 import { defaultIcon, activeIcon } from '../icons';
-import PanoLayer from './panoLayer/panoLayer';
-import OrthoLayer from './orthoLayer/orthoLayer';
+
+// <-- Если PanoLayer.tsx лежит в "maps/panoLayer"
+import PanoLayer from './panoLayer/PanoLayer';
+
+// <-- Если OrthoLayer.tsx лежит в "maps/orthoLayer"
+import OrthoLayer, { OrthoImageType } from './orthoLayer/OrthoLayer';
+
 import { Map as LeafletMap } from 'leaflet';
 
 interface MarkerType {
   id: string;
   lat: number;
   lng: number;
-}
-
-interface OrthoImageType {
-  bounds: {
-    north: number;
-    south: number;
-    east: number;
-    west: number;
-  };
-  url: string;
 }
 
 interface MapContainerCanvasProps {
@@ -71,9 +71,7 @@ const MapContainerCanvas: React.FC<MapContainerCanvasProps> = ({
 
   const mapRef = useRef<LeafletMap | null>(null);
 
-  const copyCoordinatesHandler = () => handleCopyCoordinates(contextMenu);
-
-  // Компонент для установки mapRef.current
+  // Хук, чтобы сохранить ref на карту
   const SetMapRef = () => {
     const map = useMap();
     useEffect(() => {
@@ -82,7 +80,9 @@ const MapContainerCanvas: React.FC<MapContainerCanvasProps> = ({
     return null;
   };
 
-  // Обработчик поиска координат
+  const copyCoordinatesHandler = () => handleCopyCoordinates(contextMenu);
+
+  // Координаты из строки поиска
   const handleSearch = (searchInput: string) => {
     const coords = searchInput.split(',').map((coord) => parseFloat(coord.trim()));
     if (coords.length === 2 && !isNaN(coords[0]) && !isNaN(coords[1])) {
@@ -95,24 +95,24 @@ const MapContainerCanvas: React.FC<MapContainerCanvasProps> = ({
     }
   };
 
-  // Обработчик изменения базового слоя карты
+  // Переключение базового слоя
   const handleLayerChange = (layerUrl: string) => {
     setBaseLayer(layerUrl);
   };
 
-  // Переключатель слоя панорам
+  // Показ/скрытие слоя панорам
   const togglePanoLayer = (newMarkers: MarkerType[]) => {
     setShowPanoLayer(!showPanoLayer);
     setMarkers(newMarkers);
   };
 
-  // Переключатель слоя ортофотопланов
+  // Показ/скрытие слоя ортофото
   const toggleOrthoLayer = (newOrthoImages: OrthoImageType[]) => {
     setShowOrthoLayer(!showOrthoLayer);
     setOrthoImages(newOrthoImages);
   };
 
-  // Обработчик кликов на карту
+  // Закрыть поисковое окошко по клику на карту
   const MapClickHandler = () => {
     useMapEvents({
       click: () => {
@@ -137,10 +137,11 @@ const MapContainerCanvas: React.FC<MapContainerCanvasProps> = ({
         zoom={5}
         style={{ height: '100%', width: '100%' }}
         zoomControl={false}
-        maxZoom={22}
+        maxZoom={20}
       >
         <SetMapRef />
-        <TileLayer url={baseLayer} maxZoom={22} />
+        <TileLayer url={baseLayer} maxZoom={20} />
+
         {showPanoLayer && (
           <MarkerClusterGroup disableClusteringAtZoom={18} maxClusterRadius={50}>
             {markers.map((marker, index) => (
@@ -159,30 +160,37 @@ const MapContainerCanvas: React.FC<MapContainerCanvasProps> = ({
             ))}
           </MarkerClusterGroup>
         )}
+
         {showOrthoLayer &&
-          orthoImages.map((image, index) => (
-            <ImageOverlay
-              key={index}
-              bounds={[
-                [image.bounds.south, image.bounds.west],
-                [image.bounds.north, image.bounds.east],
-              ]}
-              url={image.url}
-            />
-          ))}
+          orthoImages.map((image, idx) => {
+            if (!image.bounds) return null;
+            const southWest: [number, number] = [image.bounds.south, image.bounds.west];
+            const northEast: [number, number] = [image.bounds.north, image.bounds.east];
+            return (
+              <ImageOverlay
+                key={idx}
+                bounds={[southWest, northEast]}
+                url={image.url}
+              />
+            );
+          })}
+
         <ZoomControl position="bottomright" />
         <MapClickHandler />
         <MapEventHandlers setContextMenu={setContextMenu} />
       </MapContainer>
+
       <ContextMenu
         contextMenu={contextMenu}
         handleCopyCoordinates={copyCoordinatesHandler}
       />
+
       <Search
         handleSearch={handleSearch}
         isExpanded={isSearchExpanded}
         setIsExpanded={setIsSearchExpanded}
       />
+
       <BaseLayer handleLayerChange={handleLayerChange} />
       <PanoLayer togglePanoLayer={togglePanoLayer} />
       <OrthoLayer toggleOrthoLayer={toggleOrthoLayer} />

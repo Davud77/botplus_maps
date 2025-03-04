@@ -1,5 +1,5 @@
 // src/utils/api.ts
-const API_URL = 'http://localhost:5080';
+const API_URL = 'http://localhost:5000';
 
 interface LoginResponse {
   status: string;
