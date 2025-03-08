@@ -21,6 +21,7 @@ import {
 } from './ContextMenu';
 import { defaultIcon, activeIcon } from '../icons';
 import PanoLayer from './panoLayer/PanoLayer';
+import PanoLayerButton from './panoLayer/PanoLayerButton';
 import OrthoLayer, { OrthoImageType } from './orthoLayer/OrthoLayer';
 import OrthoPanel from './orthoLayer/OrthoPanel';
 import SelectionPanel from './panoLayer/SelectionPanel';
@@ -64,6 +65,7 @@ const MapPage: React.FC = () => {
 
   // Отображать ли слой панорам
   const [showPanoLayer, setShowPanoLayer] = useState<boolean>(false);
+  const [isLoadingMarkers, setIsLoadingMarkers] = useState<boolean>(false);
 
   // Ортофото
   const [orthoImages, setOrthoImages] = useState<OrthoImageType[]>([]);
@@ -141,14 +143,8 @@ const MapPage: React.FC = () => {
   };
 
   // Включение/выключение слоя панорам
-  const togglePanoLayer = (newMarkers: MarkerType[]) => {
-    setShowPanoLayer((prev) => {
-      const newState = !prev;
-      // Показывать ли кнопку добавления панорам
-      setShowAddPanoramaButton(newState);
-      return newState;
-    });
-    setMarkers(newMarkers);
+  const handlePanoLayerToggle = () => {
+    setShowPanoLayer(prev => !prev);
   };
 
   // Включение/выключение ортофото
@@ -289,7 +285,10 @@ const MapPage: React.FC = () => {
 
               <div className="map-buttons">
                 <BaseLayer handleLayerChange={handleLayerChange} />
-                <PanoLayer togglePanoLayer={togglePanoLayer} />
+                <PanoLayerButton 
+                  handlePanoLayerToggle={handlePanoLayerToggle}
+                  isLoading={isLoadingMarkers}
+                />
                 <button
                   className="layers-button"
                   onClick={() => handleToggleOrthoLayer(orthoImages)}
@@ -342,16 +341,10 @@ const MapPage: React.FC = () => {
         <CustomZoomControl />
 
         {showPanoLayer && (
-          <MarkerClusterGroup disableClusteringAtZoom={18} maxClusterRadius={50}>
-            {markers.map((marker, index) => (
-              <Marker
-                position={[marker.lat, marker.lng]}
-                key={`${marker.lat}-${marker.lng}-${index}`}
-                icon={selectedMarker === marker.id ? activeIcon : defaultIcon}
-                eventHandlers={{ click: () => handleMarkerClick(marker) }}
-              />
-            ))}
-          </MarkerClusterGroup>
+          <PanoLayer
+            selectedMarker={selectedMarker}
+            onMarkerClick={handleMarkerClick}
+          />
         )}
 
         {showOrthoLayer &&
