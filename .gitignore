@@ -1,0 +1,33 @@
+# OS / tools
+.DS_Store
+*.log
+*.tmp
+*.swp
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+.env
+.env.*
+*.sqlite*
+*.db
+
+# Node / React
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-lock.yaml
+dist/
+build/
+
+# CRA/Vite artifacts
+public/build/
+public/assets/
+
+# App data
+uploads/
+data/

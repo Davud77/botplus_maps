@@ -1,23 +1,23 @@
 services:
-  frontend:
+  app:
     build:
-      context: ./frontend
+      context: .
       dockerfile: Dockerfile
+    environment:
+      SECRET_KEY: ${SECRET_KEY:-change-me}
+      CLIENT_ORIGINS: ${CLIENT_ORIGINS:-http://localhost:5580}
+      SESSION_COOKIE_DOMAIN: ${SESSION_COOKIE_DOMAIN:-}
+      COOKIE_SECURE: ${COOKIE_SECURE:-0}
+      COOKIE_SAMESITE: ${COOKIE_SAMESITE:-Lax}
+      DB_FILE: /app/data/botplus.db
     volumes:
-      - ./frontend/:/app
-    ports:
-      - "3080:3000"
-    depends_on:
-      - backend
-    restart: always
-
-
-  backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    volumes:
-      - ./backend/uploads:/app/uploads
+      - ./data:/app/data
+      - ./server/uploads:/app/server/uploads
     ports:
       - "5580:5000"
-    restart: always
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:5000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
