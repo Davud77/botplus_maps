@@ -3,7 +3,7 @@ import React, { FC, useEffect, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import Header from './Header';
 import { useAuth } from '../hooks/useAuth';
-import '../assets/css/profile.css';
+
 
 interface PanoItem {
   id: number;

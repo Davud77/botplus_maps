@@ -8,7 +8,7 @@ import ProfilePage from './components/ProfilePage';
 import UploadOrtho from './components/UploadOrtho';
 import UploadPano from './components/UploadPano';
 import { useAuth } from './hooks/useAuth';
-import './assets/css/styles.css';
+import './index.css';
 
 const App: React.FC = () => {
   const { isAuthenticated, isLoading } = useAuth();
