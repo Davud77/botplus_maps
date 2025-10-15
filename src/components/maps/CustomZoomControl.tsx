@@ -1,7 +1,6 @@
 import React, { useCallback } from 'react';
 import { useMap } from 'react-leaflet';
 import type { Map as LeafletMap } from 'leaflet';
-import '../../assets/css/ZoomControl.css';
 
 const CustomZoomControl: React.FC = () => {
   const map = useMap() as LeafletMap;

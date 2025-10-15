@@ -1,6 +1,6 @@
 import React, { useState, useRef, DragEvent } from 'react';
 import axios from 'axios';
-import '../assets/css/uploadOrtho.css';
+
 
 interface FileItem {
   file: File;

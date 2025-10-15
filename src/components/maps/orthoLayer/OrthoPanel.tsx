@@ -1,6 +1,6 @@
 import React from 'react';
 import { OrthoImageType } from './OrthoLayer';
-import '../../../assets/css/orthoPanel.css';
+
 
 interface OrthoPanelProps {
   onClose: () => void;
