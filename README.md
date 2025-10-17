@@ -430,3 +430,4 @@ gunicorn --workers 3 --bind 0.0.0.0:5000 'server.app:create_app()'
 
 ```
 ```
+USER, PASS = "newadmin", "New#Pass123"

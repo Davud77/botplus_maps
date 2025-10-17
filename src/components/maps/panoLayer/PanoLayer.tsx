@@ -1,3 +1,5 @@
+// src/components/maps/panoLayer/PanoLayer.tsx
+
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useMap } from 'react-leaflet';
 import debounce from 'lodash/debounce';
@@ -96,21 +98,32 @@ const PanoLayer: React.FC<PanoLayerProps> = ({
 
       setIsLoading(true);
       try {
-        const response = await fetch(
-          `https://api.botplus.ru/panoramas?north=${north}&south=${south}&east=${east}&west=${west}&limit=${MAX_MARKERS_PER_REQUEST}`,
-        );
+        // Ходим ТОЛЬКО на наш бэкенд (тот же origin), чтобы не ловить CORS
+        const url = `/api/panoramas?north=${north}&south=${south}&east=${east}&west=${west}&limit=${MAX_MARKERS_PER_REQUEST}`;
+        const response = await fetch(url, {
+          method: 'GET',
+          credentials: 'include', // важно: передавать куки
+          headers: { Accept: 'application/json' },
+        });
 
         if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
+          let body: any = undefined;
+          try {
+            body = await response.text();
+          } catch {
+            /* noop */
+          }
+          throw new Error(`HTTP ${response.status} ${response.statusText}. ${body || ''}`.trim());
         }
 
         const data = await response.json();
-        if (!Array.isArray(data)) {
+        const listRaw: any[] = Array.isArray(data) ? data : data?.items ?? data?.data ?? [];
+        if (!Array.isArray(listRaw)) {
           console.error('Invalid data format received:', data);
           return;
         }
 
-        const newMarkers = data
+        const newMarkers = listRaw
           .filter(
             (item: any): item is PanoramaItem =>
               item &&
@@ -119,7 +132,7 @@ const PanoLayer: React.FC<PanoLayerProps> = ({
               typeof item.longitude === 'number',
           )
           .map((item) => ({
-            id: item.id.toString(),
+            id: String(item.id),
             lat: item.latitude,
             lng: item.longitude,
           }));
@@ -166,12 +179,14 @@ const PanoLayer: React.FC<PanoLayerProps> = ({
     if (!map) return;
 
     const handleMoveEnd = () => {
-      const bounds = map.getBounds();
-      if (bounds) debouncedFetchMarkers(bounds);
+      const b = map.getBounds();
+      if (b) debouncedFetchMarkers(b);
     };
 
     const handleZoomEnd = () => {
       updateVisibleMarkers();
+      const b = map.getBounds();
+      if (b) debouncedFetchMarkers(b);
     };
 
     map.on('moveend', handleMoveEnd);

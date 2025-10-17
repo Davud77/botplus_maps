@@ -1,115 +1,118 @@
+// src/components/maps/panoLayer/PanoramaViewer.tsx
 import React, { useRef, useEffect, useState } from 'react';
 import Marzipano from 'marzipano';
 
 interface PanoramaViewerProps {
-  markerId: string;      // Обратите внимание, что теперь точно string, без null
+  markerId: string;      // ID точки (строка)
   isExpanded: boolean;   // если нужно регулировать высоту
 }
 
 const PanoramaViewer: React.FC<PanoramaViewerProps> = ({ markerId, isExpanded }) => {
   const viewerRef = useRef<HTMLDivElement | null>(null);
   const viewerInstanceRef = useRef<any>(null);
-  // Если нужно показывать блок с информацией, включаем флажок:
+
   const [showPointInfo] = useState<boolean>(false);
   const [pointData, setPointData] = useState<any>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   const toggleFullscreen = () => {
-    if (viewerRef.current) {
-      if (!isFullscreen) {
-        if (viewerRef.current.requestFullscreen) {
-          viewerRef.current.requestFullscreen();
-        }
-        setIsFullscreen(true);
-      } else {
-        if (document.exitFullscreen) {
-          document.exitFullscreen();
-        }
-        setIsFullscreen(false);
-      }
+    if (!viewerRef.current) return;
+    if (!isFullscreen) {
+      viewerRef.current.requestFullscreen?.();
+      setIsFullscreen(true);
+    } else {
+      document.exitFullscreen?.();
+      setIsFullscreen(false);
     }
   };
 
   useEffect(() => {
-    const handleFullscreenChange = () => {
-      setIsFullscreen(!!document.fullscreenElement);
-    };
-
+    const handleFullscreenChange = () => setIsFullscreen(!!document.fullscreenElement);
     document.addEventListener('fullscreenchange', handleFullscreenChange);
-
-    return () => {
-      document.removeEventListener('fullscreenchange', handleFullscreenChange);
-    };
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
   }, []);
 
   useEffect(() => {
     let objectUrl: string | null = null;
     let currentViewer: any = null;
 
-    // Функция инициализации Marzipano
     const initializeViewer = async () => {
       try {
-        // 1. Загружаем информацию о панораме (атрибуты), если требуется
-        const response = await fetch(`https://api.botplus.ru/pano_info/${markerId}`);
-        const data = await response.json();
-        setPointData(data);
+        // 1) Метаданные точки
+        const metaRes = await fetch(`/api/pano_info/${encodeURIComponent(markerId)}`, {
+          method: 'GET',
+          credentials: 'include',
+          headers: { Accept: 'application/json' },
+        });
+        if (!metaRes.ok) {
+          const txt = await metaRes.text().catch(() => '');
+          throw new Error(`Meta HTTP ${metaRes.status} ${metaRes.statusText} ${txt}`);
+        }
+        const meta = await metaRes.json();
+        setPointData(meta);
 
-        // 2. Загружаем само изображение как Blob
-        const fileResponse = await fetch(`https://api.botplus.ru/pano_info/${markerId}/download`);
-        const blob = await fileResponse.blob();
+        // 2) Файл панорамы (Blob)
+        const fileRes = await fetch(`/api/pano_info/${encodeURIComponent(markerId)}/download`, {
+          method: 'GET',
+          credentials: 'include',
+        });
+        if (!fileRes.ok) {
+          const txt = await fileRes.text().catch(() => '');
+          throw new Error(`File HTTP ${fileRes.status} ${fileRes.statusText} ${txt}`);
+        }
+        const blob = await fileRes.blob();
 
-        // 3. Создаём локальный объект-URL из Blob
+        // 3) Локальный объект-URL
         objectUrl = URL.createObjectURL(blob);
 
-        // 4. Если наш div для Marzipano существует, создаём Viewer
+        // 4) Инициализация Marzipano
         if (viewerRef.current) {
           currentViewer = new Marzipano.Viewer(viewerRef.current, {
             stage: { progressive: true },
           });
 
-          // Источник – ссылка на blob (как обычная строка URL)
+          // Источник — локальный blob-url
           const source = Marzipano.ImageUrlSource.fromString(objectUrl);
 
-          // Указываем, что панорама у нас equirect (360x180)
-          // Можно выставить точную ширину, если знаете (например, 8000 px)
+          // Геометрия equirect; ширину можно увеличить, если известно реальное разрешение
           const geometry = new Marzipano.EquirectGeometry([{ width: 4000 }]);
 
-          // Ограничитель обзора, чтоб слишком не "отъезжать"
+          // Ограничитель обзора
           const limiter = Marzipano.RectilinearView.limit.traditional(
             4096,
             (120 * Math.PI) / 180
           );
 
-          // Начальный вид (yaw: Math.PI – это разворот "назад")
+          // Начальный вид
           const view = new Marzipano.RectilinearView({ yaw: Math.PI }, limiter);
 
-          // Создаём сцену
+          // Сцена
           const scene = currentViewer.createScene({
-            source: source,
-            geometry: geometry,
-            view: view,
+            source,
+            geometry,
+            view,
           });
 
-          // Плавно переключаемся на неё
           scene.switchTo({ transitionDuration: 500 });
-
-          // Сохраняем инстанс, чтобы потом удалить при размонтаже
           viewerInstanceRef.current = currentViewer;
         }
-      } catch (error) {
-        console.error('Ошибка при инициализации панорамы:', error);
+      } catch (err) {
+        console.error('Ошибка при инициализации панорамы:', err);
       }
     };
 
-    // Если markerId не пуст, загружаем панораму
     if (markerId) {
       initializeViewer();
     }
 
-    // Очистка при смене или размонтаже
+    // Очистка
     return () => {
       if (currentViewer) {
-        currentViewer.destroy();
+        try {
+          currentViewer.destroy();
+        } catch {
+          /* ignore */
+        }
       }
       if (objectUrl) {
         URL.revokeObjectURL(objectUrl);
@@ -118,12 +121,9 @@ const PanoramaViewer: React.FC<PanoramaViewerProps> = ({ markerId, isExpanded })
   }, [markerId]);
 
   return (
-    <div className="panorama-container">
-      <div
-        ref={viewerRef}
-        className="panorama-viewer"
-      >
-        <button 
+    <div className="panorama-container" style={{ height: isExpanded ? '70vh' : '40vh' }}>
+      <div ref={viewerRef} className="panorama-viewer" style={{ position: 'relative', height: '100%' }}>
+        <button
           onClick={toggleFullscreen}
           style={{
             position: 'absolute',
@@ -140,11 +140,11 @@ const PanoramaViewer: React.FC<PanoramaViewerProps> = ({ markerId, isExpanded })
         >
           {isFullscreen ? 'Свернуть' : 'На весь экран'}
         </button>
-        {/* Если нужно выводить инфу поверх панорамы */}
+
         {showPointInfo && pointData && (
           <div className="point-info-overlay">
-            <h2>{pointData.filename}</h2>
-            {/* ...и т.д. */}
+            <h2>{pointData?.filename}</h2>
+            {/* дополнительные поля при необходимости */}
           </div>
         )}
       </div>

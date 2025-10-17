@@ -1,19 +1,30 @@
+
+
 services:
   app:
     build:
       context: .
       dockerfile: Dockerfile
     environment:
+      TZ: ${TZ:-Europe/Amsterdam}
+      APP_ENV: ${APP_ENV:-production}
+      # Secrets
       SECRET_KEY: ${SECRET_KEY:-change-me}
+      JWT_SECRET: ${JWT_SECRET:-}
+      # CORS / Cookies
       CLIENT_ORIGINS: ${CLIENT_ORIGINS:-http://localhost:5580}
       SESSION_COOKIE_DOMAIN: ${SESSION_COOKIE_DOMAIN:-}
       COOKIE_SECURE: ${COOKIE_SECURE:-0}
       COOKIE_SAMESITE: ${COOKIE_SAMESITE:-Lax}
+      # Хранилище данных внутри контейнера
+      DATA_DIR: /app/data
       DB_FILE: /app/data/botplus.db
+      MEDIA_ROOT: /app/data/media
     volumes:
+      # Персистентные данные (БД + медиа)
       - ./data:/app/data
-      - ./server/uploads:/app/server/uploads
     ports:
+      # Один origin: и фронт (SPA), и API доступны на http://localhost:5580
       - "5580:5000"
     restart: unless-stopped
     healthcheck:

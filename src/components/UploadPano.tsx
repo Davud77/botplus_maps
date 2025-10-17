@@ -13,7 +13,8 @@ interface FileStatuses {
 
 type FilterType = 'all' | 'success' | 'failed' | 'selected';
 
-const API_URL = 'https://api.botplus.ru';
+// ВАЖНО: больше не ходим на внешнее доменное имя — только на свой бэкенд, чтобы не ловить CORS.
+const API_BASE = ''; // пусто => запросы вида fetch('/api/...') уйдут на http://localhost:5580/api/...
 
 const UploadPano: React.FC = () => {
   const [files, setFiles] = useState<File[]>([]);
@@ -65,40 +66,49 @@ const UploadPano: React.FC = () => {
       formData.append("files", file);
       setFileStatuses(prevStatuses => ({
         ...prevStatuses,
-        [file.name]: { status: 'uploading', log: 'Загрузка в Minio...' }
+        [file.name]: { status: 'uploading', log: 'Загрузка...' }
       }));
     });
     formData.append("tags", tags.join(', '));
 
     try {
-      const response = await fetch(`${API_URL}/upload`, {
+      // НЕ проставляем вручную Content-Type — браузер сам поставит boundary для multipart/form-data
+      const response = await fetch(`${API_BASE}/api/upload`, {
         method: 'POST',
         body: formData,
+        credentials: 'include', // если на бекенде проверяется cookie/сессия
       });
+
+      const text = await response.text();
+      let result: any = {};
+      try { result = text ? JSON.parse(text) : {}; } catch { /* игнор */ }
 
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        const msg = result?.error || result?.message || `HTTP ${response.status}`;
+        throw new Error(msg);
       }
 
-      const result = await response.json();
-      result.successful_uploads.forEach((filename: string) => {
-        setFileStatuses(prevStatuses => ({
-          ...prevStatuses,
-          [filename]: { status: 'success', log: 'Успешно загружен' }
-        }));
+      const okList: string[] = result?.successful_uploads ?? [];
+      const failList: string[] = result?.failed_uploads ?? [];
+      const skippedList: string[] = result?.skipped_files ?? [];
+
+      okList.forEach((filename: string) => {
+        setFileStatuses(prev => ({ ...prev, [filename]: { status: 'success', log: 'Успешно загружен' } }));
       });
-      result.failed_uploads.forEach((filename: string, index: number) => {
-        setFileStatuses(prevStatuses => ({
-          ...prevStatuses,
-          [filename]: { status: 'failed', log: result.skipped_files[index] }
-        }));
+
+      failList.forEach((filename: string) => {
+        setFileStatuses(prev => ({ ...prev, [filename]: { status: 'failed', log: 'Ошибка при загрузке' } }));
+      });
+
+      skippedList.forEach((filename: string) => {
+        setFileStatuses(prev => ({ ...prev, [filename]: { status: 'failed', log: 'Пропущен (не подходит формат/дубликат)' } }));
       });
     } catch (error: any) {
       console.error('Ошибка при загрузке:', error);
       batch.forEach(file => {
         setFileStatuses(prevStatuses => ({
           ...prevStatuses,
-          [file.name]: { status: 'failed', log: `Произошла ошибка при загрузке файлов: ${error.message}` }
+          [file.name]: { status: 'failed', log: `Ошибка: ${error?.message || 'неизвестно'}` }
         }));
       });
     }

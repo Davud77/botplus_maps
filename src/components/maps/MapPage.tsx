@@ -1,3 +1,4 @@
+// src/components/maps/MapPage.tsx
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   MapContainer,
@@ -5,9 +6,6 @@ import {
   useMap,
   useMapEvents,
 } from 'react-leaflet';
-import MarkerClusterGroup from 'react-leaflet-cluster';
-import { Marker } from 'react-leaflet';
-
 import 'leaflet/dist/leaflet.css';
 import L, { Map as LeafletMap } from 'leaflet';
 
@@ -19,7 +17,6 @@ import {
   MapEventHandlers,
   handleCopyCoordinates,
 } from './ContextMenu';
-import { defaultIcon, activeIcon } from '../icons';
 import PanoLayer from './panoLayer/PanoLayer';
 import PanoLayerButton from './panoLayer/PanoLayerButton';
 import OrthoLayer, { OrthoImageType } from './orthoLayer/OrthoLayer';
@@ -85,10 +82,17 @@ const MapPage: React.FC = () => {
   // Хендлер клика по маркеру панорамы
   const handleMarkerClick = useCallback(async (marker: MarkerType) => {
     try {
-      // Можно дополнительно проверить, что такой маркер реально есть
-      // Например, запросить краткую инфу
-      const response = await fetch(`https://api.botplus.ru/pano_info/${marker.id}`);
-      await response.json(); // не обязательно сохранять, если только нужна проверка
+      // Проверим, что точка существует — запросим краткую инфу с нашего backend (относительный путь)
+      const response = await fetch(`/api/pano_info/${encodeURIComponent(marker.id)}`, {
+        method: 'GET',
+        credentials: 'include',
+        headers: { Accept: 'application/json' },
+      });
+
+      if (!response.ok) {
+        const txt = await response.text().catch(() => '');
+        throw new Error(`HTTP ${response.status} ${response.statusText} ${txt}`);
+      }
 
       // При успехе сохраняем id и показываем панораму
       setSelectedMarker(marker.id);
@@ -209,8 +213,6 @@ const MapPage: React.FC = () => {
           </div>
         </div>
         <div className="end-box">
-
-
           {selectedMarker && isVisible ? (
             <>
               {/* Если панорама открыта, показываем кнопки управления (инфа, свернуть/закрыть) */}
@@ -303,13 +305,11 @@ const MapPage: React.FC = () => {
                   />
                 </button>
               </div>
-
             </>
           )}
           <div className="map-buttons">
             <ProfileNav />
           </div>
-
         </div>
       </header>
 
@@ -351,7 +351,8 @@ const MapPage: React.FC = () => {
           selectedOrthos.map((ortho) => (
             <TileLayer
               key={ortho.id}
-              url={`https://api.botplus.ru/orthophotos/${ortho.id}/tiles/{z}/{x}/{y}.png`}
+              // ТАЙЛЫ ЧЕРЕЗ НАШ БЭКЕНД (без внешнего домена → без CORS)
+              url={`/api/orthophotos/${encodeURIComponent(String(ortho.id))}/tiles/{z}/{x}/{y}.png`}
               maxZoom={20}
               opacity={0.7}
             />
