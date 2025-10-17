@@ -1,6 +1,7 @@
 # server/config.py
 import os
 from datetime import timedelta
+from urllib.parse import urlparse
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -21,16 +22,13 @@ def _env_csv(name: str, default_list: list[str]) -> list[str]:
 
 # ====================== Paths & Storage ======================
 
-# Директория с этим файлом (обычно: backend/server/)
+# Директория с этим файлом (обычно: server/)
 _SERVER_DIR = os.path.dirname(os.path.abspath(__file__))
 # Корень репозитория (на один уровень выше)
 _REPO_ROOT = os.path.abspath(os.path.join(_SERVER_DIR, os.pardir))
 
-# Общая директория для персистентных данных (БД, медиа, кеши)
+# Общая директория для персистентных данных (медиа, кеши и т.п.)
 DATA_DIR = os.getenv("DATA_DIR", os.path.join(_REPO_ROOT, "data"))
-
-# Файл БД (по умолчанию в DATA_DIR); можно переопределить через ENV DB_FILE
-DB_FILE = os.getenv("DB_FILE", os.path.join(DATA_DIR, "botplus.db"))
 
 # Папка со статикой/SPA (по умолчанию <repo>/public); можно переопределить PUBLIC_DIR
 PUBLIC_DIR = os.path.abspath(os.getenv("PUBLIC_DIR", os.path.join(_REPO_ROOT, "public")))
@@ -144,6 +142,34 @@ CORS_ALLOW_HEADERS = _env_csv(
 CORS_RESOURCES = {r"/api/*": {"origins": CLIENT_ORIGINS}}
 
 
+# ====================== Database (PostgreSQL/PostGIS) ======================
+
+# Ожидаем строку вида: postgresql://user:pass@host:port/dbname
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://botplus:botplus@db:5432/botplus")
+
+def _parse_database_url(dsn: str) -> dict:
+    u = urlparse(dsn)
+    return {
+        "dbname": (u.path or "").lstrip("/"),
+        "user": u.username or "",
+        "password": u.password or "",
+        "host": u.hostname or "localhost",
+        "port": int(u.port or 5432),
+        "scheme": u.scheme,
+    }
+
+DB_PARAMS = _parse_database_url(DATABASE_URL)
+
+# Удобная строка для psycopg2 (dsn)
+DATABASE_DSN = (
+    f"dbname={DB_PARAMS['dbname']} "
+    f"user={DB_PARAMS['user']} "
+    f"password={DB_PARAMS['password']} "
+    f"host={DB_PARAMS['host']} "
+    f"port={DB_PARAMS['port']}"
+)
+
+
 # ====================== Misc / Feature flags ======================
 
 # Включение превью генерируемых тайлов ортофото при загрузке
@@ -157,7 +183,7 @@ STRICT_UPLOAD_FILENAMES = _env_bool("STRICT_UPLOAD_FILENAMES", True)
 
 __all__ = [
     # Paths
-    "DATA_DIR", "DB_FILE", "MEDIA_ROOT", "PUBLIC_DIR",
+    "DATA_DIR", "MEDIA_ROOT", "PUBLIC_DIR",
     "PANOS_DIR", "ORTHOS_DIR", "TILES_DIR",
     "UPLOAD_FOLDER", "PANO_FOLDER", "ORTHO_FOLDER", "TILES_FOLDER",
     # App
@@ -172,6 +198,8 @@ __all__ = [
     # CORS
     "CLIENT_ORIGINS", "CORS_SUPPORTS_CREDENTIALS",
     "CORS_ALLOW_HEADERS", "CORS_RESOURCES",
+    # DB
+    "DATABASE_URL", "DB_PARAMS", "DATABASE_DSN",
     # Flags
     "ENABLE_ORTHO_TILES", "STRICT_UPLOAD_FILENAMES",
 ]

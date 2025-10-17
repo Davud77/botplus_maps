@@ -1,34 +1,73 @@
 
 
 services:
+  db:
+    image: postgis/postgis:16-3.4
+    container_name: botplus_postgis
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-botplus}
+      POSTGRES_USER: ${POSTGRES_USER:-botplus}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-botplus}
+      TZ: ${TZ:-Europe/Amsterdam}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      # Порт для локального подключения с хоста (psql/клиенты)
+      - "55432:5432"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
   app:
     build:
       context: .
       dockerfile: Dockerfile
+    container_name: botplus_app
     environment:
       TZ: ${TZ:-Europe/Amsterdam}
       APP_ENV: ${APP_ENV:-production}
-      # Secrets
+
+      # ---- Secrets
       SECRET_KEY: ${SECRET_KEY:-change-me}
       JWT_SECRET: ${JWT_SECRET:-}
-      # CORS / Cookies
+
+      # ---- CORS / Cookies
       CLIENT_ORIGINS: ${CLIENT_ORIGINS:-http://localhost:5580}
       SESSION_COOKIE_DOMAIN: ${SESSION_COOKIE_DOMAIN:-}
       COOKIE_SECURE: ${COOKIE_SECURE:-0}
       COOKIE_SAMESITE: ${COOKIE_SAMESITE:-Lax}
-      # Хранилище данных внутри контейнера
+
+      # ---- Пути внутри контейнера
       DATA_DIR: /app/data
-      DB_FILE: /app/data/botplus.db
       MEDIA_ROOT: /app/data/media
+      UPLOAD_FOLDER: /app/server/uploads
+      PANO_FOLDER: /app/server/uploads/panos
+      ORTHO_FOLDER: /app/server/uploads/orthos
+      TILES_FOLDER: /app/server/uploads/orthos/tiles
+      PUBLIC_DIR: /app/public
+
+      # ---- База данных (PostgreSQL/PostGIS)
+      # Для приложения (контейнер app видит контейнер db по имени "db")
+      DATABASE_URL: ${DATABASE_URL:-postgresql://botplus:botplus@db:5432/botplus}
+
     volumes:
-      # Персистентные данные (БД + медиа)
+      # Персистентные данные (БД/медиа/файлы проекта в /app/data)
       - ./data:/app/data
     ports:
       # Один origin: и фронт (SPA), и API доступны на http://localhost:5580
       - "5580:5000"
+    depends_on:
+      db:
+        condition: service_healthy
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:5000/api/health"]
       interval: 30s
       timeout: 5s
       retries: 3
+
+volumes:
+  pgdata:

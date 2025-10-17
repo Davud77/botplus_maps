@@ -1,12 +1,15 @@
-# repositories/user_repository.py
+# server/repositories/user_repository.py
 """
-Репозиторий пользователей: изолирует доступ к БД.
-Зависит от Database (sqlite, с row_factory=sqlite3.Row).
+Репозиторий пользователей: доступ к БД PostgreSQL (psycopg2).
+Интерфейс:
+  - get_user_by_username(username) -> Optional[dict]
+  - get_user_by_id(user_id) -> Optional[dict]
+  - create_user(username, password_hash) -> int (id)
 """
 
 from __future__ import annotations
 
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Mapping
 
 from database import Database
 
@@ -14,35 +17,35 @@ _db = Database()
 
 
 def _row_to_dict(row) -> Dict[str, Any]:
-    """Безопасное преобразование sqlite3.Row → dict."""
-    return {k: row[k] for k in row.keys()} if row is not None else {}
+    """Нормализуем строку курсора в dict (RealDictCursor уже отдаёт dict)."""
+    if row is None:
+        return {}
+    if isinstance(row, Mapping):
+        return dict(row)
+    if hasattr(row, "keys"):
+        return {k: row[k] for k in row.keys()}
+    return {}
 
 
 def get_user_by_username(username: str) -> Optional[Dict[str, Any]]:
     """
     Возвращает пользователя по username или None.
-    Ожидается таблица users(id INTEGER PK, username TEXT UNIQUE, password TEXT).
+    Таблица: users(id SERIAL PK, username TEXT UNIQUE, password TEXT).
     """
     cur = _db.get_cursor()
     cur.execute(
-        "SELECT id, username, password FROM users WHERE username = ? LIMIT 1",
+        "SELECT id, username, password FROM users WHERE username = %s LIMIT 1",
         (username,),
     )
     row = cur.fetchone()
-    if not row:
-        return None
-    d = _row_to_dict(row)
-    # Нормализуем ключи для удобства в сервисах/контроллерах
-    return {"id": d.get("id"), "username": d.get("username"), "password": d.get("password")}
+    return _row_to_dict(row) if row else None
 
-
-# (Опционально, может пригодиться дальше — не используется контроллером логина прямо сейчас)
 
 def get_user_by_id(user_id: int) -> Optional[Dict[str, Any]]:
     """Возвращает пользователя по id или None."""
     cur = _db.get_cursor()
     cur.execute(
-        "SELECT id, username, password FROM users WHERE id = ? LIMIT 1",
+        "SELECT id, username, password FROM users WHERE id = %s LIMIT 1",
         (user_id,),
     )
     row = cur.fetchone()
@@ -56,9 +59,9 @@ def create_user(username: str, password_hash: str) -> int:
     """
     cur = _db.get_cursor()
     cur.execute(
-        "INSERT INTO users (username, password) VALUES (?, ?)",
+        "INSERT INTO users (username, password) VALUES (%s, %s) RETURNING id",
         (username, password_hash),
     )
+    row = cur.fetchone()
     _db.commit()
-    # sqlite lastrowid
-    return int(cur.lastrowid)
+    return int(row["id"])

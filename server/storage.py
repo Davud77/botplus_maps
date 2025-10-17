@@ -6,6 +6,8 @@ from typing import Optional, List
 from flask import send_file, jsonify
 from werkzeug.utils import secure_filename
 from mimetypes import guess_type
+import tempfile
+import shutil
 
 
 class LocalStorage:
@@ -51,17 +53,38 @@ class LocalStorage:
         """
         Сохраняет поток в base_dir[/subdir]/secure_filename.
         Возвращает абсолютный путь сохранённого файла.
+        Пишем атомарно: во временный файл с последующим rename.
         """
         safe_name = secure_filename(filename) or "unnamed"
         rel_parts = (subdir, safe_name) if subdir else (safe_name,)
         dst = self._safe_join(*rel_parts)
+
+        # Пишем во временный файл рядом с целевым
+        dst_dir = os.path.dirname(dst)
+        os.makedirs(dst_dir, exist_ok=True)
+
+        # Попробуем перемотать поток
         try:
             file_stream.seek(0)
         except Exception:
-            # если это не seekable поток — просто читаем как есть
             pass
-        with open(dst, "wb") as f:
-            f.write(file_stream.read())
+
+        fd, tmp_path = tempfile.mkstemp(prefix=".upload-", dir=dst_dir)
+        try:
+            with os.fdopen(fd, "wb") as tmp:
+                shutil.copyfileobj(file_stream, tmp)
+                tmp.flush()
+                os.fsync(tmp.fileno())
+            # Атомарно заменяем
+            os.replace(tmp_path, dst)
+        finally:
+            # На случай исключений
+            if os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except Exception:
+                    pass
+
         return dst
 
     def send_local_file(
@@ -86,7 +109,6 @@ class LocalStorage:
         if not (os.path.exists(abs_path) and os.path.isfile(abs_path)):
             return jsonify({"error": "File not found"}), 404
 
-        # угадать MIME, если не передан
         if not mimetype:
             guessed, _ = guess_type(abs_path)
             mimetype = guessed or "application/octet-stream"

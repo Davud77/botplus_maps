@@ -8,6 +8,12 @@ import re
 import requests
 import config
 
+# DB health/ping
+try:
+    from database import get_connection
+except Exception:  # на случай ранних стадий сборки
+    get_connection = None  # type: ignore
+
 # --- Optional blueprints (app runs even if some are missing) ---
 try:
     from controllers.auth_controller import auth_blueprint
@@ -36,9 +42,9 @@ ALLOWED_ORIGIN_REGEXES = [
 ]
 
 # --- Upstream proxy (to bypass browser CORS by using same-origin /api/*) ---
-UPSTREAM_API         = getattr(config, "UPSTREAM_API", "https://api.botplus.ru").rstrip("/")
-PROXY_API_ENABLED    = bool(getattr(config, "PROXY_API_ENABLED", True))
-PROXY_TIMEOUT        = int(getattr(config, "PROXY_TIMEOUT", 120))  # seconds
+UPSTREAM_API              = getattr(config, "UPSTREAM_API", "https://api.botplus.ru").rstrip("/")
+PROXY_API_ENABLED         = bool(getattr(config, "PROXY_API_ENABLED", True))
+PROXY_TIMEOUT             = int(getattr(config, "PROXY_TIMEOUT", 120))  # seconds
 PROXY_PASSTHROUGH_HEADERS = {
     "Content-Type",
     "Content-Length",
@@ -147,9 +153,35 @@ def create_app():
     if ortho_blueprint:
         app.register_blueprint(ortho_blueprint, url_prefix="/api")
 
+    # ---------------- Health ----------------
     @app.get("/api/health")
     def health():
-        return jsonify({"ok": True})
+        """
+        Быстрый healthcheck + мягкая проверка БД и PostGIS.
+        Не падает, если БД ещё не инициализирована (возвращает db_ok=False).
+        """
+        db_ok = False
+        postgis_enabled = False
+        if get_connection is not None:
+            try:
+                with get_connection() as conn:
+                    cur = conn.cursor()
+                    cur.execute("SELECT 1")
+                    cur.fetchone()
+                    db_ok = True
+                    # Проверяем наличие расширения postgis (без ошибки, если нет)
+                    cur.execute("SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname='postgis') AS exists")
+                    row = cur.fetchone()
+                    # row может быть dict (RealDictCursor) или tuple — поддержим оба случая
+                    if isinstance(row, dict):
+                        postgis_enabled = bool(row.get("exists"))
+                    else:
+                        postgis_enabled = bool(row[0]) if row else False
+            except Exception:
+                db_ok = False
+                postgis_enabled = False
+
+        return jsonify({"ok": True, "db_ok": db_ok, "postgis": postgis_enabled})
 
     # ---------------- Generic reverse proxy for /api/* ----------------
     # This lets the frontend call same-origin /api/... while we forward to UPSTREAM_API.
@@ -176,7 +208,7 @@ def create_app():
                     url=upstream_url,
                     params=request.args,
                     data=request.get_data(),
-                    files=None,  # requests will handle multipart if data is raw; for large uploads you may map form/files explicitly
+                    files=None,  # при необходимости можно смэппить form/files
                     headers=incoming_headers,
                     cookies=request.cookies,
                     timeout=PROXY_TIMEOUT,
