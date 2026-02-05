@@ -27,30 +27,30 @@ import SelectionPanel from './panoLayer/SelectionPanel';
 import CustomZoomControl from './CustomZoomControl';
 import ProfileNav from '../ProfileNav';
 
-// Импорт API
+// Import API
 import { 
   fetchVectorDbs, 
   fetchVectorLayers, 
   fetchLayerData,
-  VectorLayerItem // Предполагаем, что этот тип экспортируется из api.ts
+  VectorLayerItem // Assumes this type is exported from api.ts
 } from '../../utils/api'; 
 
-// --- Типы ---
+// --- Types ---
 interface MarkerType {
   id: string;
   lat: number;
   lng: number;
 }
 
-// Структура для группировки в меню
+// Structure for grouping in the menu
 interface VectorGroup {
   dbName: string;
   layers: VectorLayerItem[];
 }
 
-// Структура для хранения загруженных данных GeoJSON
+// Structure to store loaded GeoJSON data
 interface LoadedVectorData {
-  id: string; // "dbName-tableName"
+  id: string; // "dbName-schema-tableName"
   data: any;
   type: string;
   name: string;
@@ -75,18 +75,18 @@ const MapPage: React.FC = () => {
   const [selectedOrthos, setSelectedOrthos] = useState<OrthoImageType[]>([]);
 
   // --- Vector States (NEW) ---
-  const [showVectorPanel, setShowVectorPanel] = useState<boolean>(false); // Показать панель выбора слоев
-  const [vectorGroups, setVectorGroups] = useState<VectorGroup[]>([]); // Список доступных слоев (метаданные)
-  const [loadedVectors, setLoadedVectors] = useState<Map<string, LoadedVectorData>>(new Map()); // Кэш загруженных данных
-  const [activeVectorIds, setActiveVectorIds] = useState<Set<string>>(new Set()); // ID включенных слоев
-  const [loadingLayerId, setLoadingLayerId] = useState<string | null>(null); // Спиннер для конкретного слоя
+  const [showVectorPanel, setShowVectorPanel] = useState<boolean>(false); // Show layer selection panel
+  const [vectorGroups, setVectorGroups] = useState<VectorGroup[]>([]); // List of available layers (metadata)
+  const [loadedVectors, setLoadedVectors] = useState<Map<string, LoadedVectorData>>(new Map()); // Cache of loaded data
+  const [activeVectorIds, setActiveVectorIds] = useState<Set<string>>(new Set()); // IDs of active layers
+  const [loadingLayerId, setLoadingLayerId] = useState<string | null>(null); // Spinner for specific layer
 
   const [showAddPanoramaButton, setShowAddPanoramaButton] = useState<boolean>(false);
   const [showSelectionPanel, setShowSelectionPanel] = useState(false);
   
   const mapRef = useRef<LeafletMap | null>(null);
 
-  // --- Хендлеры Панорам ---
+  // --- Panorama Handlers ---
   const handleMarkerClick = useCallback(async (marker: MarkerType) => {
     try {
       await fetch(`https://api.botplus.ru/pano_info/${marker.id}`);
@@ -111,16 +111,15 @@ const MapPage: React.FC = () => {
     const coords = searchInput.split(',').map((c) => parseFloat(c.trim()));
     if (coords.length === 2 && !isNaN(coords[0]) && !isNaN(coords[1])) {
       if (mapRef.current) mapRef.current.setView(coords as [number, number], 18);
-      // setMapCenter(coords as [number, number]); // Лучше не менять стейт центра при поиске, чтобы не было конфликтов с Leaflet
     } else {
-      alert('Неверный формат координат');
+      alert('Invalid coordinate format');
     }
   };
 
   const handleLayerChange = (url: string) => setBaseLayer(url);
   const handlePanoLayerToggle = () => setShowPanoLayer(prev => !prev);
 
-  // --- Хендлеры Ортофото ---
+  // --- Ortho Handlers ---
   const handleToggleOrthoLayer = (images: OrthoImageType[]) => {
     setOrthoImages(images);
     setShowOrthoPanel((prev) => !prev);
@@ -141,9 +140,9 @@ const MapPage: React.FC = () => {
     mapRef.current.fitBounds(L.latLngBounds(sw, ne));
   };
 
-  // --- ЛОГИКА ВЕКТОРОВ ---
+  // --- VECTOR LOGIC ---
 
-  // 1. Открытие панели и загрузка списка (структуры) слоев
+  // 1. Open panel and load layer structure (metadata)
   const handleToggleVectorPanel = async () => {
     if (showVectorPanel) {
       setShowVectorPanel(false);
@@ -152,13 +151,13 @@ const MapPage: React.FC = () => {
 
     setShowVectorPanel(true);
     
-    // Если список уже загружен, не грузим снова
+    // If list is already loaded, don't load again
     if (vectorGroups.length > 0) return;
 
     try {
       const dbs = await fetchVectorDbs();
       
-      // Сортировка баз по алфавиту
+      // Sort DBs alphabetically
       dbs.sort((a, b) => a.name.localeCompare(b.name));
 
       const groups: VectorGroup[] = [];
@@ -166,8 +165,7 @@ const MapPage: React.FC = () => {
       for (const db of dbs) {
         try {
           const layers = await fetchVectorLayers(db.name);
-          // Сортировка слоев внутри базы по алфавиту
-          layers.sort((a, b) => a.tableName.localeCompare(b.tableName));
+          // Sorting of layers is handled during rendering (grouping by schema)
           
           if (layers.length > 0) {
             groups.push({ dbName: db.name, layers });
@@ -179,15 +177,15 @@ const MapPage: React.FC = () => {
       setVectorGroups(groups);
     } catch (error) {
       console.error("Failed to load vector databases", error);
-      alert("Ошибка при загрузке списка векторных баз");
+      alert("Error loading vector database list");
     }
   };
 
-  // 2. Переключение видимости конкретного слоя (Глазик)
-  const toggleVectorLayerVisibility = async (dbName: string, layer: any) => { // layer is VectorLayerItem
-    const layerId = `${dbName}-${layer.tableName}`;
+  // 2. Toggle specific layer visibility (Eye icon)
+  const toggleVectorLayerVisibility = async (dbName: string, layer: VectorLayerItem) => {
+    const layerId = `${dbName}-${layer.schema}-${layer.tableName}`;
 
-    // Если слой уже включен -> выключаем
+    // If layer is already active -> deactivate
     if (activeVectorIds.has(layerId)) {
       const newSet = new Set(activeVectorIds);
       newSet.delete(layerId);
@@ -195,46 +193,46 @@ const MapPage: React.FC = () => {
       return;
     }
 
-    // Если слой выключен -> включаем
-    // Сначала проверяем, есть ли данные в кэше
+    // If layer is inactive -> activate
+    // First check if data is in cache
     if (loadedVectors.has(layerId)) {
       const newSet = new Set(activeVectorIds);
       newSet.add(layerId);
       setActiveVectorIds(newSet);
     } else {
-      // Данных нет, нужно загрузить
+      // No data, need to load
       setLoadingLayerId(layerId);
       try {
-        const geoJSON = await fetchLayerData(dbName, layer.tableName);
+        const geoJSON = await fetchLayerData(dbName, layer.tableName, layer.schema);
         
         if (geoJSON && geoJSON.features && geoJSON.features.length > 0) {
           const newData: LoadedVectorData = {
             id: layerId,
             data: geoJSON,
             type: layer.geometryType,
-            name: layer.tableName
+            name: `${layer.schema}.${layer.tableName}`
           };
           
-          // Сохраняем в кэш
+          // Save to cache
           setLoadedVectors(prev => new Map(prev).set(layerId, newData));
           
-          // Включаем отображение
+          // Activate visibility
           const newSet = new Set(activeVectorIds);
           newSet.add(layerId);
           setActiveVectorIds(newSet);
         } else {
-          alert(`Слой ${layer.tableName} пуст`);
+          alert(`Layer ${layer.tableName} is empty`);
         }
       } catch (error) {
         console.error(`Error loading layer ${layer.tableName}:`, error);
-        alert(`Ошибка загрузки слоя ${layer.tableName}`);
+        alert(`Error loading layer ${layer.tableName}`);
       } finally {
         setLoadingLayerId(null);
       }
     }
   };
 
-  // Стиль векторов
+  // Vector Style
   const getVectorStyle = () => ({
     color: "#ff7800",
     weight: 2,
@@ -277,16 +275,16 @@ const MapPage: React.FC = () => {
               <button 
                 className={`layers-button ${showOrthoLayer ? 'active' : ''}`} 
                 onClick={() => handleToggleOrthoLayer(orthoImages)}
-                title="Ортофотопланы"
+                title="Orthophotos"
               >
                 <img src="/images/svg/ortho-icon.svg" alt="Ortho" width="24" height="24" className="ortho-icon"/>
               </button>
 
-              {/* КНОПКА ВЕКТОРНЫХ СЛОЕВ */}
+              {/* VECTOR LAYERS BUTTON */}
               <button
                 className={`layers-button ${showVectorPanel ? 'active' : ''}`}
                 onClick={handleToggleVectorPanel}
-                title="Векторные слои (PostGIS)"
+                title="Vector Layers (PostGIS)"
               >
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ stroke: 'white', strokeWidth: 2 }}>
                   <path d="M3 6L12 2L21 6V18L12 22L3 18V6Z" strokeLinecap="round" strokeLinejoin="round"/>
@@ -305,7 +303,7 @@ const MapPage: React.FC = () => {
         </div>
       )}
 
-      {/* --- ПАНЕЛЬ ВЕКТОРНЫХ СЛОЕВ --- */}
+      {/* --- VECTOR LAYERS PANEL --- */}
       {showVectorPanel && (
         <div className="ortho-panel" style={{ 
             position: 'absolute', 
@@ -315,97 +313,117 @@ const MapPage: React.FC = () => {
             background: 'white',
             borderRadius: '8px',
             boxShadow: '0 2px 10px rgba(0,0,0,0.2)',
-            width: '300px',
+            width: '320px',
             maxHeight: '70vh',
             display: 'flex',
             flexDirection: 'column'
         }}>
           <div style={{ padding: '15px', borderBottom: '1px solid #eee', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <h3 style={{ margin: 0, fontSize: '16px', color: '#333' }}>Векторные слои</h3>
+            <h3 style={{ margin: 0, fontSize: '16px', color: '#333' }}>Vector Layers</h3>
             <button onClick={() => setShowVectorPanel(false)} style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: '20px' }}>&times;</button>
           </div>
           
           <div style={{ overflowY: 'auto', padding: '10px' }}>
             {vectorGroups.length === 0 ? (
-              <div style={{ padding: '20px', textAlign: 'center', color: '#999' }}>Загрузка списка...</div>
+              <div style={{ padding: '20px', textAlign: 'center', color: '#999' }}>Loading layers...</div>
             ) : (
-              vectorGroups.map((group) => (
-                <div key={group.dbName} style={{ marginBottom: '15px' }}>
-                  <div style={{ 
-                      fontSize: '12px', 
-                      fontWeight: 'bold', 
-                      textTransform: 'uppercase', 
-                      color: '#888',
-                      marginBottom: '5px',
-                      paddingLeft: '5px'
-                  }}>
-                    {group.dbName}
+              vectorGroups.map((group) => {
+                // Group layers by Schema
+                const layersBySchema: { [key: string]: VectorLayerItem[] } = {};
+                group.layers.forEach(layer => {
+                  const schema = layer.schema || 'public';
+                  if (!layersBySchema[schema]) layersBySchema[schema] = [];
+                  layersBySchema[schema].push(layer);
+                });
+
+                const sortedSchemas = Object.keys(layersBySchema).sort();
+
+                return (
+                  <div key={group.dbName} style={{ marginBottom: '15px' }}>
+                    {/* Database Name */}
+                    <div style={{ 
+                        fontSize: '13px', 
+                        fontWeight: 'bold', 
+                        textTransform: 'uppercase', 
+                        color: '#555',
+                        marginBottom: '8px',
+                        padding: '5px',
+                        backgroundColor: '#eee',
+                        borderRadius: '4px'
+                    }}>
+                      🗄️ {group.dbName}
+                    </div>
+
+                    {/* Schemas */}
+                    {sortedSchemas.map(schema => {
+                        // Sort Tables alphabetically
+                        const sortedLayers = layersBySchema[schema].sort((a, b) => a.tableName.localeCompare(b.tableName));
+
+                        return (
+                            <div key={schema} style={{ marginLeft: '10px', marginBottom: '10px', borderLeft: '2px solid #ddd', paddingLeft: '8px' }}>
+                                <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#2196F3', marginBottom: '4px' }}>
+                                    Schema: {schema}
+                                </div>
+                                
+                                {/* Layers */}
+                                {sortedLayers.map(layer => {
+                                    const layerId = `${group.dbName}-${layer.schema}-${layer.tableName}`;
+                                    const isActive = activeVectorIds.has(layerId);
+                                    const isLoading = loadingLayerId === layerId;
+
+                                    return (
+                                        <div key={layer.id} style={{ 
+                                            display: 'flex', 
+                                            alignItems: 'center', 
+                                            padding: '6px', 
+                                            borderRadius: '4px',
+                                            background: isActive ? '#e3f2fd' : 'transparent',
+                                            marginBottom: '2px'
+                                        }}>
+                                            <div style={{ flex: 1, fontSize: '13px', color: '#333' }}>
+                                                {layer.tableName}
+                                                <span style={{ fontSize: '10px', color: '#999', marginLeft: '5px', border: '1px solid #eee', padding: '1px 3px', borderRadius: '3px' }}>
+                                                    {layer.geometryType}
+                                                </span>
+                                            </div>
+
+                                            {/* Eye Button */}
+                                            <button 
+                                              onClick={() => toggleVectorLayerVisibility(group.dbName, layer)}
+                                              disabled={isLoading}
+                                              style={{ background: 'none', border: 'none', cursor: isLoading ? 'wait' : 'pointer', padding: '4px' }}
+                                              title={isActive ? "Hide" : "Show"}
+                                            >
+                                              {isLoading ? (
+                                                <div style={{ width: '16px', height: '16px', borderRadius: '50%', border: '2px solid #ccc', borderTopColor: '#2196F3', animation: 'spin 1s linear infinite' }}></div>
+                                              ) : isActive ? (
+                                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                                  <path d="M1 12C1 12 5 4 12 4C19 4 23 12 23 12C23 12 19 20 12 20C5 20 1 12 1 12Z" stroke="#2196F3" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                                                  <circle cx="12" cy="12" r="3" stroke="#2196F3" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                                                </svg>
+                                              ) : (
+                                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                                  <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20C5 20 1 12 1 12C1 12 2.33 9.05 4.7 7.26M1 1L23 23M9.9 4.24A9.12 9.12 0 0 1 12 4C19 4 23 12 23 12C23 12 21.93 14.51 19.9 16.24" stroke="#ccc" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                                                  <path d="M14.12 14.12A3 3 0 0 1 9.88 9.88" stroke="#ccc" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                                                </svg>
+                                              )}
+                                            </button>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        );
+                    })}
                   </div>
-                  {group.layers.map((layer) => {
-                    const layerId = `${group.dbName}-${layer.tableName}`;
-                    const isActive = activeVectorIds.has(layerId);
-                    const isLoading = loadingLayerId === layerId;
-
-                    return (
-                      <div key={layer.id} style={{ 
-                          display: 'flex', 
-                          alignItems: 'center', 
-                          padding: '8px', 
-                          borderRadius: '4px',
-                          background: isActive ? '#f0f9ff' : 'transparent',
-                          marginBottom: '2px'
-                      }}>
-                        {/* Имя слоя */}
-                        <div style={{ flex: 1, fontSize: '14px', color: '#333' }}>
-                          {layer.tableName}
-                          <span style={{ fontSize: '10px', color: '#999', marginLeft: '5px', border: '1px solid #eee', padding: '1px 3px', borderRadius: '3px' }}>
-                            {layer.geometryType}
-                          </span>
-                        </div>
-
-                        {/* Кнопка Глазик */}
-                        <button 
-                          onClick={() => toggleVectorLayerVisibility(group.dbName, layer)}
-                          disabled={isLoading}
-                          style={{ 
-                            background: 'none', 
-                            border: 'none', 
-                            cursor: isLoading ? 'wait' : 'pointer',
-                            padding: '5px',
-                            display: 'flex',
-                            alignItems: 'center'
-                          }}
-                          title={isActive ? "Скрыть" : "Показать"}
-                        >
-                          {isLoading ? (
-                            // Простой спиннер
-                            <div style={{ width: '16px', height: '16px', borderRadius: '50%', border: '2px solid #ccc', borderTopColor: '#2196F3', animation: 'spin 1s linear infinite' }}></div>
-                          ) : isActive ? (
-                            // Открытый глаз (синий)
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                              <path d="M1 12C1 12 5 4 12 4C19 4 23 12 23 12C23 12 19 20 12 20C5 20 1 12 1 12Z" stroke="#2196F3" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                              <circle cx="12" cy="12" r="3" stroke="#2196F3" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                            </svg>
-                          ) : (
-                            // Закрытый глаз (серый)
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                              <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20C5 20 1 12 1 12C1 12 2.33 9.05 4.7 7.26M1 1L23 23M9.9 4.24A9.12 9.12 0 0 1 12 4C19 4 23 12 23 12C23 12 21.93 14.51 19.9 16.24" stroke="#ccc" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                              <path d="M14.12 14.12A3 3 0 0 1 9.88 9.88" stroke="#ccc" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                            </svg>
-                          )}
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              ))
+                );
+              })
             )}
           </div>
           <style>{`@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style>
         </div>
       )}
 
-      {/* --- КАРТА --- */}
+      {/* --- MAP --- */}
       <MapContainer center={[43, 47]} zoom={5} style={{ height: '100%', width: '100%' }} zoomControl={false} maxZoom={20}>
         <SetMapRef />
         <TileLayer url={baseLayer} maxZoom={20} />
@@ -417,7 +435,7 @@ const MapPage: React.FC = () => {
             <TileLayer key={ortho.id} url={`https://api.botplus.ru/orthophotos/${ortho.id}/tiles/{z}/{x}/{y}.png`} maxZoom={20} opacity={0.7} />
         ))}
 
-        {/* Рендерим только те слои, которые есть в activeVectorIds */}
+        {/* Render active vector layers from activeVectorIds */}
         {Array.from(activeVectorIds).map((layerId) => {
           const vectorInfo = loadedVectors.get(layerId);
           if (!vectorInfo) return null;
