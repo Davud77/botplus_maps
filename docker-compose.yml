@@ -1,16 +1,42 @@
 services:
+  # --- Сервис базы данных (PostGIS) ---
+  db:
+    image: postgis/postgis:16-3.4-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: botplus_user
+      POSTGRES_PASSWORD: botplus_password
+      POSTGRES_DB: botplus_db
+    ports:
+      - "5432:5432" # Открываем порт наружу, чтобы ты мог подключиться через DBeaver/PgAdmin
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U botplus_user -d botplus_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # --- Основное приложение ---
   app:
     build:
       context: .
       dockerfile: Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
     environment:
       SECRET_KEY: ${SECRET_KEY:-change-me}
       CLIENT_ORIGINS: ${CLIENT_ORIGINS:-http://localhost:5580}
       SESSION_COOKIE_DOMAIN: ${SESSION_COOKIE_DOMAIN:-}
       COOKIE_SECURE: ${COOKIE_SECURE:-0}
       COOKIE_SAMESITE: ${COOKIE_SAMESITE:-Lax}
-      DB_FILE: /app/data/botplus.db
+      # Переключаем с SQLite файла на строку подключения PG
+      # Формат: postgresql://user:password@host:port/dbname
+      DATABASE_URL: postgresql://botplus_user:botplus_password@db:5432/botplus_db
+      UPLOAD_FOLDER: /app/server/uploads
     volumes:
+      # ./data нам все еще может пригодиться для временных файлов, но БД теперь в своем томе
       - ./data:/app/data
       - ./server/uploads:/app/server/uploads
     ports:
@@ -21,3 +47,7 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+
+# Том для хранения данных базы (чтобы не пропадали при рестарте)
+volumes:
+  postgres_data:

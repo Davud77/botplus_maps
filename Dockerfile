@@ -21,9 +21,16 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1
 
-# Системные зависимости (минимум, без рекомендаций)
+# ! ВАЖНО: Добавлен libpq-dev для работы psycopg2 (PostgreSQL драйвер)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential gdal-bin libgdal-dev python3-gdal gcc ca-certificates curl \
+    build-essential \
+    gdal-bin \
+    libgdal-dev \
+    python3-gdal \
+    gcc \
+    ca-certificates \
+    curl \
+    libpq-dev \ 
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -47,6 +54,7 @@ RUN mkdir -p /app/data /app/server/uploads
 RUN useradd -u 10001 -m appuser
 USER appuser
 
+# DB_FILE больше не нужен как основной источник, но можно оставить для легаси
 ENV DB_FILE=/app/data/botplus.db
 EXPOSE 5000
 CMD ["python", "server/app.py"]
