@@ -132,3 +132,58 @@ export async function fetchOrthophotos<T = any>(): Promise<T> {
 export async function deleteOrtho(id: number): Promise<ApiOk> {
   return apiDelete<ApiOk>(`/orthophotos/${id}`);
 }
+
+/* -------------------- Vector / PostGIS API -------------------- */
+
+// Интерфейсы
+export interface VectorLayerItem {
+  id: number;
+  schema: string; // Схема БД (public, my_schema и т.д.)
+  tableName: string;
+  geometryType: string;
+  featureCount: number;
+  srid?: number;
+}
+
+export interface VectorDbItem {
+  id: string; // Используем имя базы как ID
+  name: string;
+  host: string;
+  port: number;
+  status: 'connected' | 'error';
+  type: 'internal' | 'external';
+  layers?: VectorLayerItem[]; // Опционально, заполняется после подгрузки слоев
+}
+
+// Методы
+export async function fetchVectorDbs(): Promise<VectorDbItem[]> {
+  // GET /api/vector/databases
+  return apiGet<VectorDbItem[]>("/vector/databases");
+}
+
+export async function createVectorDb(name: string): Promise<ApiOk> {
+  // POST /api/vector/create_db
+  return apiPost<ApiOk>("/vector/create_db", { name });
+}
+
+export async function fetchVectorLayers(dbName: string): Promise<VectorLayerItem[]> {
+  // GET /api/vector/layers/:dbName
+  return apiGet<VectorLayerItem[]>(`/vector/layers/${dbName}`);
+}
+
+// Создание слоя (таблицы)
+export async function createVectorLayer(
+  dbName: string, 
+  tableName: string, 
+  geomType: string
+): Promise<ApiOk> {
+  // POST /api/vector/layers/create
+  return apiPost<ApiOk>("/vector/layers/create", { dbName, tableName, geomType });
+}
+
+// Получение данных слоя (GeoJSON)
+// Добавлен аргумент schema, чтобы запрашивать данные из конкретной схемы
+export async function fetchLayerData(dbName: string, tableName: string, schema: string = 'public'): Promise<any> {
+  // GET /api/vector/layers/:dbName/:tableName/data?schema=...
+  return apiGet<any>(`/vector/layers/${dbName}/${tableName}/data?schema=${schema}`);
+}

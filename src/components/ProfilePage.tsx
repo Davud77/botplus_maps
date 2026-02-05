@@ -9,11 +9,17 @@ import {
   fetchOrthophotos, 
   updatePanoTags, 
   deletePano, 
-  deleteOrtho 
-  // В будущем сюда добавить: fetchVectorDbs, createVectorDb, connectVectorDb
+  deleteOrtho,
+  // Векторные методы и типы
+  fetchVectorDbs,
+  createVectorDb,
+  fetchVectorLayers,
+  createVectorLayer,
+  VectorDbItem,
+  VectorLayerItem
 } from '../utils/api';
 
-// --- Интерфейсы ---
+// --- Локальные интерфейсы (для Панорам и Орто) ---
 
 interface PanoItem {
   id: number;
@@ -34,23 +40,6 @@ interface OrthoItem {
     east: number;
     west: number;
   };
-}
-
-// Новые интерфейсы для Вектора
-interface VectorLayerItem {
-  id: number;
-  tableName: string;
-  geometryType: 'POINT' | 'POLYGON' | 'LINESTRING' | 'UNKNOWN';
-  featureCount: number;
-}
-
-interface VectorDbItem {
-  id: number;
-  name: string;
-  host: string;
-  port: number;
-  status: 'connected' | 'error';
-  layers: VectorLayerItem[]; // Вложенный список слоев
 }
 
 interface AuthContextType {
@@ -84,6 +73,11 @@ const ProfilePage: FC = () => {
   const [vectorDbs, setVectorDbs] = useState<VectorDbItem[]>([]);
   const [loadingVector, setLoadingVector] = useState(false);
   const [errorVector, setErrorVector] = useState('');
+
+  // Состояние для формы создания нового слоя
+  const [creatingLayerInDb, setCreatingLayerInDb] = useState<string | null>(null); // ID/Name базы, где открыта форма
+  const [newLayerName, setNewLayerName] = useState('');
+  const [newLayerType, setNewLayerType] = useState('POINT');
 
   // -------------------------------------------------------------------------
   //                               ЗАГРУЗКА ДАННЫХ
@@ -137,49 +131,43 @@ const ProfilePage: FC = () => {
     }
   }, [activeTab]);
 
-  // Загрузка векторных баз (MOCK DATA - Имитация)
-  useEffect(() => {
-    const loadVectorDbs = async () => {
-      setLoadingVector(true);
-      setErrorVector('');
-      try {
-        // TODO: Заменить на реальный вызов await fetchVectorDbs();
-        // Имитация задержки сети
-        await new Promise(resolve => setTimeout(resolve, 600));
+  // Загрузка векторных баз
+  const loadVectorData = async () => {
+    setLoadingVector(true);
+    setErrorVector('');
+    try {
+      // 1. Получаем список подключенных баз
+      const dbs = await fetchVectorDbs();
+      
+      // Сортировка баз по алфавиту
+      dbs.sort((a, b) => a.name.localeCompare(b.name));
 
-        const mockData: VectorDbItem[] = [
-          {
-            id: 1,
-            name: 'main_city_db',
-            host: 'localhost',
-            port: 5432,
-            status: 'connected',
-            layers: [
-              { id: 101, tableName: 'buildings_polygon', geometryType: 'POLYGON', featureCount: 1250 },
-              { id: 102, tableName: 'trees_point', geometryType: 'POINT', featureCount: 5000 },
-            ]
-          },
-          {
-            id: 2,
-            name: 'external_project_db',
-            host: '192.168.1.50',
-            port: 5432,
-            status: 'connected',
-            layers: [
-              { id: 201, tableName: 'roads_lines', geometryType: 'LINESTRING', featureCount: 340 }
-            ]
-          }
-        ];
-        setVectorDbs(mockData);
-      } catch (error) {
-        setErrorVector('Ошибка загрузки списка баз данных');
-      } finally {
-        setLoadingVector(false);
+      // 2. Для каждой базы подгружаем список слоев (параллельно)
+      const dbsWithLayers = await Promise.all(dbs.map(async (db) => {
+        try {
+          const layers = await fetchVectorLayers(db.name);
+          return { ...db, layers: layers };
+        } catch (err) {
+          console.warn(`Could not load layers for ${db.name}`, err);
+          return { ...db, layers: [] };
+        }
+      }));
+
+      setVectorDbs(dbsWithLayers);
+    } catch (error) {
+      if (error instanceof Error) {
+        setErrorVector(error.message);
+      } else {
+        setErrorVector('Ошибка соединения с сервером PostGIS');
       }
-    };
+    } finally {
+      setLoadingVector(false);
+    }
+  };
 
+  useEffect(() => {
     if (activeTab === 'vector') {
-      loadVectorDbs();
+      loadVectorData();
     }
   }, [activeTab]);
 
@@ -234,31 +222,47 @@ const ProfilePage: FC = () => {
     }
   };
 
-  // --- Методы для Вектора (Заглушки) ---
+  // --- Методы для Вектора ---
 
   const handleCreateVectorDB = async () => {
-    const dbName = prompt('Введите название новой базы данных (PostGIS):');
+    const dbName = prompt('Введите название новой базы данных (латиница, без пробелов):');
     if (!dbName) return;
 
     try {
-      // TODO: await createVectorDb({ name: dbName });
-      alert(`Запрос на создание БД "${dbName}" отправлен (Logic pending)`);
-      // После успеха обновить список setVectorDbs(...)
+      setLoadingVector(true);
+      await createVectorDb(dbName);
+      alert(`База данных "${dbName}" успешно создана!`);
+      await loadVectorData(); 
     } catch (error) {
-      alert('Ошибка при создании БД');
+      alert(error instanceof Error ? error.message : 'Ошибка при создании БД');
+      setLoadingVector(false);
     }
   };
 
   const handleConnectVectorDB = async () => {
-    const connectionString = prompt('Введите строку подключения или Host (напр. 192.168.1.1):');
-    if (!connectionString) return;
+    alert('Подключение внешних (удаленных) PostGIS баз будет реализовано позже.');
+  };
 
+  const handleCreateLayer = async (dbName: string) => {
+    if (!newLayerName) {
+      alert('Введите имя таблицы');
+      return;
+    }
     try {
-      // TODO: await connectExternalDb({ host: connectionString });
-      alert(`Подключение к "${connectionString}" инициировано (Logic pending)`);
-      // После успеха обновить список
+      // Блокируем интерфейс легкой загрузкой или просто ждем
+      await createVectorLayer(dbName, newLayerName, newLayerType);
+      
+      alert('Слой успешно создан!');
+      
+      // Сброс формы
+      setCreatingLayerInDb(null);
+      setNewLayerName('');
+      setNewLayerType('POINT');
+      
+      // Обновляем данные
+      await loadVectorData();
     } catch (error) {
-      alert('Ошибка подключения');
+      alert(error instanceof Error ? error.message : 'Ошибка создания слоя');
     }
   };
 
@@ -314,93 +318,177 @@ const ProfilePage: FC = () => {
     </div>
   );
 
-  // --- Новый рендер для вкладки Вектор ---
+  // --- Рендер вкладки Вектор (Обновленная группировка) ---
   const renderVector = () => (
-    <div className="table-container">
+    <div 
+      className="table-container" 
+      style={{ overflowY: 'auto', maxHeight: 'calc(100vh - 160px)' }} // <-- Добавлен скролл
+    >
       <div className="table-header" style={{ justifyContent: 'space-between' }}>
-        <h3>Управление PostGIS</h3>
+        <h3>Управление PostGIS (Local Docker)</h3>
         <div style={{ display: 'flex', gap: '10px' }}>
-          {/* Кнопка 1: Создать новую БД */}
-          <button 
-            className="primary-button" 
-            onClick={handleCreateVectorDB}
-          >
+          <button className="primary-button" onClick={handleCreateVectorDB}>
             + Создать БД
           </button>
-          {/* Кнопка 2: Подключить существующую БД */}
-          <button 
-            className="primary-button" 
-            style={{ backgroundColor: '#2196F3' }} // Отличаем цветом
-            onClick={handleConnectVectorDB}
-          >
+          <button className="primary-button" style={{ backgroundColor: '#2196F3' }} onClick={handleConnectVectorDB}>
             &#128279; Подключить БД
           </button>
         </div>
       </div>
 
-      {loadingVector && <div style={{ padding: '20px' }}>Загрузка списка баз данных...</div>}
+      {loadingVector && <div style={{ padding: '20px' }}>Загрузка данных PostGIS...</div>}
       {errorVector && <div style={{ color: 'red', padding: '20px' }}>{errorVector}</div>}
 
       {!loadingVector && !errorVector && vectorDbs.length === 0 && (
-        <div className="empty-state">Нет подключенных баз данных</div>
+        <div className="empty-state">Нет доступных баз данных</div>
       )}
 
-      {/* Список баз данных */}
-      {!loadingVector && !errorVector && vectorDbs.map((db) => (
-        <div key={db.id} className="section" style={{ marginTop: '20px', marginBottom: '20px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #eee', paddingBottom: '10px', marginBottom: '10px' }}>
-            <div>
-              <h4 style={{ margin: 0 }}>🗄️ {db.name}</h4>
-              <small style={{ color: '#666' }}>Host: {db.host}:{db.port} • Status: <span style={{ color: 'green' }}>{db.status}</span></small>
-            </div>
-            <button className="danger-button" onClick={() => alert('Отключение БД не реализовано')}>Отключить</button>
-          </div>
+      {/* Перебираем Базы Данных */}
+      {!loadingVector && !errorVector && vectorDbs.map((db) => {
+        // Группировка слоев по Схемам (schema)
+        const layersBySchema: { [key: string]: VectorLayerItem[] } = {};
+        
+        if (db.layers) {
+          db.layers.forEach(layer => {
+            const schema = layer.schema || 'public'; // fallback если схемы нет
+            if (!layersBySchema[schema]) {
+              layersBySchema[schema] = [];
+            }
+            layersBySchema[schema].push(layer);
+          });
+        }
 
-          {/* Список слоев внутри базы */}
-          {db.layers.length === 0 ? (
-            <div style={{ padding: '10px', color: '#888', fontStyle: 'italic' }}>Нет доступных слоев (таблиц)</div>
-          ) : (
-            <table className="data-table" style={{ marginTop: '0' }}>
-              <thead>
-                <tr>
-                  <th>ID</th>
-                  <th>Имя слоя (Table)</th>
-                  <th>Тип геометрии</th>
-                  <th>Объектов</th>
-                  <th>Действия</th>
-                </tr>
-              </thead>
-              <tbody>
-                {db.layers.map((layer) => (
-                  <tr key={layer.id}>
-                    <td>{layer.id}</td>
-                    <td><b>{layer.tableName}</b></td>
-                    <td>
-                      <span style={{ 
-                        padding: '2px 6px', 
-                        borderRadius: '4px', 
-                        backgroundColor: layer.geometryType === 'POLYGON' ? '#e3f2fd' : '#e8f5e9',
-                        fontSize: '0.85em'
-                      }}>
-                        {layer.geometryType}
-                      </span>
-                    </td>
-                    <td>{layer.featureCount}</td>
-                    <td>
-                      <button className="icon-button" title="Просмотр на карте">👁️</button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-      ))}
+        // Сортируем схемы по алфавиту
+        const sortedSchemas = Object.keys(layersBySchema).sort();
+
+        return (
+          <div key={db.id} className="section" style={{ marginTop: '20px', marginBottom: '20px' }}>
+            
+            {/* Карточка БД */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #eee', paddingBottom: '10px', marginBottom: '10px' }}>
+              <div>
+                <h4 style={{ margin: 0 }}>🗄️ {db.name}</h4>
+                <small style={{ color: '#666' }}>Internal PostGIS • Status: <span style={{ color: 'green' }}>Active</span></small>
+              </div>
+              
+              {/* Кнопка создания слоя */}
+              {creatingLayerInDb !== db.name && (
+                <div style={{ display: 'flex', gap: '10px' }}>
+                  <button 
+                    className="primary-button" 
+                    style={{ fontSize: '0.8em', padding: '5px 10px' }}
+                    onClick={() => setCreatingLayerInDb(db.name)}
+                  >
+                    + Новый слой
+                  </button>
+                  <button className="danger-button" style={{ fontSize: '0.8em' }} onClick={() => alert('Отключение БД не реализовано')}>
+                    Отключить
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Форма создания нового слоя */}
+            {creatingLayerInDb === db.name && (
+              <div style={{ background: '#f5f5f5', padding: '15px', borderRadius: '4px', marginBottom: '15px', border: '1px solid #ddd' }}>
+                <h5>Создание новой таблицы (Слоя) в public</h5>
+                <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginTop: '10px' }}>
+                  <input 
+                    type="text" 
+                    placeholder="Имя таблицы (англ)" 
+                    value={newLayerName}
+                    onChange={(e) => setNewLayerName(e.target.value)}
+                    style={{ padding: '8px', flex: 1, border: '1px solid #ccc', borderRadius: '4px' }}
+                  />
+                  <select 
+                    value={newLayerType} 
+                    onChange={(e) => setNewLayerType(e.target.value)}
+                    style={{ padding: '8px', border: '1px solid #ccc', borderRadius: '4px' }}
+                  >
+                    <option value="POINT">Точки (POINT)</option>
+                    <option value="LINESTRING">Линии (LINESTRING)</option>
+                    <option value="POLYGON">Полигоны (POLYGON)</option>
+                  </select>
+                  <button className="success-button" onClick={() => handleCreateLayer(db.name)}>Создать</button>
+                  <button className="danger-button" onClick={() => { setCreatingLayerInDb(null); setNewLayerName(''); }}>Отмена</button>
+                </div>
+              </div>
+            )}
+
+            {/* Если слоев нет */}
+            {sortedSchemas.length === 0 && (
+              <div style={{ padding: '10px', color: '#888', fontStyle: 'italic', fontSize: '0.9em' }}>
+                База пуста (нет таблиц в geometry_columns)
+              </div>
+            )}
+
+            {/* Перебираем Схемы */}
+            {sortedSchemas.map(schemaName => {
+              // Сортируем таблицы внутри схемы по алфавиту
+              const sortedLayers = layersBySchema[schemaName].sort((a, b) => a.tableName.localeCompare(b.tableName));
+
+              return (
+                <div key={schemaName} style={{ marginBottom: '15px' }}>
+                  <div style={{ 
+                    padding: '5px 10px', 
+                    backgroundColor: '#eef2f5', 
+                    borderLeft: '4px solid #2196F3', 
+                    marginBottom: '5px',
+                    fontWeight: 'bold',
+                    fontSize: '0.9em',
+                    color: '#444'
+                  }}>
+                    Схема: {schemaName}
+                  </div>
+
+                  <table className="data-table" style={{ marginTop: '0', marginLeft: '10px', width: 'calc(100% - 10px)' }}>
+                    <thead>
+                      <tr>
+                        <th>Таблица</th>
+                        <th>Тип геометрии</th>
+                        <th>SRID</th>
+                        <th>Объектов</th>
+                        <th>Действия</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sortedLayers.map((layer) => (
+                        <tr key={layer.id}>
+                          <td><b>{layer.tableName}</b></td>
+                          <td>
+                            <span style={{ 
+                              padding: '2px 6px', 
+                              borderRadius: '4px', 
+                              backgroundColor: layer.geometryType.includes('POLYGON') ? '#e3f2fd' : 
+                                               layer.geometryType.includes('LINE') ? '#fff3e0' : '#e8f5e9',
+                              fontSize: '0.85em'
+                            }}>
+                              {layer.geometryType}
+                            </span>
+                          </td>
+                          <td>{layer.srid}</td>
+                          <td>{layer.featureCount}</td>
+                          <td>
+                            <button className="icon-button" title="Просмотр">👁️</button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              );
+            })}
+          </div>
+        );
+      })}
     </div>
   );
 
   const renderPanoramas = () => (
-    <div className="table-container">
+    <div 
+      className="table-container"
+      style={{ overflowY: 'auto', maxHeight: 'calc(100vh - 160px)' }} // <-- Добавлен скролл
+    >
       <div className="table-header">
         <h3>Мои панорамы</h3>
         <Link to="/upload">
@@ -489,7 +577,10 @@ const ProfilePage: FC = () => {
   );
 
   const renderOrtho = () => (
-    <div className="table-container">
+    <div 
+      className="table-container"
+      style={{ overflowY: 'auto', maxHeight: 'calc(100vh - 160px)' }} // <-- Добавлен скролл
+    >
       <div className="table-header">
         <h3>Ортофотопланы</h3>
         <Link to="/uploadortho">

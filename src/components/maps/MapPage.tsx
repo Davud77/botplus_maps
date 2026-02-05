@@ -1,13 +1,12 @@
+// src/components/maps/MapPage.tsx
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   MapContainer,
   TileLayer,
   useMap,
   useMapEvents,
+  GeoJSON,
 } from 'react-leaflet';
-import MarkerClusterGroup from 'react-leaflet-cluster';
-import { Marker } from 'react-leaflet';
-
 import 'leaflet/dist/leaflet.css';
 import L, { Map as LeafletMap } from 'leaflet';
 
@@ -19,7 +18,7 @@ import {
   MapEventHandlers,
   handleCopyCoordinates,
 } from './ContextMenu';
-import { defaultIcon, activeIcon } from '../icons';
+import { defaultIcon } from '../icons';
 import PanoLayer from './panoLayer/PanoLayer';
 import PanoLayerButton from './panoLayer/PanoLayerButton';
 import OrthoLayer, { OrthoImageType } from './orthoLayer/OrthoLayer';
@@ -28,146 +27,113 @@ import SelectionPanel from './panoLayer/SelectionPanel';
 import CustomZoomControl from './CustomZoomControl';
 import ProfileNav from '../ProfileNav';
 
-// Тип для маркеров панорам
+// Импорт API
+import { 
+  fetchVectorDbs, 
+  fetchVectorLayers, 
+  fetchLayerData,
+  VectorLayerItem // Предполагаем, что этот тип экспортируется из api.ts
+} from '../../utils/api'; 
+
+// --- Типы ---
 interface MarkerType {
   id: string;
   lat: number;
   lng: number;
 }
 
+// Структура для группировки в меню
+interface VectorGroup {
+  dbName: string;
+  layers: VectorLayerItem[];
+}
+
+// Структура для хранения загруженных данных GeoJSON
+interface LoadedVectorData {
+  id: string; // "dbName-tableName"
+  data: any;
+  type: string;
+  name: string;
+}
+
 const MapPage: React.FC = () => {
-  // id выбранного маркера (строка или null)
+  // --- UI States ---
   const [selectedMarker, setSelectedMarker] = useState<string | null>(null);
-  // Раскрыт ли блок панорамы на весь экран
   const [isExpanded, setIsExpanded] = useState(false);
-  // Виден ли блок панорамы внизу
   const [isVisible, setIsVisible] = useState(false);
-
-  // Список маркеров, загруженных из PanoLayer
-  const [markers, setMarkers] = useState<MarkerType[]>([]);
-
-  // Начальный центр карты
-  const [mapCenter, setMapCenter] = useState<[number, number]>([43, 47]);
-
-  // Состояние контекстного меню
-  const [contextMenu, setContextMenu] = useState({
-    visible: false,
-    x: 0,
-    y: 0,
-    lat: 0,
-    lng: 0,
-  });
-
-  // Текущий базовый слой
-  const [baseLayer, setBaseLayer] = useState<string>(
-    'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png'
-  );
-
-  // Отображать ли слой панорам
+  const [contextMenu, setContextMenu] = useState({ visible: false, x: 0, y: 0, lat: 0, lng: 0 });
+  
+  // --- Layers States ---
+  const [baseLayer, setBaseLayer] = useState<string>('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png');
   const [showPanoLayer, setShowPanoLayer] = useState<boolean>(false);
   const [isLoadingMarkers, setIsLoadingMarkers] = useState<boolean>(false);
-
-  // Ортофото
+  
+  // --- Ortho States ---
   const [orthoImages, setOrthoImages] = useState<OrthoImageType[]>([]);
   const [showOrthoPanel, setShowOrthoPanel] = useState<boolean>(false);
   const [showOrthoLayer, setShowOrthoLayer] = useState<boolean>(false);
   const [selectedOrthos, setSelectedOrthos] = useState<OrthoImageType[]>([]);
 
-  // Показать ли кнопку "Добавить панораму"
+  // --- Vector States (NEW) ---
+  const [showVectorPanel, setShowVectorPanel] = useState<boolean>(false); // Показать панель выбора слоев
+  const [vectorGroups, setVectorGroups] = useState<VectorGroup[]>([]); // Список доступных слоев (метаданные)
+  const [loadedVectors, setLoadedVectors] = useState<Map<string, LoadedVectorData>>(new Map()); // Кэш загруженных данных
+  const [activeVectorIds, setActiveVectorIds] = useState<Set<string>>(new Set()); // ID включенных слоев
+  const [loadingLayerId, setLoadingLayerId] = useState<string | null>(null); // Спиннер для конкретного слоя
+
   const [showAddPanoramaButton, setShowAddPanoramaButton] = useState<boolean>(false);
-
-  // Панель массового выбора панорам
   const [showSelectionPanel, setShowSelectionPanel] = useState(false);
-
-  // Ссылка на карту
+  
   const mapRef = useRef<LeafletMap | null>(null);
 
-  // Хендлер клика по маркеру панорамы
+  // --- Хендлеры Панорам ---
   const handleMarkerClick = useCallback(async (marker: MarkerType) => {
     try {
-      // Можно дополнительно проверить, что такой маркер реально есть
-      // Например, запросить краткую инфу
-      const response = await fetch(`https://api.botplus.ru/pano_info/${marker.id}`);
-      await response.json(); // не обязательно сохранять, если только нужна проверка
-
-      // При успехе сохраняем id и показываем панораму
+      await fetch(`https://api.botplus.ru/pano_info/${marker.id}`);
       setSelectedMarker(marker.id);
       setIsVisible(true);
     } catch (error) {
-      console.error('Ошибка при запросе данных о маркере:', error);
-      alert('Не удалось загрузить данные о панораме.');
+      console.error('Error fetching pano info:', error);
     }
   }, []);
 
-  // Раскрыть/свернуть панораму
-  const toggleHeight = useCallback(() => {
-    setIsExpanded((prev) => !prev);
-  }, []);
+  const toggleHeight = useCallback(() => setIsExpanded((prev) => !prev), []);
+  const closeInfo = useCallback(() => { setIsVisible(false); setSelectedMarker(null); }, []);
+  const copyCoordinatesHandler = useCallback(() => handleCopyCoordinates(contextMenu), [contextMenu]);
 
-  // Закрыть панораму
-  const closeInfo = useCallback(() => {
-    setIsVisible(false);
-    setSelectedMarker(null);
-  }, []);
-
-  // Копирование координат
-  const copyCoordinatesHandler = useCallback(() => {
-    handleCopyCoordinates(contextMenu);
-  }, [contextMenu]);
-
-  // Сохраняем ссылку на карту
   const SetMapRef = () => {
     const map = useMap();
-    useEffect(() => {
-      mapRef.current = map;
-    }, [map]);
+    useEffect(() => { mapRef.current = map; }, [map]);
     return null;
   };
 
-  // Поиск по координатам
   const handleSearch = (searchInput: string) => {
     const coords = searchInput.split(',').map((c) => parseFloat(c.trim()));
     if (coords.length === 2 && !isNaN(coords[0]) && !isNaN(coords[1])) {
-      if (mapRef.current) {
-        mapRef.current.setView(coords as [number, number], 18);
-      }
-      setMapCenter(coords as [number, number]);
+      if (mapRef.current) mapRef.current.setView(coords as [number, number], 18);
+      // setMapCenter(coords as [number, number]); // Лучше не менять стейт центра при поиске, чтобы не было конфликтов с Leaflet
     } else {
-      alert('Неверный формат координат. Используйте "55.123, 47.456"');
+      alert('Неверный формат координат');
     }
   };
 
-  // Смена базового слоя
-  const handleLayerChange = (layerUrl: string) => {
-    setBaseLayer(layerUrl);
-  };
+  const handleLayerChange = (url: string) => setBaseLayer(url);
+  const handlePanoLayerToggle = () => setShowPanoLayer(prev => !prev);
 
-  // Включение/выключение слоя панорам
-  const handlePanoLayerToggle = () => {
-    setShowPanoLayer(prev => !prev);
-  };
-
-  // Включение/выключение ортофото
+  // --- Хендлеры Ортофото ---
   const handleToggleOrthoLayer = (images: OrthoImageType[]) => {
     setOrthoImages(images);
-    // Открыть/закрыть боковую панель
     setShowOrthoPanel((prev) => !prev);
-    // Сам слой
     setShowOrthoLayer((prev) => !prev);
   };
 
-  // Выбор конкретного орто
   const handleOrthoSelect = (ortho: OrthoImageType) => {
-    setSelectedOrthos((prevSelected) => {
-      const alreadySelected = prevSelected.some((o) => o.id === ortho.id);
-      if (alreadySelected) {
-        return prevSelected.filter((o) => o.id !== ortho.id);
-      }
-      return [...prevSelected, ortho];
+    setSelectedOrthos((prev) => {
+      if (prev.some((o) => o.id === ortho.id)) return prev.filter((o) => o.id !== ortho.id);
+      return [...prev, ortho];
     });
   };
 
-  // Фокус на bounds выбранного орто
   const fitToOrthoBounds = (ortho: OrthoImageType) => {
     if (!mapRef.current || !ortho.bounds) return;
     const sw = L.CRS.EPSG3857.unproject(L.point(ortho.bounds.west, ortho.bounds.south));
@@ -175,208 +141,322 @@ const MapPage: React.FC = () => {
     mapRef.current.fitBounds(L.latLngBounds(sw, ne));
   };
 
-  // Пример пустого обработчика
-  const MapClickHandler = () => {
-    useMapEvents({
-      click: () => {
-        // закрывать какие-то меню, если надо
-      },
-    });
-    return null;
+  // --- ЛОГИКА ВЕКТОРОВ ---
+
+  // 1. Открытие панели и загрузка списка (структуры) слоев
+  const handleToggleVectorPanel = async () => {
+    if (showVectorPanel) {
+      setShowVectorPanel(false);
+      return;
+    }
+
+    setShowVectorPanel(true);
+    
+    // Если список уже загружен, не грузим снова
+    if (vectorGroups.length > 0) return;
+
+    try {
+      const dbs = await fetchVectorDbs();
+      
+      // Сортировка баз по алфавиту
+      dbs.sort((a, b) => a.name.localeCompare(b.name));
+
+      const groups: VectorGroup[] = [];
+
+      for (const db of dbs) {
+        try {
+          const layers = await fetchVectorLayers(db.name);
+          // Сортировка слоев внутри базы по алфавиту
+          layers.sort((a, b) => a.tableName.localeCompare(b.tableName));
+          
+          if (layers.length > 0) {
+            groups.push({ dbName: db.name, layers });
+          }
+        } catch (e) {
+          console.warn(`Failed to load layers for ${db.name}`);
+        }
+      }
+      setVectorGroups(groups);
+    } catch (error) {
+      console.error("Failed to load vector databases", error);
+      alert("Ошибка при загрузке списка векторных баз");
+    }
   };
 
-  const handleAddPanoramaClick = () => {
-    // Пример: просто переходим на страницу загрузки
-    window.location.href = '/upload';
+  // 2. Переключение видимости конкретного слоя (Глазик)
+  const toggleVectorLayerVisibility = async (dbName: string, layer: any) => { // layer is VectorLayerItem
+    const layerId = `${dbName}-${layer.tableName}`;
+
+    // Если слой уже включен -> выключаем
+    if (activeVectorIds.has(layerId)) {
+      const newSet = new Set(activeVectorIds);
+      newSet.delete(layerId);
+      setActiveVectorIds(newSet);
+      return;
+    }
+
+    // Если слой выключен -> включаем
+    // Сначала проверяем, есть ли данные в кэше
+    if (loadedVectors.has(layerId)) {
+      const newSet = new Set(activeVectorIds);
+      newSet.add(layerId);
+      setActiveVectorIds(newSet);
+    } else {
+      // Данных нет, нужно загрузить
+      setLoadingLayerId(layerId);
+      try {
+        const geoJSON = await fetchLayerData(dbName, layer.tableName);
+        
+        if (geoJSON && geoJSON.features && geoJSON.features.length > 0) {
+          const newData: LoadedVectorData = {
+            id: layerId,
+            data: geoJSON,
+            type: layer.geometryType,
+            name: layer.tableName
+          };
+          
+          // Сохраняем в кэш
+          setLoadedVectors(prev => new Map(prev).set(layerId, newData));
+          
+          // Включаем отображение
+          const newSet = new Set(activeVectorIds);
+          newSet.add(layerId);
+          setActiveVectorIds(newSet);
+        } else {
+          alert(`Слой ${layer.tableName} пуст`);
+        }
+      } catch (error) {
+        console.error(`Error loading layer ${layer.tableName}:`, error);
+        alert(`Ошибка загрузки слоя ${layer.tableName}`);
+      } finally {
+        setLoadingLayerId(null);
+      }
+    }
+  };
+
+  // Стиль векторов
+  const getVectorStyle = () => ({
+    color: "#ff7800",
+    weight: 2,
+    opacity: 0.8,
+    fillColor: "#ff7800",
+    fillOpacity: 0.2
+  });
+
+  const MapClickHandler = () => {
+    useMapEvents({ click: () => {} });
+    return null;
   };
 
   return (
     <div style={{ height: '100vh', width: '100%', position: 'relative' }}>
-      {/* Шапка с логотипом, поиском и т.д. */}
       <header className="map-header">
         <div className="first-box">
           <div className="logo">
-            <a href="/">
-              <img
-                src="/images/logowhite2.png"
-                alt="Логотип"
-                className="logo-image"
-              />
-            </a>
+            <a href="/"><img src="/images/logowhite2.png" alt="Logo" className="logo-image"/></a>
           </div>
-          <div className="search-bar">
-            <Search handleSearch={handleSearch} />
-          </div>
+          <div className="search-bar"><Search handleSearch={handleSearch} /></div>
         </div>
         <div className="end-box">
-
-
           {selectedMarker && isVisible ? (
-            <>
-              {/* Если панорама открыта, показываем кнопки управления (инфа, свернуть/закрыть) */}
-              <div className="map-buttons">
-                <button
-                  className="button_control pointinfo"
-                  onClick={() => console.log('Информация о точке')}
-                >
-                  <img
-                    src="/images/svg/info-icon.svg"
-                    alt="Информация"
-                    width="30"
-                    height="30"
-                  />
-                </button>
-              </div>
-              <div className="map-buttons">
-                <div className="visible_control">
+            <div className="map-buttons">
+               <button className="button_control pointinfo" onClick={() => console.log('Info')}>
+                  <img src="/images/svg/info-icon.svg" alt="Info" width="30" height="30"/>
+               </button>
+               <div className="visible_control">
                   <button className="button_control" onClick={closeInfo}>
-                    <img
-                      src="/images/svg/close-icon.svg"
-                      alt="Закрыть"
-                      width="30"
-                      height="30"
-                    />
+                    <img src="/images/svg/close-icon.svg" alt="Close" width="30" height="30"/>
                   </button>
-                </div>
-              </div>
-            </>
+               </div>
+            </div>
           ) : (
-            <>
-              {/* Если панорама не открыта, показываем другие кнопки */}
-              {showAddPanoramaButton && (
-                <div className="map-buttons">
-                  <button
-                    className="layers-button"
-                    onClick={() => setShowSelectionPanel(!showSelectionPanel)}
-                    title="Выбор"
-                  >
-                    <img
-                      src="/images/svg/select-icon.svg"
-                      alt="Выбор"
-                      width="24"
-                      height="24"
-                    />
-                  </button>
+            <div className="map-buttons">
+              <BaseLayer handleLayerChange={handleLayerChange} />
+              <PanoLayerButton handlePanoLayerToggle={handlePanoLayerToggle} isLoading={isLoadingMarkers} />
+              
+              <button 
+                className={`layers-button ${showOrthoLayer ? 'active' : ''}`} 
+                onClick={() => handleToggleOrthoLayer(orthoImages)}
+                title="Ортофотопланы"
+              >
+                <img src="/images/svg/ortho-icon.svg" alt="Ortho" width="24" height="24" className="ortho-icon"/>
+              </button>
 
-                  {showSelectionPanel && (
-                    <SelectionPanel
-                      handleSelection={(type: string) => {
-                        console.log('Selected type:', type);
-                        setShowSelectionPanel(false);
-                      }}
-                      closePanel={() => setShowSelectionPanel(false)}
-                    />
-                  )}
-
-                  <button
-                    className="layers-button"
-                    onClick={handleAddPanoramaClick}
-                    title="Добавить панорамы"
-                  >
-                    <img
-                      src="/images/svg/add-pano-icon.svg"
-                      alt="Добавить панорамы"
-                      width="24"
-                      height="24"
-                    />
-                  </button>
-                </div>
-              )}
-
-              <div className="map-buttons">
-                <BaseLayer handleLayerChange={handleLayerChange} />
-                <PanoLayerButton 
-                  handlePanoLayerToggle={handlePanoLayerToggle}
-                  isLoading={isLoadingMarkers}
-                />
-                <button
-                  className="layers-button"
-                  onClick={() => handleToggleOrthoLayer(orthoImages)}
-                  title="Показать ортофото"
-                >
-                  <img
-                    src="/images/svg/ortho-icon.svg"
-                    alt="Ортофото"
-                    width="24"
-                    height="24"
-                    className="ortho-icon"
-                  />
-                </button>
-              </div>
-
-            </>
+              {/* КНОПКА ВЕКТОРНЫХ СЛОЕВ */}
+              <button
+                className={`layers-button ${showVectorPanel ? 'active' : ''}`}
+                onClick={handleToggleVectorPanel}
+                title="Векторные слои (PostGIS)"
+              >
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ stroke: 'white', strokeWidth: 2 }}>
+                  <path d="M3 6L12 2L21 6V18L12 22L3 18V6Z" strokeLinecap="round" strokeLinejoin="round"/>
+                  <circle cx="12" cy="12" r="2" fill="white" stroke="none"/>
+                </svg>
+              </button>
+            </div>
           )}
-          <div className="map-buttons">
-            <ProfileNav />
-          </div>
-
+          <div className="map-buttons"><ProfileNav /></div>
         </div>
       </header>
 
-      {/* Контейнер под панораму, если маркер выбран */}
       {selectedMarker && isVisible && (
-        <div
-          className="selected-marker-info"
-          style={{ height: isExpanded ? '100%' : '50%' }}
-        >
-          {/* Передаём выбранный markerId (уже точно string) в панораму */}
-          <PanoramaViewer
-            markerId={selectedMarker}
-            isExpanded={isExpanded}
-          />
+        <div className="selected-marker-info" style={{ height: isExpanded ? '100%' : '50%' }}>
+          <PanoramaViewer markerId={selectedMarker} isExpanded={isExpanded} />
         </div>
       )}
 
-      {/* Сама карта */}
-      <MapContainer
-        center={mapCenter}
-        zoom={5}
-        style={{ height: '100%', width: '100%' }}
-        zoomControl={false}
-        maxZoom={20}
-      >
-        <SetMapRef />
+      {/* --- ПАНЕЛЬ ВЕКТОРНЫХ СЛОЕВ --- */}
+      {showVectorPanel && (
+        <div className="ortho-panel" style={{ 
+            position: 'absolute', 
+            top: '80px', 
+            right: '20px', 
+            zIndex: 1000,
+            background: 'white',
+            borderRadius: '8px',
+            boxShadow: '0 2px 10px rgba(0,0,0,0.2)',
+            width: '300px',
+            maxHeight: '70vh',
+            display: 'flex',
+            flexDirection: 'column'
+        }}>
+          <div style={{ padding: '15px', borderBottom: '1px solid #eee', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <h3 style={{ margin: 0, fontSize: '16px', color: '#333' }}>Векторные слои</h3>
+            <button onClick={() => setShowVectorPanel(false)} style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: '20px' }}>&times;</button>
+          </div>
+          
+          <div style={{ overflowY: 'auto', padding: '10px' }}>
+            {vectorGroups.length === 0 ? (
+              <div style={{ padding: '20px', textAlign: 'center', color: '#999' }}>Загрузка списка...</div>
+            ) : (
+              vectorGroups.map((group) => (
+                <div key={group.dbName} style={{ marginBottom: '15px' }}>
+                  <div style={{ 
+                      fontSize: '12px', 
+                      fontWeight: 'bold', 
+                      textTransform: 'uppercase', 
+                      color: '#888',
+                      marginBottom: '5px',
+                      paddingLeft: '5px'
+                  }}>
+                    {group.dbName}
+                  </div>
+                  {group.layers.map((layer) => {
+                    const layerId = `${group.dbName}-${layer.tableName}`;
+                    const isActive = activeVectorIds.has(layerId);
+                    const isLoading = loadingLayerId === layerId;
 
+                    return (
+                      <div key={layer.id} style={{ 
+                          display: 'flex', 
+                          alignItems: 'center', 
+                          padding: '8px', 
+                          borderRadius: '4px',
+                          background: isActive ? '#f0f9ff' : 'transparent',
+                          marginBottom: '2px'
+                      }}>
+                        {/* Имя слоя */}
+                        <div style={{ flex: 1, fontSize: '14px', color: '#333' }}>
+                          {layer.tableName}
+                          <span style={{ fontSize: '10px', color: '#999', marginLeft: '5px', border: '1px solid #eee', padding: '1px 3px', borderRadius: '3px' }}>
+                            {layer.geometryType}
+                          </span>
+                        </div>
+
+                        {/* Кнопка Глазик */}
+                        <button 
+                          onClick={() => toggleVectorLayerVisibility(group.dbName, layer)}
+                          disabled={isLoading}
+                          style={{ 
+                            background: 'none', 
+                            border: 'none', 
+                            cursor: isLoading ? 'wait' : 'pointer',
+                            padding: '5px',
+                            display: 'flex',
+                            alignItems: 'center'
+                          }}
+                          title={isActive ? "Скрыть" : "Показать"}
+                        >
+                          {isLoading ? (
+                            // Простой спиннер
+                            <div style={{ width: '16px', height: '16px', borderRadius: '50%', border: '2px solid #ccc', borderTopColor: '#2196F3', animation: 'spin 1s linear infinite' }}></div>
+                          ) : isActive ? (
+                            // Открытый глаз (синий)
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                              <path d="M1 12C1 12 5 4 12 4C19 4 23 12 23 12C23 12 19 20 12 20C5 20 1 12 1 12Z" stroke="#2196F3" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                              <circle cx="12" cy="12" r="3" stroke="#2196F3" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                            </svg>
+                          ) : (
+                            // Закрытый глаз (серый)
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                              <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20C5 20 1 12 1 12C1 12 2.33 9.05 4.7 7.26M1 1L23 23M9.9 4.24A9.12 9.12 0 0 1 12 4C19 4 23 12 23 12C23 12 21.93 14.51 19.9 16.24" stroke="#ccc" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                              <path d="M14.12 14.12A3 3 0 0 1 9.88 9.88" stroke="#ccc" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                            </svg>
+                          )}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              ))
+            )}
+          </div>
+          <style>{`@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style>
+        </div>
+      )}
+
+      {/* --- КАРТА --- */}
+      <MapContainer center={[43, 47]} zoom={5} style={{ height: '100%', width: '100%' }} zoomControl={false} maxZoom={20}>
+        <SetMapRef />
         <TileLayer url={baseLayer} maxZoom={20} />
         <CustomZoomControl />
 
-        {showPanoLayer && (
-          <PanoLayer
-            selectedMarker={selectedMarker}
-            onMarkerClick={handleMarkerClick}
-          />
-        )}
+        {showPanoLayer && <PanoLayer selectedMarker={selectedMarker} onMarkerClick={handleMarkerClick} />}
+        
+        {showOrthoLayer && selectedOrthos.map((ortho) => (
+            <TileLayer key={ortho.id} url={`https://api.botplus.ru/orthophotos/${ortho.id}/tiles/{z}/{x}/{y}.png`} maxZoom={20} opacity={0.7} />
+        ))}
 
-        {showOrthoLayer &&
-          selectedOrthos.map((ortho) => (
-            <TileLayer
-              key={ortho.id}
-              url={`https://api.botplus.ru/orthophotos/${ortho.id}/tiles/{z}/{x}/{y}.png`}
-              maxZoom={20}
-              opacity={0.7}
+        {/* Рендерим только те слои, которые есть в activeVectorIds */}
+        {Array.from(activeVectorIds).map((layerId) => {
+          const vectorInfo = loadedVectors.get(layerId);
+          if (!vectorInfo) return null;
+
+          return (
+            <GeoJSON 
+              key={layerId}
+              data={vectorInfo.data}
+              style={getVectorStyle}
+              pointToLayer={(feature, latlng) => L.marker(latlng, { icon: defaultIcon })}
+              onEachFeature={(feature, layer) => {
+                  if (feature.properties) {
+                      const rows = Object.entries(feature.properties).map(([k, v]) => `
+                          <tr style="border-bottom: 1px solid #eee;">
+                              <td style="padding: 4px; font-weight: bold; color: #555;">${k}</td>
+                              <td style="padding: 4px;">${v}</td>
+                          </tr>
+                      `).join('');
+                      layer.bindPopup(`
+                        <div style="font-family: sans-serif; font-size: 13px; max-height: 300px; overflow-y: auto;">
+                          <h4 style="margin: 0 0 5px 0;">${vectorInfo.name}</h4>
+                          <table style="width:100%; border-collapse: collapse;">${rows}</table>
+                        </div>
+                      `, { maxWidth: 300 });
+                  }
+              }}
             />
-          ))}
+          );
+        })}
 
         <MapClickHandler />
         <MapEventHandlers setContextMenu={setContextMenu} />
       </MapContainer>
 
-      {/* Панель с выбором ортофото */}
-      {showOrthoPanel && (
-        <OrthoPanel
-          onClose={() => setShowOrthoPanel(false)}
-          orthoImages={orthoImages}
-          onOrthoSelect={handleOrthoSelect}
-          selectedOrthos={selectedOrthos}
-          fitToBounds={fitToOrthoBounds}
-        />
-      )}
+      {showOrthoPanel && <OrthoPanel onClose={() => setShowOrthoPanel(false)} orthoImages={orthoImages} onOrthoSelect={handleOrthoSelect} selectedOrthos={selectedOrthos} fitToBounds={fitToOrthoBounds} />}
+      
+      {showSelectionPanel && <SelectionPanel handleSelection={() => setShowSelectionPanel(false)} closePanel={() => setShowSelectionPanel(false)} />}
 
-      {/* Контекстное меню (копировать координаты) */}
-      <ContextMenu
-        contextMenu={contextMenu}
-        handleCopyCoordinates={copyCoordinatesHandler}
-      />
+      <ContextMenu contextMenu={contextMenu} handleCopyCoordinates={copyCoordinatesHandler} />
     </div>
   );
 };

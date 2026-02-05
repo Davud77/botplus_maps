@@ -10,14 +10,23 @@ try:
     from controllers.auth_controller import auth_blueprint
 except Exception:
     auth_blueprint = None
+
 try:
     from controllers.pano_controller import pano_blueprint
 except Exception:
     pano_blueprint = None
+
 try:
     from controllers.ortho_controller import ortho_blueprint
 except Exception:
     ortho_blueprint = None
+
+# Новый контроллер для Вектора (PostGIS)
+try:
+    # Имя файла: server/controllers/vector.py, переменная: vector_bp
+    from controllers.vector import vector_bp
+except Exception:
+    vector_bp = None
 
 # Пути к статике (сохраняем совместимость с текущей структурой)
 # Прежний код поднимался на один уровень вверх: parents[1] → /app
@@ -84,10 +93,17 @@ def create_app():
         return make_response("", 204)
 
     # ---------------- API ----------------
-    # Авторизация — строго под /api/auth/*
+    
+    # 1. Auth
     if auth_blueprint:
         app.register_blueprint(auth_blueprint, url_prefix="/api/auth")
-    # Остальные блюпринты регистрируем как есть (их внутренние пути уже могут начинаться с /api/*)
+    
+    # 2. Vector / PostGIS (Новый)
+    # Префикс /api + пути внутри контроллера (/vector/...) = /api/vector/...
+    if vector_bp:
+        app.register_blueprint(vector_bp, url_prefix="/api")
+
+    # 3. Pano & Ortho (Legacy - регистрируются как есть)
     if pano_blueprint:
         app.register_blueprint(pano_blueprint)
     if ortho_blueprint:
