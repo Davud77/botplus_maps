@@ -1,7 +1,8 @@
 // src/utils/api.ts
 
-// Ходим только на свой бэкенд того же origin (Flask отдаёт /api/*)
-const API_BASE = "/api";
+// Базовый путь. В PROD это будет относительный путь (nginx разрулит).
+// В DEV это перехватит прокси и отправит на localhost:5000.
+const API_BASE = "/api"; 
 
 /* -------------------- Общие типы -------------------- */
 export interface ApiOk {
@@ -20,7 +21,7 @@ export type ApiResp = ApiOk | ApiError;
 async function apiGet<T = any>(path: string): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     method: "GET",
-    credentials: "include",
+    credentials: "include", // Важно для кук
   });
   if (!res.ok) {
     const text = await res.text().catch(() => "");
@@ -43,8 +44,33 @@ async function apiPost<T = any>(path: string, body?: any): Promise<T> {
   return res.json();
 }
 
+async function apiPut<T = any>(path: string, body?: any): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`PUT ${path} failed: ${res.status} ${text}`);
+  }
+  return res.json();
+}
+
+async function apiDelete<T = any>(path: string): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: "DELETE",
+    credentials: "include",
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`DELETE ${path} failed: ${res.status} ${text}`);
+  }
+  return res.json();
+}
+
 /* -------------------- Auth API -------------------- */
-// Ответ /api/auth/me
 export type MeResponse =
   | { authenticated: false }
   | {
@@ -70,13 +96,21 @@ export async function authLogout(): Promise<ApiResp> {
   return apiPost<ApiResp>("/auth/logout", {});
 }
 
-/* -------------------- Примеры прикладных вызовов -------------------- */
-/** Панорамы (предполагается эндпоинт на сервере /api/panoramas) */
+/* -------------------- Data API -------------------- */
+
+// --- Панорамы ---
 export async function fetchPanoramas<T = any>(): Promise<T> {
   return apiGet<T>("/panoramas");
 }
 
-/** Загрузка файлов (POST /api/upload). Важно: без ручной установки Content-Type — его выставит браузер. */
+export async function updatePanoTags(id: number, tags: string): Promise<ApiOk> {
+  return apiPut<ApiOk>(`/pano_info/${id}`, { tags });
+}
+
+export async function deletePano(id: number): Promise<ApiOk> {
+  return apiDelete<ApiOk>(`/pano_info/${id}`);
+}
+
 export async function uploadFiles<T = any>(formData: FormData): Promise<T> {
   const res = await fetch(`${API_BASE}/upload`, {
     method: "POST",
@@ -88,4 +122,13 @@ export async function uploadFiles<T = any>(formData: FormData): Promise<T> {
     throw new Error(`POST /upload failed: ${res.status} ${text}`);
   }
   return res.json();
+}
+
+// --- Ортофото ---
+export async function fetchOrthophotos<T = any>(): Promise<T> {
+  return apiGet<T>("/orthophotos");
+}
+
+export async function deleteOrtho(id: number): Promise<ApiOk> {
+  return apiDelete<ApiOk>(`/orthophotos/${id}`);
 }

@@ -3,7 +3,17 @@ import React, { FC, useEffect, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import Header from './Header';
 import { useAuth } from '../hooks/useAuth';
+// Импортируем методы API
+import { 
+  fetchPanoramas, 
+  fetchOrthophotos, 
+  updatePanoTags, 
+  deletePano, 
+  deleteOrtho 
+  // В будущем сюда добавить: fetchVectorDbs, createVectorDb, connectVectorDb
+} from '../utils/api';
 
+// --- Интерфейсы ---
 
 interface PanoItem {
   id: number;
@@ -26,6 +36,23 @@ interface OrthoItem {
   };
 }
 
+// Новые интерфейсы для Вектора
+interface VectorLayerItem {
+  id: number;
+  tableName: string;
+  geometryType: 'POINT' | 'POLYGON' | 'LINESTRING' | 'UNKNOWN';
+  featureCount: number;
+}
+
+interface VectorDbItem {
+  id: number;
+  name: string;
+  host: string;
+  port: number;
+  status: 'connected' | 'error';
+  layers: VectorLayerItem[]; // Вложенный список слоев
+}
+
 interface AuthContextType {
   logout: () => void;
   user?: {
@@ -38,7 +65,7 @@ const ProfilePage: FC = () => {
   const navigate = useNavigate();
   const { logout, user } = useAuth() as AuthContextType;
 
-  const [activeTab, setActiveTab] = useState<'overview' | 'panoramas' | 'ortho' | 'dashboard'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'vector' | 'panoramas' | 'ortho' | 'dashboard'>('overview');
 
   // --- Панорамы ---
   const [panos, setPanos] = useState<PanoItem[]>([]);
@@ -53,21 +80,22 @@ const ProfilePage: FC = () => {
   const [loadingOrthos, setLoadingOrthos] = useState(false);
   const [errorOrthos, setErrorOrthos] = useState('');
 
+  // --- Векторные данные (PostGIS) ---
+  const [vectorDbs, setVectorDbs] = useState<VectorDbItem[]>([]);
+  const [loadingVector, setLoadingVector] = useState(false);
+  const [errorVector, setErrorVector] = useState('');
+
   // -------------------------------------------------------------------------
   //                               ЗАГРУЗКА ДАННЫХ
   // -------------------------------------------------------------------------
   
-  // Загрузка панорам (пример с одним эндпоинтом, который возвращает полную инфу о каждой панораме)
+  // Загрузка панорам
   useEffect(() => {
-    const fetchPanoramas = async () => {
+    const loadPanoramas = async () => {
       setLoadingPanos(true);
       setErrorPanos('');
       try {
-        const response = await fetch('https://api.botplus.ru/panoramas'); 
-        if (!response.ok) {
-          throw new Error(`Ошибка при загрузке панорам: ${response.statusText}`);
-        }
-        const data: PanoItem[] = await response.json();
+        const data: PanoItem[] = await fetchPanoramas();
         setPanos(data);
       } catch (error) {
         if (error instanceof Error) {
@@ -80,20 +108,18 @@ const ProfilePage: FC = () => {
       }
     };
 
-    fetchPanoramas();
-  }, []);
+    if (activeTab === 'panoramas') {
+      loadPanoramas();
+    }
+  }, [activeTab]);
 
   // Загрузка ортофотопланов
   useEffect(() => {
-    const fetchOrthos = async () => {
+    const loadOrthos = async () => {
       setLoadingOrthos(true);
       setErrorOrthos('');
       try {
-        const response = await fetch('https://api.botplus.ru/orthophotos');
-        if (!response.ok) {
-          throw new Error(`Ошибка при загрузке ортофотопланов: ${response.statusText}`);
-        }
-        const data: OrthoItem[] = await response.json();
+        const data: OrthoItem[] = await fetchOrthophotos();
         setOrthos(data);
       } catch (error) {
         if (error instanceof Error) {
@@ -106,8 +132,56 @@ const ProfilePage: FC = () => {
       }
     };
 
-    fetchOrthos();
-  }, []);
+    if (activeTab === 'ortho') {
+      loadOrthos();
+    }
+  }, [activeTab]);
+
+  // Загрузка векторных баз (MOCK DATA - Имитация)
+  useEffect(() => {
+    const loadVectorDbs = async () => {
+      setLoadingVector(true);
+      setErrorVector('');
+      try {
+        // TODO: Заменить на реальный вызов await fetchVectorDbs();
+        // Имитация задержки сети
+        await new Promise(resolve => setTimeout(resolve, 600));
+
+        const mockData: VectorDbItem[] = [
+          {
+            id: 1,
+            name: 'main_city_db',
+            host: 'localhost',
+            port: 5432,
+            status: 'connected',
+            layers: [
+              { id: 101, tableName: 'buildings_polygon', geometryType: 'POLYGON', featureCount: 1250 },
+              { id: 102, tableName: 'trees_point', geometryType: 'POINT', featureCount: 5000 },
+            ]
+          },
+          {
+            id: 2,
+            name: 'external_project_db',
+            host: '192.168.1.50',
+            port: 5432,
+            status: 'connected',
+            layers: [
+              { id: 201, tableName: 'roads_lines', geometryType: 'LINESTRING', featureCount: 340 }
+            ]
+          }
+        ];
+        setVectorDbs(mockData);
+      } catch (error) {
+        setErrorVector('Ошибка загрузки списка баз данных');
+      } finally {
+        setLoadingVector(false);
+      }
+    };
+
+    if (activeTab === 'vector') {
+      loadVectorDbs();
+    }
+  }, [activeTab]);
 
   // -------------------------------------------------------------------------
   //                           ОБРАБОТЧИКИ ДЕЙСТВИЙ
@@ -126,16 +200,7 @@ const ProfilePage: FC = () => {
 
   const handleSaveTags = async (panoId: number) => {
     try {
-      const response = await fetch(`https://api.botplus.ru/pano_info/${panoId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tags: editTags }),
-      });
-      const result = await response.json();
-      if (!response.ok) {
-        throw new Error(result.error || result.message || 'Ошибка обновления');
-      }
-      // Обновляем состояние
+      await updatePanoTags(panoId, editTags);
       setPanos((prev) =>
         prev.map((p) => (p.id === panoId ? { ...p, tags: editTags } : p))
       );
@@ -143,59 +208,57 @@ const ProfilePage: FC = () => {
       setEditId(null);
       setEditTags('');
     } catch (error) {
-      if (error instanceof Error) {
-        alert(`Ошибка обновления: ${error.message}`);
-      } else {
-        alert('Неизвестная ошибка обновления тегов');
-      }
+      alert(error instanceof Error ? error.message : 'Ошибка');
     }
   };
 
-  // --- Удаление панорамы ---
   const handleDelete = async (panoId: number) => {
-    const confirmDel = window.confirm('Уверены, что хотите удалить панораму?');
-    if (!confirmDel) return;
-
+    if (!window.confirm('Уверены, что хотите удалить панораму?')) return;
     try {
-      const response = await fetch(`https://api.botplus.ru/pano_info/${panoId}`, {
-        method: 'DELETE',
-      });
-      const result = await response.json();
-      if (!response.ok) {
-        throw new Error(result.error || result.message || 'Ошибка удаления');
-      }
+      await deletePano(panoId);
       setPanos((prev) => prev.filter((p) => p.id !== panoId));
       alert('Панорама удалена!');
     } catch (error) {
-      if (error instanceof Error) {
-        alert(`Ошибка удаления: ${error.message}`);
-      } else {
-        alert('Неизвестная ошибка при удалении панорамы');
-      }
+      alert(error instanceof Error ? error.message : 'Ошибка');
     }
   };
 
-  // --- Удаление ортофотоплана ---
   const handleDeleteOrtho = async (orthoId: number) => {
-    const confirmDel = window.confirm('Удалить ортофотоплан?');
-    if (!confirmDel) return;
-
+    if (!window.confirm('Удалить ортофотоплан?')) return;
     try {
-      const response = await fetch(`https://api.botplus.ru/orthophotos/${orthoId}`, {
-        method: 'DELETE',
-      });
-      const result = await response.json();
-      if (!response.ok) {
-        throw new Error(result.error || result.message || 'Ошибка удаления ортофотоплана');
-      }
+      await deleteOrtho(orthoId);
       setOrthos((prev) => prev.filter((o) => o.id !== orthoId));
       alert('Ортофотоплан удалён!');
     } catch (error) {
-      if (error instanceof Error) {
-        alert(`Ошибка удаления: ${error.message}`);
-      } else {
-        alert('Неизвестная ошибка при удалении ортофотоплана');
-      }
+      alert(error instanceof Error ? error.message : 'Ошибка');
+    }
+  };
+
+  // --- Методы для Вектора (Заглушки) ---
+
+  const handleCreateVectorDB = async () => {
+    const dbName = prompt('Введите название новой базы данных (PostGIS):');
+    if (!dbName) return;
+
+    try {
+      // TODO: await createVectorDb({ name: dbName });
+      alert(`Запрос на создание БД "${dbName}" отправлен (Logic pending)`);
+      // После успеха обновить список setVectorDbs(...)
+    } catch (error) {
+      alert('Ошибка при создании БД');
+    }
+  };
+
+  const handleConnectVectorDB = async () => {
+    const connectionString = prompt('Введите строку подключения или Host (напр. 192.168.1.1):');
+    if (!connectionString) return;
+
+    try {
+      // TODO: await connectExternalDb({ host: connectionString });
+      alert(`Подключение к "${connectionString}" инициировано (Logic pending)`);
+      // После успеха обновить список
+    } catch (error) {
+      alert('Ошибка подключения');
     }
   };
 
@@ -225,13 +288,10 @@ const ProfilePage: FC = () => {
           <div className="info-grid">
             <div className="info-label">Email</div>
             <div className="info-value">{user?.email || 'example@gmail.com'}</div>
-
             <div className="info-label">Полное имя</div>
             <div className="info-value">{user?.name || 'Davud'}</div>
-
             <div className="info-label">Имя</div>
             <div className="info-value">Davud</div>
-
             <div className="info-label">Логин</div>
             <div className="info-value">davud</div>
           </div>
@@ -251,6 +311,91 @@ const ProfilePage: FC = () => {
           </div>
         </div>
       </div>
+    </div>
+  );
+
+  // --- Новый рендер для вкладки Вектор ---
+  const renderVector = () => (
+    <div className="table-container">
+      <div className="table-header" style={{ justifyContent: 'space-between' }}>
+        <h3>Управление PostGIS</h3>
+        <div style={{ display: 'flex', gap: '10px' }}>
+          {/* Кнопка 1: Создать новую БД */}
+          <button 
+            className="primary-button" 
+            onClick={handleCreateVectorDB}
+          >
+            + Создать БД
+          </button>
+          {/* Кнопка 2: Подключить существующую БД */}
+          <button 
+            className="primary-button" 
+            style={{ backgroundColor: '#2196F3' }} // Отличаем цветом
+            onClick={handleConnectVectorDB}
+          >
+            &#128279; Подключить БД
+          </button>
+        </div>
+      </div>
+
+      {loadingVector && <div style={{ padding: '20px' }}>Загрузка списка баз данных...</div>}
+      {errorVector && <div style={{ color: 'red', padding: '20px' }}>{errorVector}</div>}
+
+      {!loadingVector && !errorVector && vectorDbs.length === 0 && (
+        <div className="empty-state">Нет подключенных баз данных</div>
+      )}
+
+      {/* Список баз данных */}
+      {!loadingVector && !errorVector && vectorDbs.map((db) => (
+        <div key={db.id} className="section" style={{ marginTop: '20px', marginBottom: '20px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #eee', paddingBottom: '10px', marginBottom: '10px' }}>
+            <div>
+              <h4 style={{ margin: 0 }}>🗄️ {db.name}</h4>
+              <small style={{ color: '#666' }}>Host: {db.host}:{db.port} • Status: <span style={{ color: 'green' }}>{db.status}</span></small>
+            </div>
+            <button className="danger-button" onClick={() => alert('Отключение БД не реализовано')}>Отключить</button>
+          </div>
+
+          {/* Список слоев внутри базы */}
+          {db.layers.length === 0 ? (
+            <div style={{ padding: '10px', color: '#888', fontStyle: 'italic' }}>Нет доступных слоев (таблиц)</div>
+          ) : (
+            <table className="data-table" style={{ marginTop: '0' }}>
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Имя слоя (Table)</th>
+                  <th>Тип геометрии</th>
+                  <th>Объектов</th>
+                  <th>Действия</th>
+                </tr>
+              </thead>
+              <tbody>
+                {db.layers.map((layer) => (
+                  <tr key={layer.id}>
+                    <td>{layer.id}</td>
+                    <td><b>{layer.tableName}</b></td>
+                    <td>
+                      <span style={{ 
+                        padding: '2px 6px', 
+                        borderRadius: '4px', 
+                        backgroundColor: layer.geometryType === 'POLYGON' ? '#e3f2fd' : '#e8f5e9',
+                        fontSize: '0.85em'
+                      }}>
+                        {layer.geometryType}
+                      </span>
+                    </td>
+                    <td>{layer.featureCount}</td>
+                    <td>
+                      <button className="icon-button" title="Просмотр на карте">👁️</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      ))}
     </div>
   );
 
@@ -432,6 +577,12 @@ const ProfilePage: FC = () => {
             Обзор
           </button>
           <button
+            className={`tab-button ${activeTab === 'vector' ? 'active' : ''}`}
+            onClick={() => setActiveTab('vector')}
+          >
+            Вектор
+          </button>
+          <button
             className={`tab-button ${activeTab === 'panoramas' ? 'active' : ''}`}
             onClick={() => setActiveTab('panoramas')}
           >
@@ -453,6 +604,7 @@ const ProfilePage: FC = () => {
 
         <div className="tab-content">
           {activeTab === 'overview' && renderOverview()}
+          {activeTab === 'vector' && renderVector()}
           {activeTab === 'panoramas' && renderPanoramas()}
           {activeTab === 'ortho' && renderOrtho()}
           {activeTab === 'dashboard' && renderDashboard()}
