@@ -13,7 +13,6 @@ import { MapHeader } from './ui/MapHeader';
 import { VectorPanel } from './ui/panels/VectorPanel';
 import { OrthoPanel } from './ui/panels/OrthoPanel';
 import { BaseLayersPanel } from './ui/panels/BaseLayersPanel';
-import { SelectionPanel } from './ui/panels/SelectionPanel';
 
 // --- VIEWERS ---
 import PanoramaViewer from './ui/viewers/PanoramaViewer'; // <-- Исправленный путь
@@ -21,7 +20,7 @@ import PanoramaViewer from './ui/viewers/PanoramaViewer'; // <-- Исправл�
 // --- LAYERS ---
 import PanoLayer from './layers/PanoLayer'; // <-- Исправленный путь
 import { VectorLayerRenderer } from './layers/VectorLayerRenderer'; // <-- Исправленный путь
-import { OrthoTileLayer } from './layers/OrthoTileLayer'; // <-- Исправленный путь
+import { OrthoTileLayer } from './layers/OrthoLayer'; // <-- Исправленный путь
 
 // --- CORE ---
 import CustomZoomControl from './core/CustomZoomControl'; // <-- Исправленный путь
@@ -83,7 +82,6 @@ const MapPage: React.FC = () => {
       {activePanel === 'vector' && <VectorPanel onClose={closeAll} />}
       {activePanel === 'baseLayers' && <BaseLayersPanel onClose={closeAll} />}
       {activePanel === 'ortho' && <OrthoPanel onClose={closeAll} />}
-      {activePanel === 'selection' && <SelectionPanel onClose={closeAll} />}
 
       {/* 3. PANORAMA VIEWER */}
       {selectedMarker && isPanoVisible && (

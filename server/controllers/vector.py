@@ -4,12 +4,12 @@ from psycopg2 import sql
 from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
 import os
 import math
+import xml.etree.ElementTree as ET
 
 vector_bp = Blueprint('vector', __name__)
 
 # --- ПОДКЛЮЧЕНИЕ К БД (ЧЕРЕЗ PGBOUNCER) ---
 def get_db_connection(dbname=None):
-    # Берем настройки из ENV
     host = os.environ.get('DB_HOST', 'pgbouncer')
     port = os.environ.get('DB_PORT', '6432')
     user = os.environ.get('DB_USER', 'botplus_user')
@@ -258,7 +258,6 @@ def get_vector_tile(db_name, schema, table_name, z, x, y):
         
         cur = conn.cursor()
 
-        # Метаданные
         cur.execute(
             "SELECT f_geometry_column, srid FROM geometry_columns WHERE f_table_schema=%s AND f_table_name=%s",
             (schema, table_name)
@@ -266,7 +265,6 @@ def get_vector_tile(db_name, schema, table_name, z, x, y):
         res = cur.fetchone()
         
         if not res:
-            # Fallback
             cur.execute("""
                 SELECT column_name 
                 FROM information_schema.columns 
@@ -282,7 +280,6 @@ def get_vector_tile(db_name, schema, table_name, z, x, y):
             geom_col, srid = res
             if not srid or srid == 0: srid = 4326
 
-        # Динамические атрибуты
         cur.execute("""
             SELECT column_name 
             FROM information_schema.columns 
@@ -335,10 +332,9 @@ def get_vector_tile(db_name, schema, table_name, z, x, y):
     finally:
         release_db_connection(conn, db_name)
 
-# --- 7. COMBINED VECTOR TILES (NEW: DYNAMIC ATTRIBUTES) ---
+# --- 7. COMBINED VECTOR TILES ---
 @vector_bp.route('/vector/tiles/combined/<db_name>/<int:z>/<int:x>/<int:y>.pbf', methods=['GET'])
 def get_combined_tiles(db_name, z, x, y):
-    # Получаем параметры
     layers_param = request.args.get('layers', '')
     schema = request.args.get('schema', 'public')
     
@@ -353,7 +349,6 @@ def get_combined_tiles(db_name, z, x, y):
         
         cur = conn.cursor()
         
-        # 1. Пакетное получение метаданных геометрии (SRID и имя гео-колонки)
         cur.execute("""
             SELECT f_table_name, f_geometry_column, srid 
             FROM geometry_columns 
@@ -361,14 +356,11 @@ def get_combined_tiles(db_name, z, x, y):
         """, (schema, table_names))
         
         meta_rows = cur.fetchall()
-        # Словарь: { 'table1': {'col': 'geom', 'srid': 4326}, ... }
         meta_dict = {
             row[0]: {'col': row[1], 'srid': row[2] if row[2] > 0 else 4326} 
             for row in meta_rows
         }
 
-        # 2. [FIX] Пакетное получение реальных имен колонок для всех таблиц
-        # Это нужно, чтобы не запрашивать несуществующий "properties"
         cur.execute("""
             SELECT table_name, column_name 
             FROM information_schema.columns 
@@ -382,33 +374,26 @@ def get_combined_tiles(db_name, z, x, y):
                 attr_dict[t_name] = []
             attr_dict[t_name].append(c_name)
         
-        # 3. Границы тайла
         min_x, min_y, max_x, max_y = tile_bounds(z, x, y)
         
-        # 4. Строим составной SQL запрос
         subqueries = []
         params = []
         
         for tbl in table_names:
-            # Если нет инфы о геометрии, пропускаем
             if tbl not in meta_dict:
                 continue
                 
             geom_col = meta_dict[tbl]['col']
             srid = meta_dict[tbl]['srid']
             
-            # Формируем список колонок для SELECT (кроме геометрии)
             all_cols = attr_dict.get(tbl, [])
             valid_cols = [c for c in all_cols if c != geom_col]
             
             if valid_cols:
-                # Генерируем SQL: ", col1, col2, col3"
                 cols_select = sql.SQL(', ') + sql.SQL(', ').join(map(sql.Identifier, valid_cols))
             else:
                 cols_select = sql.SQL('')
             
-            # Подзапрос
-            # Используем COALESCE(..., ''), чтобы пустой слой не испортил конкатенацию
             sq = sql.SQL("""
                 COALESCE(
                     (
@@ -419,7 +404,7 @@ def get_combined_tiles(db_name, z, x, y):
                                     ST_Transform(ST_Force2D(t.{geom_col_id}), 3857), 
                                     ST_MakeEnvelope(%s, %s, %s, %s, 3857)
                                 ) AS geom
-                                {cols_select} -- [FIX] Вставляем реальные колонки таблицы
+                                {cols_select}
                             FROM {schema_id}.{table_id} t
                             WHERE 
                                 t.{geom_col_id} && ST_Transform(ST_MakeEnvelope(%s, %s, %s, %s, 3857), {srid_literal})
@@ -437,13 +422,11 @@ def get_combined_tiles(db_name, z, x, y):
             )
             
             subqueries.append(sq)
-            # Добавляем 8 координат (4 для ST_MakeEnvelope в SELECT, 4 для WHERE)
             params.extend([min_x, min_y, max_x, max_y, min_x, min_y, max_x, max_y])
 
         if not subqueries:
             return b'', 204
 
-        # Объединяем все части через конкатенацию байтов (||)
         final_query = sql.SQL("SELECT ") + sql.SQL(" || ").join(subqueries) + sql.SQL(" AS full_mvt")
         
         cur.execute(final_query, params)
@@ -457,7 +440,6 @@ def get_combined_tiles(db_name, z, x, y):
 
         response = make_response(bytes(full_mvt))
         response.headers['Content-Type'] = 'application/vnd.mapbox-vector-tile'
-        # Кэширование 1 день
         response.headers['Cache-Control'] = 'public, max-age=86400'
         
         return response
@@ -467,3 +449,70 @@ def get_combined_tiles(db_name, z, x, y):
         return jsonify({'error': str(e)}), 500
     finally:
         release_db_connection(conn, db_name)
+
+# --- 8. ЭНДПОИНТ ДЛЯ ПОЛУЧЕНИЯ СТИЛЯ ИЗ БАЗЫ (FIXED & IMPROVED) ---
+@vector_bp.route('/vector/styles/<db_name>/<schema>/<table_name>', methods=['GET'])
+def get_layer_style(db_name, schema, table_name):
+    conn = None
+    try:
+        conn = get_db_connection(db_name)
+        if not conn: return jsonify({'error': 'Connection failed'}), 500
+        
+        cur = conn.cursor()
+        
+        # [FIX] Используем LOWER для нечувствительности к регистру имен схем и таблиц
+        cur.execute("""
+            SELECT styleqml FROM public.layer_styles 
+            WHERE LOWER(f_table_schema) = LOWER(%s) AND LOWER(f_table_name) = LOWER(%s)
+            ORDER BY update_time DESC LIMIT 1
+        """, (schema, table_name))
+        
+        row = cur.fetchone()
+        if not row or not row[0]:
+            return jsonify({'error': 'Style not found'}), 404
+            
+        qml_content = row[0]
+        # В некоторых версиях psycopg2 xml возвращается как объект, приводим к строке
+        if not isinstance(qml_content, str):
+            qml_content = str(qml_content)
+
+        root = ET.fromstring(qml_content)
+        
+        # Базовые значения стиля
+        style_data = {
+            'color': '#3388ff',
+            'weight': 1,
+            'fillOpacity': 0.4,
+            'fill': True
+        }
+
+        # Собираем все пропсы в словарь для удобного поиска
+        props = {prop.get('k'): prop.get('v') for prop in root.findall(".//prop")}
+
+        # 1. Цвет (приоритет заливке, затем границе)
+        raw_color = props.get('color') or props.get('outline_color') or props.get('line_color')
+        if raw_color:
+            c = raw_color.split(',')
+            if len(c) >= 3:
+                hex_color = '#%02x%02x%02x' % (int(c[0]), int(c[1]), int(c[2]))
+                style_data['color'] = hex_color
+                style_data['fillColor'] = hex_color
+                if len(c) == 4:
+                    style_data['fillOpacity'] = round(int(c[3]) / 255, 2)
+
+        # 2. Толщина линии (weight)
+        width = props.get('outline_width') or props.get('line_width') or props.get('width')
+        if width:
+            try:
+                style_data['weight'] = float(width)
+            except:
+                pass
+
+        cur.close()
+        return jsonify(style_data)
+
+    except Exception as e:
+        print(f"!!! Style Error: {e}")
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if conn: release_db_connection(conn, db_name)

@@ -1,8 +1,8 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { useVectorStore } from '../hooks/useVectorStore';
 import VectorTileLayer from './VectorTileLayer';
 
-// Вспомогательная функция для генерации уникального цвета по строке
+// Вспомогательная функция (оставляем как fallback)
 const stringToColor = (str: string) => {
   let hash = 0;
   for (let i = 0; i < str.length; i++) {
@@ -14,26 +14,87 @@ const stringToColor = (str: string) => {
 
 export const VectorLayerRenderer = () => {
   const { activeVectorIds } = useVectorStore();
+  
+  // Хранилище стилей: { [tableName]: { style object } }
+  const [dbStyles, setDbStyles] = useState<Record<string, any>>({});
+  
+  // Используем Ref для отслеживания текущих запросов, чтобы не запрашивать один слой дважды
+  const fetchingRef = useRef<Set<string>>(new Set());
 
-  // 1. ГРУППИРОВКА СЛОЕВ
-  // Мы не рендерим каждый слой отдельно. Мы группируем их по Базе и Схеме.
-  // Результат: { "dbName/schema": ["table1", "table2", "table3"] }
+  // 1. ЗАГРУЗКА СТИЛЕЙ
+  useEffect(() => {
+    if (!activeVectorIds || activeVectorIds.size === 0) return;
+
+    activeVectorIds.forEach(async (layerId) => {
+      // ПРАВИЛЬНЫЙ ПАРСИНГ: "db-schema-table-name-with-dashes"
+      // parts[0] = db, parts[1] = schema, остальное = tableName
+      const parts = layerId.split('-');
+      if (parts.length < 3) return;
+
+      const dbName = parts[0];
+      const schema = parts[1];
+      const tableName = parts.slice(2).join('-'); // Собираем имя таблицы обратно
+
+      // Если стиль уже есть или он прямо сейчас загружается — выходим
+      if (dbStyles[tableName] || fetchingRef.current.has(layerId)) return;
+
+      fetchingRef.current.add(layerId);
+
+      try {
+        const response = await fetch(`/api/vector/styles/${dbName}/${schema}/${tableName}`);
+        
+        if (response.ok) {
+          const styleData = await response.json();
+          setDbStyles((prev) => ({
+            ...prev,
+            [tableName]: {
+              color: styleData.color,
+              weight: styleData.weight || 1,
+              opacity: 1,
+              fillColor: styleData.fillColor || styleData.color,
+              fill: true,
+              fillOpacity: styleData.fillOpacity || 0.4,
+            }
+          }));
+        } else {
+          // Если стиля в БД нет (404), генерируем цвет по названию
+          console.warn(`[Style] Using fallback for: ${tableName}`);
+          const color = stringToColor(tableName);
+          setDbStyles((prev) => ({
+            ...prev,
+            [tableName]: {
+              color,
+              weight: 1,
+              opacity: 1,
+              fillColor: color,
+              fill: true,
+              fillOpacity: 0.4,
+            }
+          }));
+        }
+      } catch (err) {
+        console.error(`[Style] Fetch error for ${tableName}:`, err);
+      } finally {
+        // Убираем из списка загрузки (не удаляем из dbStyles, чтобы не качать повторно)
+        fetchingRef.current.delete(layerId);
+      }
+    });
+  }, [activeVectorIds]); // Убрали dbStyles из зависимостей, чтобы избежать циклов
+
+  // 2. ГРУППИРОВКА СЛОЕВ ДЛЯ КОМБИНИРОВАННЫХ ТАЙЛОВ
   const groupedLayers = useMemo(() => {
     const groups: Record<string, string[]> = {};
 
     if (!activeVectorIds) return groups;
 
     activeVectorIds.forEach((layerId) => {
-      // Парсинг ID: "dbName-schema-tableName"
       const parts = layerId.split('-');
       if (parts.length < 3) return;
 
       const dbName = parts[0];
       const schema = parts[1];
-      // Собираем имя таблицы обратно (на случай дефисов в названии)
       const tableName = parts.slice(2).join('-');
 
-      // Ключ группы
       const groupKey = `${dbName}/${schema}`;
 
       if (!groups[groupKey]) {
@@ -54,40 +115,29 @@ export const VectorLayerRenderer = () => {
       {Object.entries(groupedLayers).map(([groupKey, tableNames]) => {
         const [dbName, schema] = groupKey.split('/');
         
-        // Если в группе нет таблиц, пропускаем
         if (!tableNames.length) return null;
 
-        // 2. ФОРМИРОВАНИЕ ЕДИНОГО URL
-        // Перечисляем все таблицы через запятую в параметре ?layers=...
         const layersParam = tableNames.join(',');
-        
-        // API endpoint, который мы создали в vector.py (get_combined_tiles)
         const tileUrl = `/api/vector/tiles/combined/${dbName}/{z}/{x}/{y}.pbf?layers=${layersParam}&schema=${schema}`;
 
-        // 3. ПОДГОТОВКА СТИЛЕЙ
-        // Формируем объект стилей для каждого слоя в этой группе
-        const styles: Record<string, any> = {};
+        // Сборка финального объекта стилей для конкретной группы на карте
+        const currentGroupStyles: Record<string, any> = {};
         
         tableNames.forEach((tableName) => {
-          const color = stringToColor(tableName);
-          // Ключ в объекте styles должен совпадать с именем слоя в PBF (имя таблицы)
-          styles[tableName] = {
+          // Если данные из БД еще не пришли, показываем временный серый стиль
+          currentGroupStyles[tableName] = dbStyles[tableName] || {
             weight: 1,
-            color: color,
-            opacity: 1,
-            fillColor: color,
-            fill: true,
-            fillOpacity: 0.4,
+            color: '#888888',
+            opacity: 0.5,
+            fill: false
           };
         });
 
-        // 4. РЕНДЕРИНГ ОДНОГО КОМПОНЕНТА НА ВСЮ ГРУППУ
-        // Это сокращает количество сетевых запросов в N раз (где N - количество слоев)
         return (
           <VectorTileLayer
-            key={groupKey + '-' + layersParam} // Ключ меняется при добавлении/удалении слоев, заставляя перерисоваться
+            key={`${groupKey}-${layersParam}`} 
             url={tileUrl}
-            styles={styles} // Передаем ВСЕ стили разом (убедитесь, что VectorTileLayer обновлен для приема styles)
+            styles={currentGroupStyles}
             active={true}
           />
         );
