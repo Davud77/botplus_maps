@@ -1,6 +1,7 @@
-# controllers/auth_controller.py
+# ./backend/controllers/auth_controller.py
 from flask import Blueprint, request, jsonify, make_response
 from werkzeug.security import check_password_hash
+from flask_cors import cross_origin
 import time
 
 from services.auth_service import create_access_token, decode_access_token
@@ -40,25 +41,29 @@ def _clear_token_cookie(resp):
     return resp
 
 
-@auth_blueprint.post("/login")
+@auth_blueprint.route("/login", methods=["POST", "OPTIONS"])
+@cross_origin(supports_credentials=True)
 def login():
     """
-    Логин по username/password.
-    Успех: ставим HttpOnly cookie access_token и возвращаем {status:"ok"}.
-    Ошибка: 400/401 с {status:"error"/"fail", message}.
+    Login by username/password.
+    Success: sets HttpOnly access_token cookie and returns {status:"ok"}.
+    Error: 400/401 with {status:"error"/"fail", message}.
     """
+    if request.method == "OPTIONS":
+        return jsonify({"status": "ok"}), 200
+
     try:
         data = request.get_json(silent=True) or {}
         username = (data.get("username") or "").strip()
         password = (data.get("password") or "").strip()
 
         if not username or not password:
-            return jsonify({"status": "error", "message": "Укажите логин и пароль"}), 400
+            return jsonify({"status": "error", "message": "Please provide username and password"}), 400
 
         user = get_user_by_username(username)
         if not user or not check_password_hash(user["password"], password):
-            # одинаковый ответ для защиты от перебора
-            return jsonify({"status": "fail", "message": "Неверные учетные данные"}), 401
+            # Same response to protect against enumeration
+            return jsonify({"status": "fail", "message": "Invalid credentials"}), 401
 
         token = create_access_token(
             {"uid": user["id"], "u": user["username"]},
@@ -70,19 +75,27 @@ def login():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
-@auth_blueprint.post("/logout")
+@auth_blueprint.route("/logout", methods=["POST", "OPTIONS"])
+@cross_origin(supports_credentials=True)
 def logout():
-    """Выход: гасим cookie access_token."""
+    """Logout: clears access_token cookie."""
+    if request.method == "OPTIONS":
+        return jsonify({"status": "ok"}), 200
+
     resp = make_response(jsonify({"status": "ok"}), 200)
     return _clear_token_cookie(resp)
 
 
-@auth_blueprint.get("/me")
+@auth_blueprint.route("/me", methods=["GET", "OPTIONS"])
+@cross_origin(supports_credentials=True)
 def me():
     """
-    Проверка сессии по HttpOnly cookie.
-    Возвращает authenticated: true/false и информацию о пользователе при успехе.
+    Check session via HttpOnly cookie.
+    Returns authenticated: true/false and user info on success.
     """
+    if request.method == "OPTIONS":
+        return jsonify({"status": "ok"}), 200
+
     token = request.cookies.get(COOKIE_NAME)
     if not token:
         return jsonify({"authenticated": False}), 200

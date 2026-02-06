@@ -1,8 +1,11 @@
 // src/utils/api.ts
 
-// Базовый путь. В PROD это будет относительный путь (nginx разрулит).
-// В DEV это перехватит прокси и отправит на localhost:5000.
-const API_BASE = "/api"; 
+// [FIX] Определяем правильный адрес API
+// В разработке (локально) используем прямой адрес бэкенда (5580)
+// В продакшене (Docker) используем относительный путь
+const API_BASE = process.env.NODE_ENV === 'development' 
+  ? 'http://localhost:5580' 
+  : '';
 
 /* -------------------- Общие типы -------------------- */
 export interface ApiOk {
@@ -70,57 +73,65 @@ export interface BBox {
   maxLat: number;
 }
 
-/* -------------------- Низкоуровневые вызовы -------------------- */
-async function apiGet<T = any>(path: string): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    method: "GET",
-    credentials: "include", // Важно для кук
-  });
+/* -------------------- Низкоуровневые вызовы (с обработкой ошибок) -------------------- */
+
+async function handleResponse<T>(res: Response, url: string): Promise<T> {
+  // [FIX] Проверка на HTML (ошибка "Unexpected token <")
+  const contentType = res.headers.get("content-type");
+  if (contentType && contentType.includes("text/html")) {
+    const text = await res.text();
+    // Пытаемся вытащить заголовок из HTML ошибки для ясности
+    const titleMatch = text.match(/<title>(.*?)<\/title>/i);
+    const title = titleMatch ? titleMatch[1] : "HTML Page returned";
+    throw new Error(`Ошибка API (${res.status}): Сервер вернул HTML вместо JSON по адресу ${url}. Вероятно, неправильный путь. Заголовок: ${title}`);
+  }
+
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    throw new Error(`GET ${path} failed: ${res.status} ${text}`);
+    throw new Error(`Request failed: ${res.status} ${text}`);
   }
+
   return res.json();
 }
 
+async function apiGet<T = any>(path: string): Promise<T> {
+  const url = `${API_BASE}${path}`;
+  const res = await fetch(url, {
+    method: "GET",
+    credentials: "include", // Важно для кук
+  });
+  return handleResponse<T>(res, url);
+}
+
 async function apiPost<T = any>(path: string, body?: any): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
+  const url = `${API_BASE}${path}`;
+  const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     credentials: "include",
     body: body ? JSON.stringify(body) : undefined,
   });
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`POST ${path} failed: ${res.status} ${text}`);
-  }
-  return res.json();
+  return handleResponse<T>(res, url);
 }
 
 async function apiPut<T = any>(path: string, body?: any): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
+  const url = `${API_BASE}${path}`;
+  const res = await fetch(url, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     credentials: "include",
     body: body ? JSON.stringify(body) : undefined,
   });
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`PUT ${path} failed: ${res.status} ${text}`);
-  }
-  return res.json();
+  return handleResponse<T>(res, url);
 }
 
 async function apiDelete<T = any>(path: string): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
+  const url = `${API_BASE}${path}`;
+  const res = await fetch(url, {
     method: "DELETE",
     credentials: "include",
   });
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`DELETE ${path} failed: ${res.status} ${text}`);
-  }
-  return res.json();
+  return handleResponse<T>(res, url);
 }
 
 /* -------------------- Auth API -------------------- */
@@ -137,21 +148,23 @@ export type MeResponse =
       };
     };
 
+// [FIX] Добавлен префикс /api к путям авторизации, так как в app.py url_prefix="/api/auth"
 export async function authMe(): Promise<MeResponse> {
-  return apiGet<MeResponse>("/auth/me");
+  return apiGet<MeResponse>("/api/auth/me");
 }
 
 export async function authLogin(username: string, password: string): Promise<ApiResp> {
-  return apiPost<ApiResp>("/auth/login", { username, password });
+  return apiPost<ApiResp>("/api/auth/login", { username, password });
 }
 
 export async function authLogout(): Promise<ApiResp> {
-  return apiPost<ApiResp>("/auth/logout", {});
+  return apiPost<ApiResp>("/api/auth/logout", {});
 }
 
 /* -------------------- Data API -------------------- */
 
 // --- Панорамы ---
+// [NOTE] В app.py pano_blueprint зарегистрирован без префикса, поэтому пути от корня
 export async function fetchPanoramas<T = any>(): Promise<T> {
   return apiGet<T>("/panoramas");
 }
@@ -165,19 +178,17 @@ export async function deletePano(id: number): Promise<ApiOk> {
 }
 
 export async function uploadFiles<T = any>(formData: FormData): Promise<T> {
-  const res = await fetch(`${API_BASE}/upload`, {
+  const url = `${API_BASE}/upload`;
+  const res = await fetch(url, {
     method: "POST",
     credentials: "include",
     body: formData,
   });
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`POST /upload failed: ${res.status} ${text}`);
-  }
-  return res.json();
+  return handleResponse<T>(res, url);
 }
 
 // --- Ортофото ---
+// [NOTE] В app.py ortho_blueprint зарегистрирован без префикса
 export async function fetchOrthophotos(): Promise<OrthoItem[]> {
   return apiGet<OrthoItem[]>("/orthophotos");
 }
@@ -187,18 +198,18 @@ export async function deleteOrtho(id: number): Promise<ApiOk> {
 }
 
 /* -------------------- Vector / PostGIS API -------------------- */
+// [NOTE] В app.py vector_bp зарегистрирован с префиксом /api
 
-// Методы
 export async function fetchVectorDbs(): Promise<VectorDbItem[]> {
-  return apiGet<VectorDbItem[]>("/vector/databases");
+  return apiGet<VectorDbItem[]>("/api/vector/databases");
 }
 
 export async function createVectorDb(name: string): Promise<ApiOk> {
-  return apiPost<ApiOk>("/vector/create_db", { name });
+  return apiPost<ApiOk>("/api/vector/create_db", { name });
 }
 
 export async function fetchVectorLayers(dbName: string): Promise<VectorLayerItem[]> {
-  return apiGet<VectorLayerItem[]>(`/vector/layers/${dbName}`);
+  return apiGet<VectorLayerItem[]>(`/api/vector/layers/${dbName}`);
 }
 
 export async function createVectorLayer(
@@ -206,7 +217,7 @@ export async function createVectorLayer(
   tableName: string, 
   geomType: string
 ): Promise<ApiOk> {
-  return apiPost<ApiOk>("/vector/layers/create", { dbName, tableName, geomType });
+  return apiPost<ApiOk>("/api/vector/layers/create", { dbName, tableName, geomType });
 }
 
 // Обновленная функция с поддержкой BBOX
@@ -216,7 +227,7 @@ export async function fetchLayerData(
   schema: string = 'public',
   bounds?: BBox
 ): Promise<any> {
-  let url = `/vector/layers/${dbName}/${tableName}/data?schema=${schema}`;
+  let url = `/api/vector/layers/${dbName}/${tableName}/data?schema=${schema}`;
   
   if (bounds) {
     // Добавляем параметры границ экрана к запросу

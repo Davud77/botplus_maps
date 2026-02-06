@@ -1,31 +1,99 @@
-# ./backend/storage.py
-
 import os
-from flask import send_file, jsonify
 import io
+from flask import send_file, jsonify, Response
+from minio import Minio
+from minio.error import S3Error
 
-class LocalStorage:
+class MinioStorage:
     """
-    Класс для локального хранения файлов (загрузка, скачивание).
+    Класс для работы с S3-хранилищем (MinIO).
+    Заменяет LocalStorage, сохраняя интерфейс методов.
     """
-    def __init__(self, base_folder):
-        self.base_folder = base_folder
+    def __init__(self):
+        # Получаем настройки из переменных окружения (заданы в docker-compose)
+        self.endpoint = os.environ.get("MINIO_ENDPOINT", "minio:9000")
+        self.access_key = os.environ.get("MINIO_ACCESS_KEY", "minioadmin")
+        self.secret_key = os.environ.get("MINIO_SECRET_KEY", "minioadmin")
+        self.bucket_name = os.environ.get("MINIO_BUCKET_NAME", "panoramas")
+        # Для локальной разработки secure=False (http), для продакшена True (https)
+        self.secure = os.environ.get("MINIO_SECURE", "False").lower() == "true"
 
-    def save_file(self, file_stream, filename):
-        if not os.path.exists(self.base_folder):
-            os.makedirs(self.base_folder, exist_ok=True)
-        file_path = os.path.join(self.base_folder, filename)
-        file_stream.seek(0)
-        with open(file_path, "wb") as f:
-            f.write(file_stream.read())
-        return file_path
+        # Инициализация клиента
+        self.client = Minio(
+            self.endpoint,
+            access_key=self.access_key,
+            secret_key=self.secret_key,
+            secure=self.secure
+        )
+        self._ensure_bucket()
 
-    def send_local_file(self, filename, mimetype='application/octet-stream'):
-        file_path = os.path.join(self.base_folder, filename)
-        if os.path.exists(file_path):
-            return send_file(file_path, mimetype=mimetype, download_name=filename)
-        else:
-            return jsonify({"error": "File not found"}), 404
+    def _ensure_bucket(self):
+        """Создает бакет, если он не существует."""
+        try:
+            if not self.client.bucket_exists(self.bucket_name):
+                self.client.make_bucket(self.bucket_name)
+                print(f"Bucket '{self.bucket_name}' created.")
+        except S3Error as e:
+            print(f"MinIO Error: {e}")
+
+    def save_file(self, file_stream, filename, content_type="image/jpeg"):
+        """
+        Загружает файл в MinIO.
+        """
+        try:
+            # Сбрасываем указатель и определяем размер
+            file_stream.seek(0, 2)
+            file_size = file_stream.tell()
+            file_stream.seek(0)
+
+            # Загрузка
+            self.client.put_object(
+                self.bucket_name,
+                filename,
+                file_stream,
+                length=file_size,
+                content_type=content_type
+            )
+            # Возвращаем путь в формате bucket/filename (для БД)
+            return f"{self.bucket_name}/{filename}"
+        except Exception as e:
+            print(f"Error saving to MinIO: {e}")
+            raise e
+
+    def send_local_file(self, filename, mimetype='image/jpeg'):
+        """
+        Скачивает файл из MinIO и отдает его клиенту через Flask.
+        """
+        try:
+            # Получаем поток данных от MinIO
+            response = self.client.get_object(self.bucket_name, filename)
+            
+            # Читаем данные в память (для картинок это нормально)
+            # Для очень больших файлов лучше использовать потоковую передачу (Response stream)
+            file_data = io.BytesIO(response.read())
+            
+            # Важно закрыть соединение с MinIO
+            response.close()
+            response.release_conn()
+            
+            file_data.seek(0)
+            
+            return send_file(
+                file_data, 
+                mimetype=mimetype, 
+                download_name=filename
+            )
+        except S3Error as e:
+            print(f"MinIO Fetch Error: {e}")
+            return jsonify({"error": "File not found in storage"}), 404
+        except Exception as e:
+            print(f"General Error: {e}")
+            return jsonify({"error": str(e)}), 500
 
     def get_local_file_path(self, filename):
-        return os.path.join(self.base_folder, filename)
+        """
+        Возвращает URL или путь (для совместимости).
+        """
+        # Если нужно получить пре-подписанный URL (временную ссылку):
+        # return self.client.presigned_get_object(self.bucket_name, filename)
+        return f"{self.endpoint}/{self.bucket_name}/{filename}"

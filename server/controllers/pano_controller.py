@@ -1,24 +1,35 @@
 # ./backend/controllers/pano_controller.py
 
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, send_file
 from flask_cors import cross_origin
 import io
+import os
 import piexif
 from PIL import Image
 from datetime import datetime
+import psycopg2
+import traceback
+
+# Импорты ваших модулей
 from managers.pano_manager import PanoManager
-from database import Database
-import config
-from storage import LocalStorage
+from storage import MinioStorage
 from models.pano import Pano
+import config
 
 pano_blueprint = Blueprint("pano", __name__)
 
 class PanoController:
     def __init__(self):
-        self.db = Database()
-        self.pano_manager = PanoManager(self.db)
-        self.storage = LocalStorage(config.PANO_FOLDER)
+        # Инициализация хранилища S3 (MinIO)
+        self.storage = MinioStorage()
+
+    def _get_db_connection(self):
+        """
+        Создает соединение с PostgreSQL.
+        Использует DATABASE_URL из docker-compose (через PgBouncer).
+        """
+        dsn = os.environ.get("DATABASE_URL", "postgresql://botplus_user:botplus_password@pgbouncer:6432/botplus_db")
+        return psycopg2.connect(dsn)
 
     @staticmethod
     def register_routes(blueprint):
@@ -38,138 +49,179 @@ class PanoController:
 
     def get_panoramas(self):
         """
-        Возвращает краткий список панорам (id, latitude, longitude).
+        Возвращает краткий список панорам из PostGIS.
         """
+        conn = None
         try:
-            rows = self.pano_manager.get_pano_list()
-            panoramas = []
-            for row in rows:
-                panoramas.append({
-                    "id": row["id"],
-                    "latitude": row["latitude"],
-                    "longitude": row["longitude"]
-                })
-            return jsonify(panoramas)
+            conn = self._get_db_connection()
+            manager = PanoManager(conn)
+            rows = manager.get_pano_list()
+            return jsonify(rows)
         except Exception as e:
             return jsonify({"error": str(e)}), 500
+        finally:
+            if conn:
+                conn.close()
 
     def get_pano_info(self, pano_id):
         """
-        Возвращает информацию о конкретной панораме (без поля 'url', если оно есть).
+        Возвращает информацию о конкретной панораме.
         """
+        conn = None
         try:
-            row = self.pano_manager.get_pano_by_id(pano_id)
+            conn = self._get_db_connection()
+            manager = PanoManager(conn)
+            row = manager.get_pano_by_id(pano_id)
+            
             if row:
-                row_dict = dict(row)
-                row_dict.pop("url", None)
-                return jsonify(row_dict)
+                return jsonify(row)
             else:
                 return jsonify({"error": "Panorama not found"}), 404
         except Exception as e:
+            print(f"Error getting pano info: {e}")
             return jsonify({"error": str(e)}), 500
+        finally:
+            if conn:
+                conn.close()
 
     def download_pano_file(self, pano_id):
         """
-        Отдаёт файл панорамы (JPG), если он существует в локальном хранилище.
+        Скачивает файл из MinIO и отдает клиенту.
         """
+        conn = None
         try:
-            row = self.pano_manager.get_pano_by_id(pano_id)
+            conn = self._get_db_connection()
+            manager = PanoManager(conn)
+            row = manager.get_pano_by_id(pano_id)
+            
             if not row:
                 return jsonify({"error": "Panorama not found"}), 404
 
             filename = row["filename"]
-            file_type = row["file_type"] if row["file_type"] else "application/octet-stream"
+            file_type = "image/jpeg"
+            
             return self.storage.send_local_file(filename, mimetype=file_type)
         except Exception as e:
+            print(f"Error downloading file: {e}")
             return jsonify({"error": str(e)}), 500
+        finally:
+            if conn:
+                conn.close()
 
     @cross_origin()
     def upload_pano_files(self):
         """
-        Загрузка панорамных фото (JPEG).
+        Загрузка панорамных фото (JPEG) -> MinIO + PostGIS.
         """
         if request.method == "OPTIONS":
             return "", 200
 
         uploaded_files = request.files.getlist("files")
         tags = request.form.get("tags", "")
-        user_id = request.form.get("user_id", 1)
+        
+        try:
+            user_id = int(request.form.get("user_id", 1))
+        except ValueError:
+            user_id = 1
 
         successful_uploads = []
         failed_uploads = []
         skipped_files = []
 
-        for file in uploaded_files:
-            original_filename = file.filename
-            try:
-                file_content = file.read()
-                file_stream = io.BytesIO(file_content)
-                file_stream.seek(0)
+        conn = None
+        try:
+            conn = self._get_db_connection()
+            manager = PanoManager(conn)
 
-                with Image.open(file_stream) as img:
-                    # Проверка EXIF
-                    if "exif" not in img.info:
-                        raise ValueError("Файл без EXIF данных")
+            for file in uploaded_files:
+                original_filename = file.filename
+                try:
+                    file_content = file.read()
+                    file_stream = io.BytesIO(file_content)
+                    file_stream.seek(0)
 
-                    exif_dict = piexif.load(img.info["exif"])
+                    with Image.open(file_stream) as img:
+                        # 1. Проверка EXIF
+                        if "exif" not in img.info:
+                            raise ValueError("Файл без EXIF данных")
 
-                    # Извлекаем GPS
-                    latitude, longitude, altitude = self._get_gps_coordinates(exif_dict)
-                    if latitude is None or longitude is None:
-                        raise ValueError("Файл без GPS координат")
+                        try:
+                            exif_dict = piexif.load(img.info["exif"])
+                        except Exception:
+                            raise ValueError("Не удалось прочитать структуру EXIF")
 
-                    file_size = len(file_content)
-                    file_type = file.mimetype or "image/jpeg"
-                    width, height = img.width, img.height
-                    first_photo_date = self._extract_datetime_original(exif_dict)
-                    new_filename = self._generate_filename(original_filename, first_photo_date)
-                    model = self._get_model(exif_dict)
-                    focal_length = self._get_focal_length(exif_dict)
+                        # 2. Извлекаем GPS (Безопасно!)
+                        latitude, longitude, altitude = self._get_gps_coordinates(exif_dict)
+                        if latitude is None or longitude is None:
+                            raise ValueError("Файл без валидных GPS координат")
 
-                    # Сохраняем локально
-                    file_save_stream = io.BytesIO(file_content)
-                    self.storage.save_file(file_save_stream, new_filename)
+                        file_size = len(file_content)
+                        file_type = file.mimetype or "image/jpeg"
+                        width, height = img.width, img.height
+                        
+                        first_photo_date = self._extract_datetime_original(exif_dict)
+                        if not first_photo_date:
+                            first_photo_date = datetime.now()
 
-                    # Запись в БД
-                    pano_obj = Pano(
-                        filename=new_filename,
-                        latitude=latitude,
-                        longitude=longitude,
-                        user_id=user_id,
-                        file_type=file_type,
-                        file_size=file_size,
-                        width=width,
-                        height=height,
-                        first_photo_date=first_photo_date,
-                        model=model,
-                        altitude=altitude,
-                        focal_length=focal_length,
-                        tags=tags
-                    )
-                    self.pano_manager.create_pano(pano_obj)
+                        new_filename = self._generate_filename(original_filename, first_photo_date)
+                        model = self._get_model(exif_dict)
+                        focal_length = self._get_focal_length(exif_dict)
 
-                    successful_uploads.append(original_filename)
-            except Exception as e:
-                error_message = f"Ошибка при обработке файла {original_filename}: {str(e)}"
-                print(error_message)
-                failed_uploads.append(original_filename)
-                skipped_files.append(error_message)
+                        # 3. Сохраняем в MinIO
+                        file_save_stream = io.BytesIO(file_content)
+                        self.storage.save_file(file_save_stream, new_filename)
 
-        return jsonify({
-            "message": "Отчет о загрузке файлов",
-            "successful_uploads": successful_uploads,
-            "failed_uploads": failed_uploads,
-            "skipped_files": skipped_files
-        }), 200
+                        # 4. Запись в БД (PostGIS)
+                        pano_obj = Pano(
+                            filename=new_filename,
+                            latitude=latitude,
+                            longitude=longitude,
+                            user_id=user_id,
+                            file_type=file_type,
+                            file_size=file_size,
+                            width=width,
+                            height=height,
+                            first_photo_date=first_photo_date,
+                            model=model,
+                            altitude=altitude,
+                            focal_length=focal_length,
+                            tags=tags
+                        )
+                        manager.create_pano(pano_obj)
+
+                        successful_uploads.append(original_filename)
+                except Exception as e:
+                    # Логируем стек ошибки для отладки
+                    traceback.print_exc()
+                    error_message = f"Ошибка ({original_filename}): {str(e)}"
+                    print(error_message)
+                    failed_uploads.append(original_filename)
+                    skipped_files.append(error_message)
+
+            return jsonify({
+                "message": "Отчет о загрузке файлов",
+                "successful_uploads": successful_uploads,
+                "failed_uploads": failed_uploads,
+                "skipped_files": skipped_files
+            }), 200
+            
+        except Exception as e:
+            return jsonify({"error": f"System error: {str(e)}"}), 500
+        finally:
+            if conn:
+                conn.close()
 
     def update_pano(self, pano_id):
         """
-        Обновляет некоторые поля панорамы (например, filename, latitude, longitude, tags).
-        Ожидает JSON: {"filename": "...", "latitude":..., "longitude":..., "tags":"..."}
+        Обновляет некоторые поля панорамы.
         """
+        conn = None
         try:
             data = request.json
-            existing = self.pano_manager.get_pano_by_id(pano_id)
+            conn = self._get_db_connection()
+            manager = PanoManager(conn)
+            
+            existing = manager.get_pano_by_id(pano_id)
             if not existing:
                 return jsonify({"error": "Panorama not found"}), 404
 
@@ -178,26 +230,57 @@ class PanoController:
                 if field in data:
                     updated_fields[field] = data[field]
 
-            self.pano_manager.update_pano(pano_id, updated_fields)
+            manager.update_pano(pano_id, updated_fields)
             return jsonify({"status": "success", "message": "Panorama updated"}), 200
         except Exception as e:
             return jsonify({"error": str(e)}), 500
+        finally:
+            if conn:
+                conn.close()
 
     def delete_pano(self, pano_id):
         """
-        Удаляет панораму по её ID.
+        Удаляет панораму.
         """
+        conn = None
         try:
-            existing = self.pano_manager.get_pano_by_id(pano_id)
+            conn = self._get_db_connection()
+            manager = PanoManager(conn)
+            
+            existing = manager.get_pano_by_id(pano_id)
             if not existing:
                 return jsonify({"error": "Panorama not found"}), 404
 
-            self.pano_manager.delete_pano(pano_id)
+            manager.delete_pano(pano_id)
             return jsonify({"status": "success", "message": "Panorama deleted"}), 200
         except Exception as e:
             return jsonify({"error": str(e)}), 500
+        finally:
+            if conn:
+                conn.close()
 
-    # ===== Вспомогательные методы =====
+    # ===== ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ (С ЗАЩИТОЙ) =====
+
+    def _safe_rational(self, value):
+        """
+        Безопасное чтение рациональных чисел из EXIF.
+        Защищает от ошибки 'tuple index out of range', если формат (num,).
+        """
+        if isinstance(value, tuple):
+            if len(value) >= 2:
+                # Стандартный случай (числитель, знаменатель)
+                if value[1] == 0: return 0.0
+                return float(value[0]) / float(value[1])
+            elif len(value) == 1:
+                # Нестандартный случай (GoPro/Insta360): (число,)
+                return float(value[0])
+            else:
+                return 0.0
+        # Если пришло просто число
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return 0.0
 
     def _get_gps_coordinates(self, exif_dict):
         gps_ifd = exif_dict.get("GPS", {})
@@ -219,16 +302,30 @@ class PanoController:
 
         if piexif.GPSIFD.GPSAltitude in gps_ifd:
             alt = gps_ifd[piexif.GPSIFD.GPSAltitude]
-            altitude = alt[0] / alt[1] if isinstance(alt, tuple) else alt
+            # [FIX] Используем безопасный метод
+            altitude = self._safe_rational(alt)
 
         return (latitude, longitude, altitude)
 
     def _convert_to_degrees(self, value):
         """
-        Преобразует GPS-координаты из формата EXIF в градусы (float).
+        Преобразует GPS-координаты из формата EXIF (D, M, S) в градусы.
         """
-        d, m, s = value
-        return d[0] / d[1] + (m[0] / m[1]) / 60 + (s[0] / s[1]) / 3600
+        try:
+            # value ожидается кортежем из 3 элементов
+            if not isinstance(value, tuple) or len(value) < 3:
+                return 0.0
+            
+            d, m, s = value
+            # [FIX] Используем _safe_rational для каждого компонента
+            d_val = self._safe_rational(d)
+            m_val = self._safe_rational(m)
+            s_val = self._safe_rational(s)
+            
+            return d_val + (m_val / 60.0) + (s_val / 3600.0)
+        except Exception as e:
+            print(f"Error converting GPS: {e}")
+            return 0.0
 
     def _extract_datetime_original(self, exif_dict):
         exif_data = exif_dict.get("Exif", {})
@@ -242,7 +339,6 @@ class PanoController:
         return None
 
     def _generate_filename(self, original_filename, dt=None):
-        import os
         name, ext = os.path.splitext(original_filename)
         if dt:
             date_str = dt.strftime("%Y%m%d")
@@ -265,9 +361,7 @@ class PanoController:
         exif_data = exif_dict.get("Exif", {})
         focal_length = exif_data.get(piexif.ExifIFD.FocalLength, None)
         if focal_length:
-            if isinstance(focal_length, tuple):
-                return focal_length[0] / focal_length[1]
-            return focal_length
+            return self._safe_rational(focal_length)
         return None
 
 PanoController.register_routes(pano_blueprint)

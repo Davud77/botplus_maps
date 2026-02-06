@@ -13,7 +13,12 @@ interface FileStatuses {
 
 type FilterType = 'all' | 'success' | 'failed' | 'selected';
 
-const API_URL = 'https://api.botplus.ru';
+// [FIX] Исправление CORS и адреса API
+// В production (внутри Docker) используем относительный путь, чтобы запрос шел к "своему" бэкенду.
+// В development (локально npm start) можно указать полный путь к localhost:5580.
+const API_URL = process.env.NODE_ENV === 'development' 
+  ? 'http://localhost:5580' 
+  : '';
 
 const UploadPano: React.FC = () => {
   const [files, setFiles] = useState<File[]>([]);
@@ -71,6 +76,7 @@ const UploadPano: React.FC = () => {
     formData.append("tags", tags.join(', '));
 
     try {
+      // [FIX] Используем исправленный API_URL
       const response = await fetch(`${API_URL}/upload`, {
         method: 'POST',
         body: formData,
