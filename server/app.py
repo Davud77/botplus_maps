@@ -1,5 +1,6 @@
 from flask import Flask, request, make_response, send_from_directory, jsonify
 from flask_cors import CORS
+from flask_compress import Compress  # <--- [NEW] Импорт сжатия
 from pathlib import Path
 import os
 import re
@@ -28,13 +29,12 @@ try:
 except Exception:
     vector_bp = None
 
-# Пути к статике (сохраняем совместимость с текущей структурой)
-# Прежний код поднимался на один уровень вверх: parents[1] → /app
+# Пути к статике
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PUBLIC_DIR   = getattr(config, "PUBLIC_DIR", PROJECT_ROOT / "public")
 BUILD_DIR    = PUBLIC_DIR / "build"
 
-# Разрешённые источники CORS: из config.CLIENT_ORIGINS + опционально поддомены *.botplus.ru
+# Разрешённые источники CORS
 ALLOWED_ORIGINS = list(getattr(config, "CLIENT_ORIGINS", [])) + [re.compile(r"^https://.*\.botplus\.ru$")]
 
 def origin_allowed(origin: str | None) -> bool:
@@ -64,6 +64,22 @@ def create_app():
         MAX_CONTENT_LENGTH=1024 * 1024 * 1024,  # 1 ГБ
     )
 
+    # ---------------- [NEW] НАСТРОЙКА СЖАТИЯ ----------------
+    # Это уменьшает вес тайлов (.pbf) в 5-10 раз
+    app.config['COMPRESS_MIMETYPES'] = [
+        'text/html', 
+        'text/css', 
+        'text/xml', 
+        'application/json', 
+        'application/javascript',
+        'application/vnd.mapbox-vector-tile'  # <--- Самое важное для карт!
+    ]
+    app.config['COMPRESS_LEVEL'] = 6      # Оптимальный баланс скорость/сжатие
+    app.config['COMPRESS_MIN_SIZE'] = 500 # Не сжимать мелочь меньше 500 байт
+    
+    Compress(app) # Инициализация
+    # --------------------------------------------------------
+
     # CORS: достаточно описать /api/* — статика и SPA ходят с того же origin
     CORS(
         app,
@@ -84,7 +100,11 @@ def create_app():
         response.headers["Access-Control-Allow-Credentials"] = "true"
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
         response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With"
-        response.headers["Cache-Control"] = "no-store"
+        
+        # Если это НЕ тайл (тайлы имеют свой кэш), запрещаем кэширование API
+        if 'application/vnd.mapbox-vector-tile' not in response.headers.get('Content-Type', ''):
+             response.headers["Cache-Control"] = "no-store"
+             
         return response
 
     # Универсальный preflight для нестандартных путей
@@ -98,12 +118,11 @@ def create_app():
     if auth_blueprint:
         app.register_blueprint(auth_blueprint, url_prefix="/api/auth")
     
-    # 2. Vector / PostGIS (Новый)
-    # Префикс /api + пути внутри контроллера (/vector/...) = /api/vector/...
+    # 2. Vector / PostGIS
     if vector_bp:
         app.register_blueprint(vector_bp, url_prefix="/api")
 
-    # 3. Pano & Ortho (Legacy - регистрируются как есть)
+    # 3. Pano & Ortho
     if pano_blueprint:
         app.register_blueprint(pano_blueprint)
     if ortho_blueprint:

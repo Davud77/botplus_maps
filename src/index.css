@@ -447,7 +447,18 @@ input:focus, textarea:focus {
   .map-header { gap: 5px; flex-wrap: wrap; }
 }
 
-.end-box { display: flex; align-items: center; margin-right: 15px; }
+.end-box { 
+  display: flex; 
+  align-items: center; 
+  margin-right: 15px; 
+      background-color: #1e1e1e;
+    background-color: var(--color-surface);
+    border-radius: 6px;
+    border-radius: var(--radius-base);
+    height: 45px;
+    margin: 0 10px;
+    z-index: 1000;
+}
 
 /* Map buttons */
 
@@ -455,12 +466,8 @@ input:focus, textarea:focus {
   height: 45px;
   position: relative;
   z-index: 1002;
-  border-radius: var(--radius-base);
-  background-color: var(--color-surface);
   display: flex;
   margin: 0 10px;
-  padding: 0 5px;
-  align-items: center;
 }
 
 .layers-button,
@@ -1346,3 +1353,48 @@ h3 { margin: 0; color: var(--color-text); }
   pointer-events: none !important;
 }
 .custom-zoom-btn.active { background: var(--color-hover) !important; transform: scale(1.02) !important; }
+
+
+
+.map-buttons-wrapper {
+  z-index: 1001;
+}
+
+.map-buttons-container {
+  display: flex;
+  flex-direction: row;
+  gap: 8px;
+}
+
+
+
+
+        .map-side-panel {
+          position: absolute;
+          top: 80px; 
+          right: 10px; /* Отступ под кнопки */
+          z-index: 1002;
+              background-color: var(--color-surface);
+    border-radius: var(--radius-base);
+          box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+          width: 320px;
+          max-height: calc(100vh - 100px);
+          display: flex;
+          flex-direction: column;
+          animation: slideIn 0.2s ease-out;
+        }
+        .panel-header {
+          padding: 0 10px;
+          border-bottom: 1px solid #3c3c3c;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+        }
+        .panel-title { margin: 0; font-size: 16px; color: #333; }
+        .panel-close-btn { background: none; border: none; cursor: pointer; padding: 4px; }
+        .panel-content { overflow-y: auto; padding: 10px; flex: 1; }
+        @keyframes slideIn {
+          from { opacity: 0; transform: translateX(10px); }
+          to { opacity: 1; transform: translateX(0); }
+        }
+    

@@ -17,6 +17,59 @@ export interface ApiError {
 
 export type ApiResp = ApiOk | ApiError;
 
+/* -------------------- Типы данных (Data Types) -------------------- */
+
+// Панорамы
+export interface PanoItem {
+  id: number;
+  filename: string;
+  latitude?: number;
+  longitude?: number;
+  tags?: string;
+  upload_date?: string;
+}
+
+// Ортофотопланы
+export interface OrthoItem {
+  id: number;
+  filename: string;
+  url: string;
+  bounds: {
+    north: number;
+    south: number;
+    east: number;
+    west: number;
+  };
+}
+
+// Векторные слои
+export interface VectorLayerItem {
+  id: number;
+  schema: string;
+  tableName: string;
+  geometryType: string;
+  featureCount: number;
+  srid?: number;
+}
+
+export interface VectorDbItem {
+  id: string;
+  name: string;
+  host: string;
+  port: number;
+  status: 'connected' | 'error';
+  type: 'internal' | 'external';
+  layers?: VectorLayerItem[];
+}
+
+// Bounding Box для запросов по области
+export interface BBox {
+  minLng: number;
+  minLat: number;
+  maxLng: number;
+  maxLat: number;
+}
+
 /* -------------------- Низкоуровневые вызовы -------------------- */
 async function apiGet<T = any>(path: string): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
@@ -125,8 +178,8 @@ export async function uploadFiles<T = any>(formData: FormData): Promise<T> {
 }
 
 // --- Ортофото ---
-export async function fetchOrthophotos<T = any>(): Promise<T> {
-  return apiGet<T>("/orthophotos");
+export async function fetchOrthophotos(): Promise<OrthoItem[]> {
+  return apiGet<OrthoItem[]>("/orthophotos");
 }
 
 export async function deleteOrtho(id: number): Promise<ApiOk> {
@@ -135,55 +188,40 @@ export async function deleteOrtho(id: number): Promise<ApiOk> {
 
 /* -------------------- Vector / PostGIS API -------------------- */
 
-// Интерфейсы
-export interface VectorLayerItem {
-  id: number;
-  schema: string; // Схема БД (public, my_schema и т.д.)
-  tableName: string;
-  geometryType: string;
-  featureCount: number;
-  srid?: number;
-}
-
-export interface VectorDbItem {
-  id: string; // Используем имя базы как ID
-  name: string;
-  host: string;
-  port: number;
-  status: 'connected' | 'error';
-  type: 'internal' | 'external';
-  layers?: VectorLayerItem[]; // Опционально, заполняется после подгрузки слоев
-}
-
 // Методы
 export async function fetchVectorDbs(): Promise<VectorDbItem[]> {
-  // GET /api/vector/databases
   return apiGet<VectorDbItem[]>("/vector/databases");
 }
 
 export async function createVectorDb(name: string): Promise<ApiOk> {
-  // POST /api/vector/create_db
   return apiPost<ApiOk>("/vector/create_db", { name });
 }
 
 export async function fetchVectorLayers(dbName: string): Promise<VectorLayerItem[]> {
-  // GET /api/vector/layers/:dbName
   return apiGet<VectorLayerItem[]>(`/vector/layers/${dbName}`);
 }
 
-// Создание слоя (таблицы)
 export async function createVectorLayer(
   dbName: string, 
   tableName: string, 
   geomType: string
 ): Promise<ApiOk> {
-  // POST /api/vector/layers/create
   return apiPost<ApiOk>("/vector/layers/create", { dbName, tableName, geomType });
 }
 
-// Получение данных слоя (GeoJSON)
-// Добавлен аргумент schema, чтобы запрашивать данные из конкретной схемы
-export async function fetchLayerData(dbName: string, tableName: string, schema: string = 'public'): Promise<any> {
-  // GET /api/vector/layers/:dbName/:tableName/data?schema=...
-  return apiGet<any>(`/vector/layers/${dbName}/${tableName}/data?schema=${schema}`);
+// Обновленная функция с поддержкой BBOX
+export async function fetchLayerData(
+  dbName: string, 
+  tableName: string, 
+  schema: string = 'public',
+  bounds?: BBox
+): Promise<any> {
+  let url = `/vector/layers/${dbName}/${tableName}/data?schema=${schema}`;
+  
+  if (bounds) {
+    // Добавляем параметры границ экрана к запросу
+    url += `&min_lng=${bounds.minLng}&min_lat=${bounds.minLat}&max_lng=${bounds.maxLng}&max_lat=${bounds.maxLat}`;
+  }
+  
+  return apiGet<any>(url);
 }

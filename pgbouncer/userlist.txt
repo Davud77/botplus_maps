@@ -1,0 +1,2 @@
+"botplus_user" "botplus_password"
+"postgres" "postgres_password_if_any"

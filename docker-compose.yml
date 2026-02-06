@@ -3,14 +3,14 @@ services:
   db:
     image: postgis/postgis:16-3.4-alpine
     restart: always
+    shm_size: 2gb
     environment:
       POSTGRES_USER: botplus_user
       POSTGRES_PASSWORD: botplus_password
       POSTGRES_DB: botplus_db
     ports:
-      - "5432:5432" # Открываем порт наружу, чтобы ты мог подключиться через DBeaver/PgAdmin
+      - "5432:5432" # Прямой доступ к базе (для администрирования)
     volumes:
-      # Сохраняем базу данных в локальную папку data/pg_data
       - ./data/pg_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U botplus_user -d botplus_db"]
@@ -18,32 +18,65 @@ services:
       timeout: 5s
       retries: 5
 
+  # --- PgBouncer (Пулер соединений) ---
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    container_name: pgbouncer
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./pgbouncer/pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini
+      - ./pgbouncer/userlist.txt:/etc/pgbouncer/userlist.txt
+    ports:
+      - "6432:6432" # Порт пулера (для приложения)
+
   # --- Основное приложение ---
   app:
     build:
       context: .
       dockerfile: Dockerfile
+    # [NEW] Запускаем через Gunicorn + Gevent
+    # --workers 8: 8 параллельных процессов (для карт можно и больше)
+    # --worker-class gevent: Асинхронный режим (не блокируется на ожидании БД)
+    # "server.app:create_app()": Вызов фабрики приложения
+    command: gunicorn --workers 8 --worker-class gevent --bind 0.0.0.0:5000 "server.app:create_app()"
+    
     depends_on:
+      pgbouncer:
+        condition: service_started
       db:
         condition: service_healthy
     environment:
+      # [FIX] ВАЖНОЕ ИСПРАВЛЕНИЕ:
+      # Добавляем папку server в пути поиска модулей Python, чтобы он видел config.py
+      PYTHONPATH: /app/server
+      
       SECRET_KEY: ${SECRET_KEY:-change-me}
       CLIENT_ORIGINS: ${CLIENT_ORIGINS:-http://localhost:5580}
       SESSION_COOKIE_DOMAIN: ${SESSION_COOKIE_DOMAIN:-}
       COOKIE_SECURE: ${COOKIE_SECURE:-0}
       COOKIE_SAMESITE: ${COOKIE_SAMESITE:-Lax}
-      # Переключаем с SQLite файла на строку подключения PG
-      # Формат: postgresql://user:password@host:port/dbname
-      DATABASE_URL: postgresql://botplus_user:botplus_password@db:5432/botplus_db
+      
+      # НАСТРОЙКИ POSTGRES (через PgBouncer)
+      DB_HOST: pgbouncer
+      DB_PORT: 6432
+      DB_USER: botplus_user
+      DB_PASSWORD: botplus_password
+      
+      # Строка подключения (хост pgbouncer)
+      DATABASE_URL: postgresql://botplus_user:botplus_password@pgbouncer:6432/botplus_db
+      
       UPLOAD_FOLDER: /app/server/uploads
     volumes:
-      # ./data нам все еще может пригодиться для временных файлов
       - ./data:/app/data
       - ./server/uploads:/app/server/uploads
     ports:
       - "5580:5000"
     restart: unless-stopped
     healthcheck:
+      # Проверка здоровья теперь стучится в Gunicorn
       test: ["CMD", "curl", "-fsS", "http://localhost:5000/api/health"]
       interval: 30s
       timeout: 5s

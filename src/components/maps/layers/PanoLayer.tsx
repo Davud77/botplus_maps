@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { useMap } from 'react-leaflet';
+import { useMap, Marker } from 'react-leaflet';
 import debounce from 'lodash/debounce';
-import { Marker } from 'react-leaflet';
 import MarkerClusterGroup from 'react-leaflet-cluster';
-import { defaultIcon, activeIcon } from '../../icons';
 import { LatLngBounds, LatLng } from 'leaflet';
+// Убедитесь, что этот файл существует. Если его нет, создайте или исправьте путь.
+import { defaultIcon, activeIcon } from '../../icons';
 
 interface MarkerType {
   id: string;
@@ -20,15 +20,11 @@ interface PanoramaItem {
 }
 
 interface PanoLayerProps {
-  /** Можно не передавать — тогда все маркеры будут в обычном состоянии */
   selectedMarker?: string | null;
-  /** Можно не передавать — клики по маркерам просто игнорируются */
   onMarkerClick?: (marker: MarkerType) => void;
-  /** Доп. колбэк: уведомить родителя о новом наборе маркеров (опционально) */
   togglePanoLayer?: (newMarkers: MarkerType[]) => void;
 }
 
-// Константы для оптимизации
 const MIN_ZOOM_LEVEL = 10;
 const MAX_MARKERS_PER_REQUEST = 1000;
 const CLUSTER_SIZES = {
@@ -49,6 +45,7 @@ const PanoLayer: React.FC<PanoLayerProps> = ({
   const [visibleMarkers, setVisibleMarkers] = useState<MarkerType[]>([]);
   const map = useMap();
 
+  // Определение радиуса кластеризации в зависимости от зума
   const getClusterRadius = useCallback((zoom: number) => {
     if (zoom >= CLUSTER_SIZES.closest.zoom) return CLUSTER_SIZES.closest.radius;
     if (zoom >= CLUSTER_SIZES.near.zoom) return CLUSTER_SIZES.near.radius;
@@ -56,11 +53,14 @@ const PanoLayer: React.FC<PanoLayerProps> = ({
     return CLUSTER_SIZES.far.radius;
   }, []);
 
+  // Фильтрация маркеров, видимых на экране
   const updateVisibleMarkers = useCallback(() => {
     if (!map) return;
 
     const bounds = map.getBounds();
     const zoom = map.getZoom();
+    
+    // Простая оптимизация: на мелких зумах показываем меньше точек
     const skipFactor = zoom < 12 ? 10 : zoom < 14 ? 5 : 1;
 
     const visible = markers.filter((marker, index) => {
@@ -71,6 +71,7 @@ const PanoLayer: React.FC<PanoLayerProps> = ({
     setVisibleMarkers(visible);
   }, [map, markers]);
 
+  // Загрузка маркеров с сервера
   const fetchMarkersInBounds = useCallback(
     async (bounds: LatLngBounds) => {
       if (isLoading || !bounds) return;
@@ -86,6 +87,7 @@ const PanoLayer: React.FC<PanoLayerProps> = ({
       const east = bounds.getEast();
       const west = bounds.getWest();
 
+      // Округляем границы для кэширования запросов
       const precision = zoom > 15 ? 4 : zoom > 12 ? 3 : 2;
       const boundsKey = `${north.toFixed(precision)},${south.toFixed(precision)},${east.toFixed(precision)},${west.toFixed(precision)}`;
 
@@ -129,22 +131,20 @@ const PanoLayer: React.FC<PanoLayerProps> = ({
           const uniqueNewMarkers = newMarkers.filter((m) => !existingIds.has(m.id));
           const updatedMarkers = [...prevMarkers, ...uniqueNewMarkers];
 
-          // Уведомим родителя, если передан колбэк
-          try {
-            if (togglePanoLayer) togglePanoLayer(updatedMarkers);
-          } catch (e) {
-            console.error('togglePanoLayer callback failed:', e);
+          if (togglePanoLayer) {
+             togglePanoLayer(updatedMarkers);
           }
-
-          // Обновляем видимые маркеры после добавления новых
-          requestAnimationFrame(() => {
-            updateVisibleMarkers();
-          });
 
           return updatedMarkers;
         });
 
         setLoadedBounds((prev) => [...prev, boundsKey]);
+        
+        // Обновляем видимые сразу после загрузки
+        requestAnimationFrame(() => {
+            // updateVisibleMarkers вызываем через эффект при изменении markers, но здесь можно форсировать если нужно
+        });
+
       } catch (error) {
         console.error('Error fetching panoramas:', error);
       } finally {
@@ -154,14 +154,21 @@ const PanoLayer: React.FC<PanoLayerProps> = ({
     [isLoading, map, loadedBounds, updateVisibleMarkers, togglePanoLayer],
   );
 
+  // Debounce для предотвращения частых запросов при драге карты
   const debouncedFetchMarkers = useMemo(
     () =>
       debounce((b: LatLngBounds) => {
         fetchMarkersInBounds(b);
-      }, 1000),
+      }, 500),
     [fetchMarkersInBounds],
   );
 
+  // Эффект обновления видимых маркеров при изменении полного списка
+  useEffect(() => {
+    updateVisibleMarkers();
+  }, [markers, updateVisibleMarkers]);
+
+  // Слушатели событий карты
   useEffect(() => {
     if (!map) return;
 
@@ -177,6 +184,7 @@ const PanoLayer: React.FC<PanoLayerProps> = ({
     map.on('moveend', handleMoveEnd);
     map.on('zoomend', handleZoomEnd);
 
+    // Первичная загрузка
     if (map.getZoom() >= MIN_ZOOM_LEVEL) {
       const initialBounds = map.getBounds();
       if (initialBounds) fetchMarkersInBounds(initialBounds);
@@ -189,18 +197,21 @@ const PanoLayer: React.FC<PanoLayerProps> = ({
     };
   }, [map, debouncedFetchMarkers, fetchMarkersInBounds, updateVisibleMarkers]);
 
+  // Мемоизация кластера для предотвращения ре-рендеров
   const markerCluster = useMemo(() => {
     const zoom = map.getZoom();
     const clusterRadius = getClusterRadius(zoom);
 
     return (
       <MarkerClusterGroup
+        key="pano-cluster" // Стабильный ключ
         disableClusteringAtZoom={CLUSTER_SIZES.closest.zoom}
         maxClusterRadius={clusterRadius}
         chunkedLoading={true}
         spiderfyOnMaxZoom={true}
         removeOutsideVisibleBounds={true}
         animate={false}
+        showCoverageOnHover={false}
       >
         {visibleMarkers.map((marker) => (
           <Marker
@@ -208,7 +219,9 @@ const PanoLayer: React.FC<PanoLayerProps> = ({
             key={marker.id}
             icon={selectedMarker === marker.id ? activeIcon : defaultIcon}
             eventHandlers={{
-              click: () => {
+              click: (e) => {
+                // Предотвращаем всплытие, чтобы не триггерить клик по карте
+                e.originalEvent.stopPropagation();
                 if (onMarkerClick) onMarkerClick(marker);
               },
             }}
