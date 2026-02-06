@@ -5,46 +5,83 @@ import L from 'leaflet';
 import 'leaflet.vectorgrid'; 
 
 // --- FIX: Polyfill for Leaflet 1.8+ and VectorGrid ---
-// Библиотека vectorgrid использует удаленный метод fakeStop. 
-// Мы возвращаем его, приравнивая к stopPropagation.
 if (!(L.DomEvent as any).fakeStop) {
   (L.DomEvent as any).fakeStop = L.DomEvent.stopPropagation;
 }
 // ---------------------------------------------------
 
-// Если TypeScript ругается на L.vectorGrid, добавляем декларацию
+// Типизация модуля leaflet.vectorgrid
 declare module 'leaflet' {
   namespace vectorGrid {
     function protobuf(url: string, options?: any): any;
   }
 }
 
+// --- Типы для конфигурации стилей ---
+interface StyleRule {
+  value: string | number;
+  style: L.PathOptions;
+}
+
+interface LayerStyleConfig {
+  type: 'single' | 'categorized';
+  field?: string;       // Поле, по которому идет категоризация
+  rules?: StyleRule[];  // Правила: значение -> стиль
+  style?: L.PathOptions; // Базовый стиль (или fallback)
+}
+
 interface VectorTileLayerProps {
-  url: string;      // Ссылка на API тайлов (комбинированная)
-  // [ИЗМЕНЕНО] Теперь принимаем объект стилей: { 'layerName': { style... }, ... }
-  styles: Record<string, any>; 
+  url: string; 
+  // [ИЗМЕНЕНО] Принимаем конфигурацию, а не готовые стили Leaflet
+  styleConfigs: Record<string, LayerStyleConfig>; 
   active: boolean;
   zIndex?: number;
 }
 
-const VectorTileLayer: React.FC<VectorTileLayerProps> = ({ url, styles, active, zIndex }) => {
+const VectorTileLayer: React.FC<VectorTileLayerProps> = ({ url, styleConfigs, active, zIndex }) => {
   const map = useMap();
 
   useEffect(() => {
     if (!active) return;
 
-    // Опции для VectorGrid
+    // --- 1. ГЕНЕРАЦИЯ СТИЛЕЙ LEAFLET ---
+    // Превращаем наши JSON-конфиги в то, что понимает VectorGrid (объекты или функции)
+    const vectorTileLayerStyles: Record<string, any> = {};
+
+    Object.keys(styleConfigs).forEach((layerName) => {
+      const config = styleConfigs[layerName];
+
+      if (config.type === 'categorized' && config.field && config.rules) {
+        // === ДИНАМИЧЕСКАЯ СТИЛИЗАЦИЯ (Categorized) ===
+        // VectorGrid будет вызывать эту функцию для КАЖДОГО объекта
+        vectorTileLayerStyles[layerName] = (properties: any, zoom: number) => {
+          const val = properties[config.field!]; // Значение поля объекта (например, 'highway')
+          
+          // Ищем правило. Приводим к строке для надежного сравнения (xml vs json number)
+          const rule = config.rules?.find((r) => String(r.value) === String(val));
+          
+          if (rule) {
+            return rule.style;
+          }
+          
+          // Если правило не найдено — возвращаем дефолтный стиль (серый)
+          return config.style || { color: '#aaaaaa', fillOpacity: 0.2, weight: 1 };
+        };
+      } else {
+        // === ОБЫЧНАЯ СТИЛИЗАЦИЯ (Single) ===
+        vectorTileLayerStyles[layerName] = config.style || { color: '#3388ff', weight: 1 };
+      }
+    });
+
+    // --- 2. НАСТРОЙКИ VECTORGRID ---
     const vectorTileOptions = {
-      // ИСПРАВЛЕНИЕ: (L.canvas as any).tile, так как TS не знает про расширение .tile
       rendererFactory: (L.canvas as any).tile,
       
-      // [ВАЖНО] Передаем весь объект стилей.
-      // Ключи объекта styles должны совпадать с именами таблиц (слоев) в PBF.
-      vectorTileLayerStyles: styles,
+      // Передаем сгенерированный объект стилей (где могут быть функции)
+      vectorTileLayerStyles: vectorTileLayerStyles,
       
-      interactive: true, // Разрешаем клики и наведение
+      interactive: true,
       
-      // Функция получения уникального ID фичи (важно для оптимизации рендеринга)
       getFeatureId: (f: any) => {
         return f.properties.id || f.id || 0;
       },
@@ -52,24 +89,26 @@ const VectorTileLayer: React.FC<VectorTileLayerProps> = ({ url, styles, active, 
       zIndex: zIndex || 1
     };
 
-    // Создаем слой тайлов
+    // Создаем слой
     const layer = L.vectorGrid.protobuf(url, vectorTileOptions);
 
-    // Обработчик клика: Показываем свойства объекта
+    // --- 3. ПОПАП ---
     layer.on('click', (e: any) => {
         const props = e.layer.properties;
+        const layerName = e.layer.options.layerName; // Имя таблицы (слоя)
         
-        // Формируем красивый HTML для попапа
         L.popup()
           .setLatLng(e.latlng)
           .setContent(`
-            <div style="font-size:12px; max-width:250px; max-height:300px; overflow-y:auto;">
-              <h4 style="margin:0 0 5px 0;">Свойства объекта</h4>
+            <div style="font-size:12px; max-width:280px; max-height:300px; overflow-y:auto; font-family: sans-serif;">
+              <div style="background: #f4f4f4; padding: 5px; border-bottom: 1px solid #ddd; margin-bottom: 5px;">
+                <strong>Слой:</strong> ${layerName}
+              </div>
               <table style="width:100%; border-collapse: collapse;">
                 ${Object.entries(props).map(([k, v]) => `
                   <tr style="border-bottom: 1px solid #eee;">
-                    <td style="font-weight:bold; padding:2px 5px; vertical-align:top;">${k}:</td>
-                    <td style="padding:2px 5px; word-break:break-word;">${String(v)}</td>
+                    <td style="font-weight:600; padding:3px 5px; color: #555; vertical-align:top;">${k}:</td>
+                    <td style="padding:3px 5px; word-break:break-word;">${v !== null && v !== undefined ? String(v) : ''}</td>
                   </tr>
                 `).join('')}
               </table>
@@ -77,18 +116,15 @@ const VectorTileLayer: React.FC<VectorTileLayerProps> = ({ url, styles, active, 
           `)
           .openOn(map);
           
-        // Останавливаем всплытие события, чтобы не кликнуть "сквозь" объект по карте
         L.DomEvent.stop(e); 
     });
 
-    // Добавляем слой на карту
     layer.addTo(map);
 
-    // Очистка при размонтировании или изменении пропсов
     return () => {
       map.removeLayer(layer);
     };
-  }, [map, url, active, styles]); // Пересоздаем слой при изменении URL или набора стилей
+  }, [map, url, active, styleConfigs]); // Пересоздаем слой при изменении конфигов
 
   return null;
 };

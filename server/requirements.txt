@@ -8,3 +8,6 @@ psycopg2-binary>=2.9.10
 flask-compress>=1.23
 gunicorn>=23.0.0
 gevent>=24.2.1
+minio>=7.2.0
+SQLAlchemy>=2.0.0
+GeoAlchemy2>=0.14.0

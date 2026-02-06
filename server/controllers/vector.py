@@ -450,7 +450,7 @@ def get_combined_tiles(db_name, z, x, y):
     finally:
         release_db_connection(conn, db_name)
 
-# --- 8. ЭНДПОИНТ ДЛЯ ПОЛУЧЕНИЯ СТИЛЯ ИЗ БАЗЫ (FIXED & IMPROVED) ---
+# --- 8. ЭНДПОИНТ ДЛЯ ПОЛУЧЕНИЯ СТИЛЯ (ПОДДЕРЖКА CATEGORIZED) ---
 @vector_bp.route('/vector/styles/<db_name>/<schema>/<table_name>', methods=['GET'])
 def get_layer_style(db_name, schema, table_name):
     conn = None
@@ -460,7 +460,7 @@ def get_layer_style(db_name, schema, table_name):
         
         cur = conn.cursor()
         
-        # [FIX] Используем LOWER для нечувствительности к регистру имен схем и таблиц
+        # Получаем QML XML из БД
         cur.execute("""
             SELECT styleqml FROM public.layer_styles 
             WHERE LOWER(f_table_schema) = LOWER(%s) AND LOWER(f_table_name) = LOWER(%s)
@@ -468,48 +468,89 @@ def get_layer_style(db_name, schema, table_name):
         """, (schema, table_name))
         
         row = cur.fetchone()
-        if not row or not row[0]:
-            return jsonify({'error': 'Style not found'}), 404
-            
-        qml_content = row[0]
-        # В некоторых версиях psycopg2 xml возвращается как объект, приводим к строке
-        if not isinstance(qml_content, str):
-            qml_content = str(qml_content)
-
-        root = ET.fromstring(qml_content)
         
-        # Базовые значения стиля
-        style_data = {
-            'color': '#3388ff',
-            'weight': 1,
-            'fillOpacity': 0.4,
-            'fill': True
-        }
+        # Вспомогательный парсер одного символа
+        def extract_symbol_style(symbol_elem):
+            if symbol_elem is None: return {'color': '#3388ff'}
+            
+            props = {prop.get('k'): prop.get('v') for prop in symbol_elem.findall(".//prop")}
+            
+            style = {
+                'weight': 1,
+                'fillOpacity': 0.4,
+                'fill': True,
+                'color': '#3388ff' # fallback
+            }
+            
+            # Цвет
+            raw_color = props.get('color') or props.get('outline_color') or props.get('line_color')
+            if raw_color:
+                c = raw_color.split(',')
+                if len(c) >= 3:
+                    hex_color = '#%02x%02x%02x' % (int(c[0]), int(c[1]), int(c[2]))
+                    style['color'] = hex_color
+                    style['fillColor'] = hex_color
+                    if len(c) == 4:
+                        style['fillOpacity'] = round(int(c[3]) / 255, 2)
+            
+            # Толщина
+            width = props.get('outline_width') or props.get('line_width') or props.get('width')
+            if width:
+                try: style['weight'] = float(width)
+                except: pass
+                
+            return style
 
-        # Собираем все пропсы в словарь для удобного поиска
-        props = {prop.get('k'): prop.get('v') for prop in root.findall(".//prop")}
+        # Если стиля нет в БД — возвращаем дефолт
+        if not row or not row[0]:
+            return jsonify({
+                'type': 'single',
+                'style': {'color': '#3388ff', 'weight': 1, 'fillOpacity': 0.4}
+            })
+            
+        qml_content = str(row[0])
+        root = ET.fromstring(qml_content)
+        renderer = root.find("renderer-v2")
 
-        # 1. Цвет (приоритет заливке, затем границе)
-        raw_color = props.get('color') or props.get('outline_color') or props.get('line_color')
-        if raw_color:
-            c = raw_color.split(',')
-            if len(c) >= 3:
-                hex_color = '#%02x%02x%02x' % (int(c[0]), int(c[1]), int(c[2]))
-                style_data['color'] = hex_color
-                style_data['fillColor'] = hex_color
-                if len(c) == 4:
-                    style_data['fillOpacity'] = round(int(c[3]) / 255, 2)
+        if not renderer:
+             return jsonify({'type': 'single', 'style': {'color': 'gray'}})
 
-        # 2. Толщина линии (weight)
-        width = props.get('outline_width') or props.get('line_width') or props.get('width')
-        if width:
-            try:
-                style_data['weight'] = float(width)
-            except:
-                pass
+        renderer_type = renderer.get("type")
 
-        cur.close()
-        return jsonify(style_data)
+        # --- ЛОГИКА ДЛЯ КАТЕГОРИЙ (Categorized) ---
+        if renderer_type == "categorizedSymbol":
+            attr = renderer.get("attr") # Поле классификации
+            categories = []
+            
+            # Парсим каждую категорию
+            for cat in renderer.findall("categories/category"):
+                value = cat.get("value")
+                # label = cat.get("label") # Можно добавить в будущем для легенды
+                symbol_name = cat.get("symbol")
+                
+                # Ищем определение символа по имени
+                symbol_node = renderer.find(f"symbols/symbol[@name='{symbol_name}']")
+                if symbol_node:
+                    style_obj = extract_symbol_style(symbol_node)
+                    categories.append({
+                        'value': value,
+                        'style': style_obj
+                    })
+            
+            return jsonify({
+                'type': 'categorized',
+                'field': attr,
+                'rules': categories
+            })
+
+        # --- ЛОГИКА ДЛЯ ОБЫЧНОГО СТИЛЯ (Single) ---
+        else:
+            symbol = renderer.find("symbols/symbol")
+            style_data = extract_symbol_style(symbol)
+            return jsonify({
+                'type': 'single',
+                'style': style_data
+            })
 
     except Exception as e:
         print(f"!!! Style Error: {e}")

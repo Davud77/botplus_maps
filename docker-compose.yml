@@ -1,5 +1,6 @@
+
 services:
-  # --- Сервис базы данных (PostGIS) ---
+  # --- 1. База данных (PostGIS) ---
   db:
     image: postgis/postgis:16-3.4-alpine
     restart: always
@@ -9,7 +10,7 @@ services:
       POSTGRES_PASSWORD: botplus_password
       POSTGRES_DB: botplus_db
     ports:
-      - "5432:5432" # Прямой доступ к базе (для администрирования)
+      - "5432:5432" # Прямой доступ (опционально)
     volumes:
       - ./data/pg_data:/var/lib/postgresql/data
     healthcheck:
@@ -18,7 +19,26 @@ services:
       timeout: 5s
       retries: 5
 
-  # --- PgBouncer (Пулер соединений) ---
+  # --- 2. MinIO (S3 Storage) ---
+  minio:
+    image: minio/minio
+    command: server /data --console-address ":9001"
+    restart: always
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000" # API S3
+      - "9001:9001" # Web Console (откройте в браузере)
+    volumes:
+      - ./data/minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  # --- 3. PgBouncer (Пулер соединений) ---
   pgbouncer:
     image: edoburu/pgbouncer:latest
     container_name: pgbouncer
@@ -26,49 +46,49 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    environment:
+      # Автоматическая конфигурация (если образ поддерживает)
+      # Или используйте volume с конфигом, как у вас было
+      DB_USER: botplus_user
+      DB_PASSWORD: botplus_password
+      DB_HOST: db
+      DB_NAME: botplus_db
+      AUTH_TYPE: md5
     volumes:
-      - ./pgbouncer/pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini
-      - ./pgbouncer/userlist.txt:/etc/pgbouncer/userlist.txt
+       # Если у вас есть свои конфиги, раскомментируйте:
+       - ./pgbouncer/pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini
+       - ./pgbouncer/userlist.txt:/etc/pgbouncer/userlist.txt
     ports:
-      - "6432:6432" # Порт пулера (для приложения)
+      - "6432:6432"
 
-  # --- Основное приложение ---
+  # --- 4. Основное приложение ---
   app:
     build:
       context: .
       dockerfile: Dockerfile
-    # [NEW] Запускаем через Gunicorn + Gevent
-    # --workers 8: 8 параллельных процессов (для карт можно и больше)
-    # --worker-class gevent: Асинхронный режим (не блокируется на ожидании БД)
-    # "server.app:create_app()": Вызов фабрики приложения
     command: gunicorn --workers 8 --worker-class gevent --bind 0.0.0.0:5000 "server.app:create_app()"
-    
     depends_on:
       pgbouncer:
         condition: service_started
       db:
         condition: service_healthy
+      minio:
+        condition: service_healthy
     environment:
-      # [FIX] ВАЖНОЕ ИСПРАВЛЕНИЕ:
-      # Добавляем папку server в пути поиска модулей Python, чтобы он видел config.py
       PYTHONPATH: /app/server
-      
       SECRET_KEY: ${SECRET_KEY:-change-me}
-      CLIENT_ORIGINS: ${CLIENT_ORIGINS:-http://localhost:5580}
-      SESSION_COOKIE_DOMAIN: ${SESSION_COOKIE_DOMAIN:-}
-      COOKIE_SECURE: ${COOKIE_SECURE:-0}
-      COOKIE_SAMESITE: ${COOKIE_SAMESITE:-Lax}
       
-      # НАСТРОЙКИ POSTGRES (через PgBouncer)
-      DB_HOST: pgbouncer
-      DB_PORT: 6432
-      DB_USER: botplus_user
-      DB_PASSWORD: botplus_password
-      
-      # Строка подключения (хост pgbouncer)
+      # Настройки БД (через PgBouncer)
       DATABASE_URL: postgresql://botplus_user:botplus_password@pgbouncer:6432/botplus_db
       
-      UPLOAD_FOLDER: /app/server/uploads
+      # Настройки MinIO
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_BUCKET_NAME: panoramas
+      MINIO_SECURE: "False" # False для локальной работы без HTTPS
+      
+      UPLOAD_FOLDER: /app/server/uploads # Для временных файлов
     volumes:
       - ./data:/app/data
       - ./server/uploads:/app/server/uploads
@@ -76,7 +96,6 @@ services:
       - "5580:5000"
     restart: unless-stopped
     healthcheck:
-      # Проверка здоровья теперь стучится в Gunicorn
       test: ["CMD", "curl", "-fsS", "http://localhost:5000/api/health"]
       interval: 30s
       timeout: 5s

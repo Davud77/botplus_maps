@@ -1,6 +1,8 @@
+// src/components/maps/hooks/useUIStore.ts
 import { create } from 'zustand';
 
-export type PanelType = 'baseLayers' | 'vector' | 'ortho' | 'selection' | null;
+// Добавлено 'pano' в список доступных панелей
+export type PanelType = 'baseLayers' | 'vector' | 'ortho' | 'selection' | 'pano' | null;
 
 interface UIState {
   activePanel: PanelType;

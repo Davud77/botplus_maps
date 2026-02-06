@@ -2,7 +2,7 @@ import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { useVectorStore } from '../hooks/useVectorStore';
 import VectorTileLayer from './VectorTileLayer';
 
-// Вспомогательная функция (оставляем как fallback)
+// Вспомогательная функция (оставляем как fallback для генерации цвета)
 const stringToColor = (str: string) => {
   let hash = 0;
   for (let i = 0; i < str.length; i++) {
@@ -15,10 +15,11 @@ const stringToColor = (str: string) => {
 export const VectorLayerRenderer = () => {
   const { activeVectorIds } = useVectorStore();
   
-  // Хранилище стилей: { [tableName]: { style object } }
-  const [dbStyles, setDbStyles] = useState<Record<string, any>>({});
+  // [ИЗМЕНЕНО] Хранилище КОНФИГУРАЦИЙ стилей: 
+  // { [tableName]: { type: 'single' | 'categorized', style?: ..., rules?: ... } }
+  const [styleConfigs, setStyleConfigs] = useState<Record<string, any>>({});
   
-  // Используем Ref для отслеживания текущих запросов, чтобы не запрашивать один слой дважды
+  // Используем Ref для отслеживания текущих запросов
   const fetchingRef = useRef<Set<string>>(new Set());
 
   // 1. ЗАГРУЗКА СТИЛЕЙ
@@ -26,17 +27,16 @@ export const VectorLayerRenderer = () => {
     if (!activeVectorIds || activeVectorIds.size === 0) return;
 
     activeVectorIds.forEach(async (layerId) => {
-      // ПРАВИЛЬНЫЙ ПАРСИНГ: "db-schema-table-name-with-dashes"
-      // parts[0] = db, parts[1] = schema, остальное = tableName
+      // ПАРСИНГ ID: "db-schema-table-name-with-dashes"
       const parts = layerId.split('-');
       if (parts.length < 3) return;
 
       const dbName = parts[0];
       const schema = parts[1];
-      const tableName = parts.slice(2).join('-'); // Собираем имя таблицы обратно
+      const tableName = parts.slice(2).join('-'); 
 
-      // Если стиль уже есть или он прямо сейчас загружается — выходим
-      if (dbStyles[tableName] || fetchingRef.current.has(layerId)) return;
+      // Если конфиг уже есть или грузится — выходим
+      if (styleConfigs[tableName] || fetchingRef.current.has(layerId)) return;
 
       fetchingRef.current.add(layerId);
 
@@ -44,42 +44,40 @@ export const VectorLayerRenderer = () => {
         const response = await fetch(`/api/vector/styles/${dbName}/${schema}/${tableName}`);
         
         if (response.ok) {
-          const styleData = await response.json();
-          setDbStyles((prev) => ({
+          const configData = await response.json();
+          
+          // [ИЗМЕНЕНО] Сохраняем конфигурацию целиком, как прислал бэкенд
+          setStyleConfigs((prev) => ({
             ...prev,
-            [tableName]: {
-              color: styleData.color,
-              weight: styleData.weight || 1,
-              opacity: 1,
-              fillColor: styleData.fillColor || styleData.color,
-              fill: true,
-              fillOpacity: styleData.fillOpacity || 0.4,
-            }
+            [tableName]: configData
           }));
         } else {
-          // Если стиля в БД нет (404), генерируем цвет по названию
+          // [ИЗМЕНЕНО] Если стиля нет (404), генерируем дефолтный конфиг "single"
           console.warn(`[Style] Using fallback for: ${tableName}`);
           const color = stringToColor(tableName);
-          setDbStyles((prev) => ({
+          
+          setStyleConfigs((prev) => ({
             ...prev,
             [tableName]: {
-              color,
-              weight: 1,
-              opacity: 1,
-              fillColor: color,
-              fill: true,
-              fillOpacity: 0.4,
+              type: 'single', // Важно указать тип
+              style: {
+                color,
+                weight: 1,
+                opacity: 1,
+                fillColor: color,
+                fill: true,
+                fillOpacity: 0.4,
+              }
             }
           }));
         }
       } catch (err) {
         console.error(`[Style] Fetch error for ${tableName}:`, err);
       } finally {
-        // Убираем из списка загрузки (не удаляем из dbStyles, чтобы не качать повторно)
         fetchingRef.current.delete(layerId);
       }
     });
-  }, [activeVectorIds]); // Убрали dbStyles из зависимостей, чтобы избежать циклов
+  }, [activeVectorIds]); // Зависимость только от списка ID
 
   // 2. ГРУППИРОВКА СЛОЕВ ДЛЯ КОМБИНИРОВАННЫХ ТАЙЛОВ
   const groupedLayers = useMemo(() => {
@@ -118,18 +116,22 @@ export const VectorLayerRenderer = () => {
         if (!tableNames.length) return null;
 
         const layersParam = tableNames.join(',');
+        // URL для MVT тайлов
         const tileUrl = `/api/vector/tiles/combined/${dbName}/{z}/{x}/{y}.pbf?layers=${layersParam}&schema=${schema}`;
 
-        // Сборка финального объекта стилей для конкретной группы на карте
-        const currentGroupStyles: Record<string, any> = {};
+        // Сборка объекта конфигов для текущей группы
+        const currentGroupConfigs: Record<string, any> = {};
         
         tableNames.forEach((tableName) => {
-          // Если данные из БД еще не пришли, показываем временный серый стиль
-          currentGroupStyles[tableName] = dbStyles[tableName] || {
-            weight: 1,
-            color: '#888888',
-            opacity: 0.5,
-            fill: false
+          // Если конфиг еще не загрузился, ставим временную "заглушку"
+          currentGroupConfigs[tableName] = styleConfigs[tableName] || {
+            type: 'single',
+            style: {
+              weight: 1,
+              color: '#888888',
+              opacity: 0.5,
+              fill: false
+            }
           };
         });
 
@@ -137,7 +139,7 @@ export const VectorLayerRenderer = () => {
           <VectorTileLayer
             key={`${groupKey}-${layersParam}`} 
             url={tileUrl}
-            styles={currentGroupStyles}
+            styleConfigs={currentGroupConfigs} // [ИЗМЕНЕНО] Передаем как styleConfigs
             active={true}
           />
         );

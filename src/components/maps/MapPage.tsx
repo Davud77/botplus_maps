@@ -13,18 +13,19 @@ import { MapHeader } from './ui/MapHeader';
 import { VectorPanel } from './ui/panels/VectorPanel';
 import { OrthoPanel } from './ui/panels/OrthoPanel';
 import { BaseLayersPanel } from './ui/panels/BaseLayersPanel';
+import { PanoPanel } from './ui/panels/PanoPanel';
 
 // --- VIEWERS ---
-import PanoramaViewer from './ui/viewers/PanoramaViewer'; // <-- Исправленный путь
+import PanoramaViewer from './ui/viewers/PanoramaViewer';
 
 // --- LAYERS ---
-import PanoLayer from './layers/PanoLayer'; // <-- Исправленный путь
-import { VectorLayerRenderer } from './layers/VectorLayerRenderer'; // <-- Исправленный путь
-import { OrthoTileLayer } from './layers/OrthoLayer'; // <-- Исправленный путь
+import PanoLayer from './layers/PanoLayer';
+import { VectorLayerRenderer } from './layers/VectorLayerRenderer';
+import { OrthoTileLayer } from './layers/OrthoLayer';
 
 // --- CORE ---
-import CustomZoomControl from './core/CustomZoomControl'; // <-- Исправленный путь
-import { MapEventHandlers, handleCopyCoordinates, ContextMenu } from './ui/ContextMenu'; // <-- Исправленный путь
+import CustomZoomControl from './core/CustomZoomControl';
+import { MapEventHandlers, handleCopyCoordinates, ContextMenu } from './ui/ContextMenu';
 
 interface MarkerType { id: string; lat: number; lng: number; }
 
@@ -47,6 +48,13 @@ const MapPage: React.FC = () => {
   const [contextMenu, setContextMenu] = useState({ visible: false, x: 0, y: 0, lat: 0, lng: 0 });
 
   const mapRef = useRef<L.Map | null>(null);
+
+  // Синхронизация: если открыта панель панорам, включаем слой на карте автоматически
+  useEffect(() => {
+    if (activePanel === 'pano') {
+      setShowPanoLayer(true);
+    }
+  }, [activePanel]);
 
   // --- Handlers ---
 
@@ -81,7 +89,9 @@ const MapPage: React.FC = () => {
       {/* 2. SIDE PANELS */}
       {activePanel === 'vector' && <VectorPanel onClose={closeAll} />}
       {activePanel === 'baseLayers' && <BaseLayersPanel onClose={closeAll} />}
-      {activePanel === 'ortho' && <OrthoPanel onClose={closeAll} />}
+      {/* Передаем mapRef.current в OrthoPanel для управления зумом */}
+      {activePanel === 'ortho' && <OrthoPanel onClose={closeAll} map={mapRef.current} />}
+      {activePanel === 'pano' && <PanoPanel onClose={closeAll} />}
 
       {/* 3. PANORAMA VIEWER */}
       {selectedMarker && isPanoVisible && (
@@ -89,7 +99,7 @@ const MapPage: React.FC = () => {
           <PanoramaViewer markerId={selectedMarker} isExpanded={isPanoExpanded} />
           
           <button 
-            onClick={() => setIsPanoVisible(false)} 
+            onClick={() => setIsPanoVisible(false)}
             style={{
               position:'absolute', top:10, right:10, zIndex:2000, 
               background:'white', border:'none', borderRadius:'50%', 
@@ -101,7 +111,7 @@ const MapPage: React.FC = () => {
           </button>
           
           <button 
-            onClick={() => setIsPanoExpanded(!isPanoExpanded)} 
+            onClick={() => setIsPanoExpanded(!isPanoExpanded)}
             style={{
               position:'absolute', top:10, right:50, zIndex:2000, 
               background:'white', border:'none', borderRadius:'4px', 

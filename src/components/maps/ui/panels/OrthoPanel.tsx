@@ -1,11 +1,15 @@
 import React, { useEffect } from 'react';
 import { BasePanel } from './BasePanel';
 import { useMapStore } from '../../hooks/useMapStore';
-import { useMap } from 'react-leaflet';
+import L from 'leaflet'; // Импортируем типы Leaflet
 
-export const OrthoPanel: React.FC<{ onClose: () => void }> = ({ onClose }) => {
+interface OrthoPanelProps {
+  onClose: () => void;
+  map: L.Map | null; // Добавляем проп для карты
+}
+
+export const OrthoPanel: React.FC<OrthoPanelProps> = ({ onClose, map }) => {
   const { orthoImages, selectedOrthoIds, isLoadingOrtho, fetchOrthos, toggleOrtho, fitToBounds } = useMapStore();
-  const map = useMap(); // Получаем доступ к Leaflet для зума
 
   useEffect(() => {
     fetchOrthos();
@@ -29,8 +33,17 @@ export const OrthoPanel: React.FC<{ onClose: () => void }> = ({ onClose }) => {
               {/* Кнопка "Найти на карте" */}
               <button 
                 className="zoom-btn"
-                onClick={(e) => { e.stopPropagation(); fitToBounds(ortho.id, map); }}
+                onClick={(e) => { 
+                  e.stopPropagation(); 
+                  // Проверяем, существует ли карта перед вызовом
+                  if (map) {
+                    fitToBounds(ortho.id, map); 
+                  } else {
+                    console.warn("Map instance is not ready");
+                  }
+                }}
                 title="Показать на карте"
+                disabled={!map} // Блокируем кнопку, если карта не прогрузилась
               >
                 🔍
               </button>
