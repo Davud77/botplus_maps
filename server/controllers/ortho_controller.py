@@ -47,7 +47,7 @@ class OrthoController:
                                view_func=controller.get_orthophotos, 
                                methods=["GET"])
         
-        # 2. Загрузка (Упрощенная: Upload -> Bounds -> DB -> MinIO)
+        # 2. Загрузка (Upload -> COG Convert -> Bounds -> DB -> MinIO)
         blueprint.add_url_rule("/upload_ortho", 
                                view_func=controller.upload_ortho, 
                                methods=["POST"])
@@ -72,7 +72,7 @@ class OrthoController:
                                view_func=controller.delete_ortho, 
                                methods=["DELETE"])
 
-        # 7. Тайлы (Заглушка, так как генерация отключена)
+        # 7. Тайлы (Заглушка, теперь тайлы отдает TiTiler, но роут оставим для совместимости)
         blueprint.add_url_rule("/orthophotos/<int:ortho_id>/tiles/<int:z>/<int:x>/<int:y>.png",
                                view_func=controller.get_ortho_tile,
                                methods=["GET"])
@@ -109,7 +109,7 @@ class OrthoController:
 
 
     # =========================================================================
-    # 2. Загрузка GeoTIFF (БЕЗ процессинга: только сохранение)
+    # 2. Загрузка GeoTIFF с конвертацией в COG (Cloud Optimized GeoTIFF)
     # =========================================================================
     def upload_ortho(self):
         uploaded_files = request.files.getlist("files")
@@ -126,45 +126,69 @@ class OrthoController:
 
         for file in uploaded_files:
             original_filename = file.filename
+            
+            # Генерируем имя для COG версии (например, map.tif -> map_cog.tif)
+            name_part, ext_part = os.path.splitext(original_filename)
+            cog_filename = f"{name_part}_cog.tif"
+
             try:
                 logs.append(f"Обработка файла: {original_filename}")
                 
-                # 1. Временное сохранение на диск (для gdalinfo)
+                # 1. Временное сохранение исходника на диск (для GDAL)
                 input_path = os.path.join(config.ORTHO_FOLDER, original_filename)
+                cog_path = os.path.join(config.ORTHO_FOLDER, cog_filename)
+                
                 file.save(input_path)
                 logs.append(f"Временный файл сохранен: {input_path}")
 
-                # 2. Считываем проекцию (просто для лога/инфо)
-                current_crs = self._get_crs_from_gdalinfo(input_path)
-                logs.append(f"Обнаружена проекция: {current_crs}")
+                # 2. КОНВЕРТАЦИЯ В COG
+                # TiTiler требует COG для быстрой работы с MinIO без скачивания всего файла
+                logs.append("Начинаю конвертацию в COG (Cloud Optimized GeoTIFF)...")
+                
+                # gdal_translate -of COG -co COMPRESS=DEFLATE ...
+                cmd = [
+                    "gdal_translate", input_path, cog_path,
+                    "-of", "COG",
+                    "-co", "COMPRESS=DEFLATE",        # Сжатие
+                    "-co", "PREDICTOR=2",             # Оптимизация для растров
+                    "-co", "NUM_THREADS=ALL_CPUS",    # Использовать все ядра
+                    "-co", "OVERVIEWS=IGNORE_EXISTING"
+                ]
+                
+                process = subprocess.run(cmd, capture_output=True, text=True)
+                
+                if process.returncode != 0:
+                    raise Exception(f"GDAL Error: {process.stderr}")
+                
+                logs.append("Конвертация в COG успешно завершена.")
 
-                # 3. Считываем границы (Bounds)
-                bounds = self._get_bounds_from_gdalinfo(input_path)
+                # 3. Считываем границы (Bounds) уже с НОВОГО COG файла
+                bounds = self._get_bounds_from_gdalinfo(cog_path)
                 logs.append("Границы (bounds) считаны.")
 
                 # 4. Сохранение в БД
-                # Сохраняем оригинальное имя файла, url=None (динамический)
+                # Важно: сохраняем имя именно COG файла, так как TiTiler будет искать его
                 ortho_obj = Ortho(
-                    filename=original_filename, 
+                    filename=cog_filename, 
                     bounds=json.dumps(bounds),
                     url=None 
                 )
                 ortho_id = self.ortho_manager.insert_ortho(ortho_obj)
                 logs.append(f"Запись добавлена в БД. ID={ortho_id}")
 
-                # 5. Загрузка оригинала в MinIO
+                # 5. Загрузка COG в MinIO
                 if self.minio.client:
-                    logs.append("Загрузка в MinIO (бакет 'orthophotos')...")
+                    logs.append("Загрузка COG в MinIO (бакет 'orthophotos')...")
                     
-                    with open(input_path, 'rb') as f:
-                        self.minio.save_file(f, original_filename, content_type="image/tiff")
+                    with open(cog_path, 'rb') as f:
+                        self.minio.save_file(f, cog_filename, content_type="image/tiff")
                     
                     logs.append("Файл успешно загружен в облако.")
 
-                    # 6. Очистка: удаляем локальный файл, так как он уже в облаке
-                    if os.path.exists(input_path):
-                        os.remove(input_path)
-                    logs.append("Локальный временный файл удален.")
+                    # 6. Очистка: удаляем оба временных файла
+                    if os.path.exists(input_path): os.remove(input_path)
+                    if os.path.exists(cog_path): os.remove(cog_path)
+                    logs.append("Локальные временные файлы удалены.")
                 else:
                     logs.append("ПРЕДУПРЕЖДЕНИЕ: MinIO недоступен. Файл остался на диске сервера.")
 
@@ -176,6 +200,14 @@ class OrthoController:
                 traceback.print_exc()
                 logs.append(error_msg)
                 failed_uploads.append(original_filename)
+                
+                # Попытка удалить мусор при ошибке
+                if 'input_path' in locals() and os.path.exists(input_path):
+                    try: os.remove(input_path)
+                    except: pass
+                if 'cog_path' in locals() and os.path.exists(cog_path):
+                    try: os.remove(cog_path)
+                    except: pass
 
         # Восстанавливаем имя бакета
         self.minio.bucket_name = original_bucket_name
@@ -287,7 +319,8 @@ class OrthoController:
     # 7. Получить тайл (Заглушка)
     # =========================================================================
     def get_ortho_tile(self, ortho_id, z, x, y):
-        # Так как тайлы не генерируются, всегда отдаем прозрачный пиксель
+        # Так как тайлы теперь отдает сервис TiTiler, этот метод
+        # возвращает прозрачный пиксель (заглушка для совместимости)
         return self._tile_png_rgba_transparent()
 
 

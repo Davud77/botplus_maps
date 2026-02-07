@@ -100,3 +100,35 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+
+
+
+ # --- 5. TiTiler (Tile Server) ---
+  titiler:
+    image: ghcr.io/developmentseed/titiler:latest
+    container_name: titiler
+    ports:
+      - "8000:80" # Внешний порт 8000 -> Внутренний 80
+    environment:
+      # --- Настройки MinIO (Важно для GDAL) ---
+      - AWS_ACCESS_KEY_ID=minioadmin
+      - AWS_SECRET_ACCESS_KEY=minioadmin
+      - AWS_REGION=us-east-1              # Обязательно
+      - AWS_S3_ENDPOINT=minio:9000        # [FIX] Без http:// и без _URL
+      - AWS_NO_SIGN_REQUEST=NO
+      - AWS_VIRTUAL_HOSTING=FALSE
+      - AWS_HTTPS=FALSE                   # Говорит GDAL использовать http
+      
+      # --- Разрешаем CORS ---
+      - TITILER_API_CORS_ORIGIN=*
+      
+      # --- Оптимизация GDAL ---
+      - CPL_VSIL_CURL_ALLOWED_EXTENSIONS=.tif,.tiff
+      - GDAL_CACHEMAX=200
+      - GDAL_DISABLE_READDIR_ON_OPEN=EMPTY_DIR
+      - GDAL_INGESTED_BYTES_AT_OPEN=32768
+      - GDAL_HTTP_MERGE_CONSECUTIVE_RANGES=YES
+      - GDAL_HTTP_MULTIPLEX=YES
+      - GDAL_HTTP_VERSION=2
+    depends_on:
+      - minio
