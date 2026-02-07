@@ -1,18 +1,8 @@
+// src/components/profile/ProfileOrthophotos.tsx
 import React, { FC, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { fetchOrthophotos, deleteOrtho } from '../../utils/api';
-
-interface OrthoItem {
-  id: number;
-  filename: string;
-  url: string;
-  bounds: {
-    north: number;
-    south: number;
-    east: number;
-    west: number;
-  } | null; // bounds может прийти null, если не определены
-}
+// [REF] Импортируем типы из api.ts, чтобы использовать единый источник истины
+import { fetchOrthophotos, deleteOrtho, OrthoItem } from '../../utils/api';
 
 const ProfileOrthophotos: FC = () => {
   const [orthos, setOrthos] = useState<OrthoItem[]>([]);
@@ -23,12 +13,13 @@ const ProfileOrthophotos: FC = () => {
     setLoadingOrthos(true);
     setErrorOrthos('');
     try {
-      const data: OrthoItem[] = await fetchOrthophotos();
-      // Проверяем, что пришел массив, а не HTML или ошибка
+      const data = await fetchOrthophotos();
+      
+      // Проверяем, что пришел массив, а не HTML (в случае ошибки 404/500)
       if (Array.isArray(data)) {
         setOrthos(data);
       } else {
-        throw new Error('Получены некорректные данные (возможно, HTML вместо JSON). Проверьте API endpoint.');
+        throw new Error('Получены некорректные данные. Ожидался массив JSON.');
       }
     } catch (error) {
       console.error("Ошибка загрузки ортофотопланов:", error);
@@ -67,8 +58,6 @@ const ProfileOrthophotos: FC = () => {
       {errorOrthos && (
         <div className="error-message" style={{ color: 'red', padding: '20px', background: '#ffe6e6', borderRadius: '4px' }}>
           <strong>Ошибка:</strong> {errorOrthos}
-          <br />
-          <small>Попробуйте проверить файл <code>src/utils/api.ts</code>: путь к API должен вести на бэкенд (например, <code>/api/orthophotos</code>).</small>
           <div style={{ marginTop: '10px' }}>
             <button className="secondary-button" onClick={loadOrthos}>Попробовать снова</button>
           </div>
@@ -119,7 +108,7 @@ const ProfileOrthophotos: FC = () => {
                   <div className="actions-group">
                     <button 
                       className="icon-button" 
-                      title="Открыть"
+                      title="Скачать / Открыть"
                       onClick={() => window.open(ortho.url, '_blank')}
                     >
                       &darr;

@@ -1,40 +1,45 @@
+# server/app.py
 from flask import Flask, request, make_response, send_from_directory, jsonify
 from flask_cors import CORS
-from flask_compress import Compress  # <--- [NEW] Импорт сжатия
+from flask_compress import Compress
 from pathlib import Path
 import os
 import re
 import config
 
-# Пытаемся подключить блюпринты (если каких-то нет — приложение всё равно стартует)
+# Try to import blueprints. 
+# If a part (e.g. Auth or Vector) is not configured, the server will still start.
 try:
     from controllers.auth_controller import auth_blueprint
-except Exception:
+except Exception as e:
+    print(f"Warning: Could not import auth_blueprint. {e}")
     auth_blueprint = None
 
 try:
     from controllers.pano_controller import pano_blueprint
-except Exception:
+except Exception as e:
+    print(f"Warning: Could not import pano_blueprint. {e}")
     pano_blueprint = None
 
 try:
     from controllers.ortho_controller import ortho_blueprint
-except Exception:
+except Exception as e:
+    print(f"Warning: Could not import ortho_blueprint. {e}")
     ortho_blueprint = None
 
-# Новый контроллер для Вектора (PostGIS)
+# New controller for Vector (PostGIS)
 try:
-    # Имя файла: server/controllers/vector.py, переменная: vector_bp
     from controllers.vector import vector_bp
-except Exception:
+except Exception as e:
+    print(f"Warning: Could not import vector_bp. {e}")
     vector_bp = None
 
-# Пути к статике
+# Paths to static files (Frontend build)
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PUBLIC_DIR   = getattr(config, "PUBLIC_DIR", PROJECT_ROOT / "public")
 BUILD_DIR    = PUBLIC_DIR / "build"
 
-# Разрешённые источники CORS
+# Allowed CORS origins
 ALLOWED_ORIGINS = list(getattr(config, "CLIENT_ORIGINS", [])) + [re.compile(r"^https://.*\.botplus\.ru$")]
 
 def origin_allowed(origin: str | None) -> bool:
@@ -50,37 +55,37 @@ def origin_allowed(origin: str | None) -> bool:
     return False
 
 def create_app():
-    # Явно отключаем дефолтную статику Flask, чтобы сами контролировать раздачу SPA
+    # Disable default Flask static handling, we will serve it manually for SPA
     app = Flask(__name__, static_folder=None)
     app.secret_key = config.SECRET_KEY
 
-    # Куки/сессии и общие лимиты
+    # Cookie and limit settings
     app.config.update(
         SESSION_COOKIE_DOMAIN=(config.SESSION_COOKIE_DOMAIN or None),
         SESSION_COOKIE_SAMESITE=getattr(config, "COOKIE_SAMESITE", "Lax"),
         SESSION_COOKIE_SECURE=getattr(config, "COOKIE_SECURE", False),
         SESSION_COOKIE_HTTPONLY=True,
         JSON_AS_ASCII=False,
-        MAX_CONTENT_LENGTH=1024 * 1024 * 1024,  # 1 ГБ
+        MAX_CONTENT_LENGTH=1024 * 1024 * 1024,  # Upload limit 1 GB
     )
 
-    # ---------------- [NEW] НАСТРОЙКА СЖАТИЯ ----------------
-    # Это уменьшает вес тайлов (.pbf) в 5-10 раз
+    # ---------------- COMPRESSION SETTINGS (GZIP) ----------------
+    # Critical for vector tiles (.pbf) and large JSON responses
     app.config['COMPRESS_MIMETYPES'] = [
         'text/html', 
         'text/css', 
         'text/xml', 
         'application/json', 
         'application/javascript',
-        'application/vnd.mapbox-vector-tile'  # <--- Самое важное для карт!
+        'application/vnd.mapbox-vector-tile'
     ]
-    app.config['COMPRESS_LEVEL'] = 6      # Оптимальный баланс скорость/сжатие
-    app.config['COMPRESS_MIN_SIZE'] = 500 # Не сжимать мелочь меньше 500 байт
+    app.config['COMPRESS_LEVEL'] = 6
+    app.config['COMPRESS_MIN_SIZE'] = 500
     
-    Compress(app) # Инициализация
-    # --------------------------------------------------------
+    Compress(app)
 
-    # CORS: достаточно описать /api/* — статика и SPA ходят с того же origin
+    # ---------------- CORS ----------------
+    # Allow requests only to API
     CORS(
         app,
         resources={r"/api/*": {"origins": ALLOWED_ORIGINS}},
@@ -94,46 +99,49 @@ def create_app():
     def add_cors_headers(response):
         origin = request.headers.get("Origin")
         if origin_allowed(origin):
-            # если запрос пришёл с допустимого источника — отзеркалим его
             response.headers["Access-Control-Allow-Origin"] = origin or "*"
             response.headers["Vary"] = "Origin"
         response.headers["Access-Control-Allow-Credentials"] = "true"
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
         response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With"
         
-        # Если это НЕ тайл (тайлы имеют свой кэш), запрещаем кэширование API
+        # Disable caching for API, but keep for map tiles
         if 'application/vnd.mapbox-vector-tile' not in response.headers.get('Content-Type', ''):
              response.headers["Cache-Control"] = "no-store"
              
         return response
 
-    # Универсальный preflight для нестандартных путей
     @app.route("/<path:any_path>", methods=["OPTIONS"])
     def cors_preflight(any_path):
         return make_response("", 204)
 
-    # ---------------- API ----------------
+    # ---------------- API REGISTRATION (Routing) ----------------
+    # Important: add url_prefix="/api" everywhere so the frontend can access
+    # via /api/orthophotos, /api/panoramas etc.
     
-    # 1. Auth
+    # 1. Auth (Authorization)
     if auth_blueprint:
         app.register_blueprint(auth_blueprint, url_prefix="/api/auth")
     
-    # 2. Vector / PostGIS
+    # 2. Vector / PostGIS (Vector data)
     if vector_bp:
         app.register_blueprint(vector_bp, url_prefix="/api")
 
-    # 3. Pano & Ortho
+    # 3. Pano (Panoramas)
     if pano_blueprint:
-        app.register_blueprint(pano_blueprint)
+        app.register_blueprint(pano_blueprint, url_prefix="/api")
+    
+    # 4. Ortho (Orthophotos)
     if ortho_blueprint:
-        app.register_blueprint(ortho_blueprint)
+        app.register_blueprint(ortho_blueprint, url_prefix="/api")
 
+    # API Health Check
     @app.get("/api/health")
     def health():
-        return jsonify({"ok": True})
+        return jsonify({"ok": True, "db": "postgres"})
 
-    # ---------------- Статика / SPA ----------------
-    # favicon/manifest: сперва из build/, если нет — из public/
+    # ---------------- STATIC SERVING (Frontend / SPA) ----------------
+    
     @app.route("/favicon.ico")
     def favicon():
         if (BUILD_DIR / "favicon.ico").exists():
@@ -146,19 +154,16 @@ def create_app():
             return send_from_directory(BUILD_DIR, "manifest.json", conditional=True)
         return send_from_directory(PUBLIC_DIR, "manifest.json", conditional=True)
 
-    # /static/* → build/static/* (CRA/SPA артефакты)
     @app.route("/static/<path:filename>")
     def static_from_build(filename):
         build_static = BUILD_DIR / "static"
         public_static = PUBLIC_DIR / "static"
         if (build_static / filename).exists():
             return send_from_directory(build_static, filename, conditional=True)
-        # fallback на /public/static (на случай dev-артефактов)
         if (public_static / filename).exists():
             return send_from_directory(public_static, filename, conditional=True)
         return ("Not Found", 404)
 
-    # /assets/* — на будущее (vite-паттерн)
     @app.route("/assets/<path:filename>")
     def assets_from_build(filename):
         build_assets = BUILD_DIR / "assets"
@@ -169,7 +174,7 @@ def create_app():
             return send_from_directory(public_assets, filename, conditional=True)
         return ("Not Found", 404)
 
-    # Любые не-API пути → SPA index.html
+    # Fallback to index.html for SPA (any unknown path returns React app)
     @app.route("/", defaults={"path": ""})
     @app.route("/<path:path>")
     def spa_fallback(path: str):
@@ -191,4 +196,5 @@ def create_app():
 
 if __name__ == "__main__":
     application = create_app()
-    application.run(host="0.0.0.0", port=5000, debug=False)
+    # Run on all interfaces (0.0.0.0) so Docker can forward the port
+    application.run(host="0.0.0.0", port=5000, debug=True)

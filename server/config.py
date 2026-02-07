@@ -1,3 +1,4 @@
+# server/config.py
 import os
 from datetime import timedelta
 
@@ -10,7 +11,7 @@ def _env_bool(name: str, default: bool) -> bool:
 # Базовая директория проекта
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Файл БД (можно переопределить через ENV DB_FILE)
+# Файл БД (оставляем для совместимости, если где-то еще используется SQLite)
 DB_FILE = os.getenv("DB_FILE", os.path.join(BASE_DIR, "botplus.db"))
 
 # Общая папка для загрузок (ENV: UPLOAD_FOLDER)
@@ -58,3 +59,12 @@ CLIENT_ORIGINS = [
     for o in os.getenv("CLIENT_ORIGINS", ",".join(_default_origins)).split(",")
     if o.strip()
 ]
+
+# --- DATABASE CONFIGURATION (POSTGRES / PGBOUNCER) ---
+# Настройки для подключения к PostgreSQL через пулер соединений (PgBouncer).
+# Хост 'pgbouncer' - это имя сервиса в docker-compose.
+DB_HOST = os.getenv('DB_HOST', 'pgbouncer')
+DB_PORT = os.getenv('DB_PORT', '6432')
+DB_NAME = os.getenv('DB_NAME', 'qgisdb')
+DB_USER = os.getenv('DB_USER', 'botplus_user')
+DB_PASSWORD = os.getenv('DB_PASSWORD', 'botplus_password')

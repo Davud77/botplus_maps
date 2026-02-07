@@ -4,13 +4,15 @@ from flask import Blueprint, jsonify, request, make_response
 from managers.ortho_manager import OrthoManager
 from database import Database
 from models.ortho import Ortho
-from storage import LocalStorage
+# Импортируем оба класса хранилища
+from storage import LocalStorage, MinioStorage
 import config
 import json
 import subprocess
 import os
 import re
 import sys
+import traceback
 from io import BytesIO
 from PIL import Image
 
@@ -20,43 +22,57 @@ class OrthoController:
     def __init__(self):
         self.db = Database()
         self.ortho_manager = OrthoManager(self.db)
+        
+        # Локальное хранилище (используется для временных файлов GDAL и хранения тайлов)
         self.storage = LocalStorage(config.ORTHO_FOLDER)
+        
+        # MinIO хранилище (для постоянного хранения оригиналов ортофотопланов)
+        self.minio = MinioStorage()
+        
+        # При инициализации проверяем и создаем бакет 'orthophotos', если нужно
+        if self.minio.client:
+            try:
+                if not self.minio.client.bucket_exists("orthophotos"):
+                    self.minio.client.make_bucket("orthophotos")
+                    print("Bucket 'orthophotos' created successfully.")
+            except Exception as e:
+                print(f"MinIO init warning: {e}")
 
     @staticmethod
     def register_routes(blueprint):
         controller = OrthoController()
 
-        # Список орто
+        # 1. Список
         blueprint.add_url_rule("/orthophotos", 
                                view_func=controller.get_orthophotos, 
                                methods=["GET"])
         
-        # Загрузка орто (приводим к EPSG:3857), делаем preview, генерируем тайлы
+        # 2. Загрузка (Upload)
         blueprint.add_url_rule("/upload_ortho", 
                                view_func=controller.upload_ortho, 
                                methods=["POST"])
         
-        # Получить информацию об одном орто
+        # 3. Инфо
         blueprint.add_url_rule("/orthophotos/<int:ortho_id>", 
                                view_func=controller.get_ortho, 
                                methods=["GET"])
         
-        # Скачать превью
+        # 4. Скачать файл
         blueprint.add_url_rule("/orthophotos/<int:ortho_id>/download", 
                                view_func=controller.download_ortho_file, 
                                methods=["GET"])
         
-        # Обновить
+        # 5. Обновить
         blueprint.add_url_rule("/orthophotos/<int:ortho_id>", 
                                view_func=controller.update_ortho, 
                                methods=["PUT"])
         
-        # Удалить
+        # 6. Удалить
         blueprint.add_url_rule("/orthophotos/<int:ortho_id>", 
                                view_func=controller.delete_ortho, 
                                methods=["DELETE"])
 
-        # Получить предсгенерированный тайл (PNG)
+        # 7. Тайлы (XYZ)
         blueprint.add_url_rule("/orthophotos/<int:ortho_id>/tiles/<int:z>/<int:x>/<int:y>.png",
                                view_func=controller.get_ortho_tile,
                                methods=["GET"])
@@ -70,100 +86,137 @@ class OrthoController:
             orthos = self.ortho_manager.get_all_orthos()
             results = []
             for o in orthos:
-                b = json.loads(o.bounds) if o.bounds else None
+                # Безопасный парсинг границ
+                b = None
+                if o.bounds:
+                    try:
+                        b = json.loads(o.bounds)
+                    except Exception:
+                        pass 
+                
                 item = {
                     "id": o.id,
-                    "filename": o.filename,  
-                    "url": f"https://api.botplus.ru/orthophotos/{o.id}/download",
+                    "filename": o.filename,
+                    "url": f"/api/orthophotos/{o.id}/download",
                     "bounds": b if b else {"north": 0, "south": 0, "east": 0, "west": 0},
+                    "upload_date": str(o.upload_date) if hasattr(o, 'upload_date') else None
                 }
                 results.append(item)
             return jsonify(results), 200
         except Exception as e:
+            print("ERROR in get_orthophotos:")
+            traceback.print_exc()
             return jsonify({"error": str(e)}), 500
 
 
     # =========================================================================
-    # 2. Загрузка GeoTIFF: приводим к EPSG:3857, делаем preview, генерируем тайлы
+    # 2. Загрузка GeoTIFF (Основная логика)
     # =========================================================================
     def upload_ortho(self):
         uploaded_files = request.files.getlist("files")
         successful_uploads = []
         failed_uploads = []
-        logs = []  # Для сбора детальных логов
+        logs = []
 
         if not uploaded_files:
-            logs.append("Файлы не были переданы.")
-            return jsonify({
-                "message": "Нет переданных файлов.",
-                "successful_uploads": [],
-                "failed_uploads": [],
-                "logs": logs
-            }), 400
+            return jsonify({"message": "Нет файлов для загрузки"}), 400
+
+        # Сохраняем текущее имя бакета и переключаемся на 'orthophotos'
+        original_bucket_name = self.minio.bucket_name
+        self.minio.bucket_name = "orthophotos"
 
         for file in uploaded_files:
             original_filename = file.filename
             try:
-                logs.append(f"Начинаем обработку файла: {original_filename}")
+                logs.append(f"Обработка файла: {original_filename}")
                 base_name, ext = os.path.splitext(original_filename)
 
-                # 1. Сохраняем во временный файл
+                # 1. Временное сохранение на диск (GDAL требует путь к файлу)
                 input_path = os.path.join(config.ORTHO_FOLDER, original_filename)
                 file.save(input_path)
-                if not os.path.exists(input_path):
-                    raise FileNotFoundError(f"Не удалось сохранить файл: {input_path}")
-                logs.append(f"Файл сохранён во временное место: {input_path}")
+                logs.append(f"Временный файл сохранен: {input_path}")
 
-                # 2. Проверяем проекцию => если не EPSG:3857, warp
+                # 2. Проверка проекции и конвертация (Warp) в EPSG:3857
                 current_crs = self._get_crs_from_gdalinfo(input_path)
-                logs.append(f"Текущая проекция файла: {current_crs}")
                 final_tiff_filename = f"{base_name}_3857.tif"
                 final_tiff_path = os.path.join(config.ORTHO_FOLDER, final_tiff_filename)
 
                 if current_crs != "EPSG:3857":
-                    logs.append("Выполняем gdalwarp для перевода проекции в EPSG:3857")
-                    self._warp_to_mercator(input_path, final_tiff_path)
-                    os.remove(input_path)
-                    logs.append(f"Файл {original_filename} преобразован и сохранён как {final_tiff_filename}")
+                    logs.append(f"Проекция {current_crs}. Выполняем Warp в EPSG:3857...")
+                    try:
+                        self._warp_to_mercator(input_path, final_tiff_path)
+                    except subprocess.CalledProcessError as e:
+                        raise Exception("Ошибка gdalwarp. Возможно, файл не имеет геопривязки.")
+                    
+                    # Удаляем исходный файл, он больше не нужен
+                    if os.path.exists(input_path):
+                        os.remove(input_path)
                 else:
                     os.rename(input_path, final_tiff_path)
-                    logs.append(f"Файл уже в EPSG:3857, переименован в {final_tiff_filename}")
+                    logs.append("Проекция корректна.")
 
-                # 3. Генерируем превью
+                # 3. Генерация превью (PNG)
                 preview_filename = f"{base_name}_3857_preview.png"
                 preview_path = os.path.join(config.ORTHO_FOLDER, preview_filename)
-                logs.append(f"Генерация превью: {preview_filename}")
                 self._create_preview(final_tiff_path, preview_path)
+                logs.append("Превью создано.")
 
-                # 4. Считываем bounds
-                logs.append("Считываем границы (bounds) c gdalinfo")
+                # 4. Получение границ изображения (Bounds)
                 bounds = self._get_bounds_from_gdalinfo(final_tiff_path)
 
-                # 5. Сохраняем запись в БД
+                # 5. Сохранение в БД
+                # ВАЖНО: передаем url=None, так как модель теперь это поддерживает
                 ortho_obj = Ortho(
-                    filename=preview_filename,
-                    bounds=json.dumps(bounds)
+                    filename=final_tiff_filename, 
+                    bounds=json.dumps(bounds),
+                    url=None 
                 )
                 ortho_id = self.ortho_manager.insert_ortho(ortho_obj)
-                logs.append(f"Создана запись в базе данных ID={ortho_id}")
+                logs.append(f"Запись добавлена в БД. ID={ortho_id}")
 
-                # 6. Генерируем тайлы
+                # 6. Генерация тайлов (XYZ)
+                # Тайлы генерируются локально в папку tiles/ID
                 tiles_folder = os.path.join(config.TILES_FOLDER, str(ortho_id))
                 os.makedirs(tiles_folder, exist_ok=True)
-                logs.append(f"Начинаем генерацию тайлов в папку: {tiles_folder}")
+                logs.append("Генерация тайлов...")
                 self._generate_tiles(final_tiff_path, tiles_folder, logs)
-                logs.append(f"Тайлы успешно сгенерированы для Ortho ID={ortho_id}")
+
+                # 7. Загрузка оригиналов в MinIO
+                if self.minio.client:
+                    logs.append("Загрузка в MinIO (бакет 'orthophotos')...")
+                    
+                    # Загрузка основного TIFF
+                    with open(final_tiff_path, 'rb') as f:
+                        self.minio.save_file(f, final_tiff_filename, content_type="image/tiff")
+                    
+                    # Загрузка превью PNG
+                    with open(preview_path, 'rb') as f:
+                        self.minio.save_file(f, preview_filename, content_type="image/png")
+                    
+                    logs.append("Файлы успешно загружены в облако.")
+
+                    # 8. Очистка локальных оригиналов
+                    # Тайлы оставляем, оригиналы удаляем, чтобы не забивать диск
+                    if os.path.exists(final_tiff_path): os.remove(final_tiff_path)
+                    if os.path.exists(preview_path): os.remove(preview_path)
+                    logs.append("Локальные временные файлы удалены.")
+                else:
+                    logs.append("ПРЕДУПРЕЖДЕНИЕ: MinIO недоступен. Файлы остались на диске.")
 
                 successful_uploads.append(original_filename)
 
             except Exception as err:
-                error_msg = f"Ошибка при обработке файла {original_filename}: {err}"
+                error_msg = f"Ошибка обработки {original_filename}: {err}"
                 print(error_msg)
+                traceback.print_exc()
                 logs.append(error_msg)
                 failed_uploads.append(original_filename)
 
+        # Восстанавливаем имя бакета
+        self.minio.bucket_name = original_bucket_name
+
         return jsonify({
-            "message": "Загрузка завершена (EPSG:3857, preview, tiles).",
+            "message": "Процесс завершен",
             "successful_uploads": successful_uploads,
             "failed_uploads": failed_uploads,
             "logs": logs
@@ -171,112 +224,127 @@ class OrthoController:
 
 
     # =========================================================================
-    # 3. Получить информацию об орто
+    # 3. Получить инфо
     # =========================================================================
     def get_ortho(self, ortho_id):
         try:
             ortho = self.ortho_manager.get_ortho_by_id(ortho_id)
             if not ortho:
-                return jsonify({"error": "Orthophoto not found"}), 404
+                return jsonify({"error": "Not found"}), 404
 
-            bounds = json.loads(ortho.bounds) if ortho.bounds else None
+            b = json.loads(ortho.bounds) if ortho.bounds else None
             result = {
                 "id": ortho.id,
                 "filename": ortho.filename,
-                "url": f"https://api.botplus.ru/orthophotos/{ortho.id}/download",
-                "bounds": bounds
+                "url": f"/api/orthophotos/{ortho.id}/download",
+                "bounds": b
             }
             return jsonify(result), 200
         except Exception as e:
+            traceback.print_exc()
             return jsonify({"error": str(e)}), 500
 
 
     # =========================================================================
-    # 4. Скачать preview-файл (PNG)
+    # 4. Скачать файл (из MinIO)
     # =========================================================================
     def download_ortho_file(self, ortho_id):
         try:
             ortho = self.ortho_manager.get_ortho_by_id(ortho_id)
             if not ortho:
-                return jsonify({"error": "Orthophoto not found"}), 404
+                return jsonify({"error": "Not found"}), 404
 
-            return self.storage.send_local_file(ortho.filename, mimetype="image/png")
+            # Пытаемся отдать из MinIO (бакет orthophotos)
+            original_bucket = self.minio.bucket_name
+            self.minio.bucket_name = "orthophotos"
+            
+            response = None
+            if self.minio.client:
+                try:
+                    response = self.minio.send_local_file(ortho.filename, mimetype="image/tiff")
+                except Exception as e:
+                    print(f"MinIO download failed: {e}")
+            
+            self.minio.bucket_name = original_bucket
+            
+            if response:
+                return response
+            
+            # Fallback: пробуем отдать локально (если вдруг файл остался)
+            return self.storage.send_local_file(ortho.filename, mimetype="image/tiff")
+            
         except Exception as e:
+            traceback.print_exc()
             return jsonify({"error": str(e)}), 500
 
 
     # =========================================================================
-    # 5. Обновить
+    # 5. Обновить данные
     # =========================================================================
     def update_ortho(self, ortho_id):
         try:
             data = request.json
-            existing = self.ortho_manager.get_ortho_by_id(ortho_id)
-            if not existing:
-                return jsonify({"error": "Orthophoto not found"}), 404
-
-            updated_fields = {}
-            for field in ["filename", "bounds"]:
-                if field in data:
-                    if field == "bounds" and isinstance(data[field], dict):
-                        updated_fields[field] = json.dumps(data[field])
-                    else:
-                        updated_fields[field] = data[field]
-
-            self.ortho_manager.update_ortho(ortho_id, updated_fields)
-            return jsonify({"status": "success", "message": "Orthophoto updated"}), 200
+            self.ortho_manager.update_ortho(ortho_id, data)
+            return jsonify({"status": "success"}), 200
         except Exception as e:
+            traceback.print_exc()
             return jsonify({"error": str(e)}), 500
 
 
     # =========================================================================
-    # 6. Удалить
+    # 6. Удалить (БД + MinIO + Тайлы)
     # =========================================================================
     def delete_ortho(self, ortho_id):
         try:
             existing = self.ortho_manager.get_ortho_by_id(ortho_id)
             if not existing:
-                return jsonify({"error": "Orthophoto not found"}), 404
+                return jsonify({"error": "Not found"}), 404
 
-            # Удаляем превью
-            file_path = os.path.join(config.ORTHO_FOLDER, existing.filename)
-            if os.path.exists(file_path):
-                os.remove(file_path)
-
-            # Удаляем тайловую папку
+            # 1. Удаляем локальные тайлы
             tiles_path = os.path.join(config.TILES_FOLDER, str(ortho_id))
             if os.path.exists(tiles_path):
                 import shutil
                 shutil.rmtree(tiles_path)
 
-            # Удаляем запись из БД
+            # 2. Удаляем файлы из MinIO
+            if self.minio.client:
+                orig_bucket = self.minio.bucket_name
+                self.minio.bucket_name = "orthophotos"
+                
+                # Удаляем сам файл
+                self.minio.delete_file(existing.filename)
+                # Удаляем превью (предполагаем имя)
+                preview_name = existing.filename.replace(".tif", "_preview.png")
+                self.minio.delete_file(preview_name)
+                
+                self.minio.bucket_name = orig_bucket
+
+            # 3. Удаляем запись из БД
             self.ortho_manager.delete_ortho(ortho_id)
 
-            return jsonify({"status": "success", "message": "Orthophoto deleted"}), 200
+            return jsonify({"status": "success"}), 200
         except Exception as e:
+            traceback.print_exc()
             return jsonify({"error": str(e)}), 500
 
 
     # =========================================================================
-    # 7. Получить тайл (PNG)
+    # 7. Получить тайл (Локально)
     # =========================================================================
     def get_ortho_tile(self, ortho_id, z, x, y):
         try:
             tile_path = os.path.join(config.TILES_FOLDER, str(ortho_id), str(z), str(x), f"{y}.png")
             if os.path.exists(tile_path):
                 return self.storage.send_local_file(tile_path, mimetype="image/png")
-            else:
-                return self._tile_png_rgba_transparent()
-        except Exception as e:
-            print(f"Ошибка при выдаче тайла: {e}")
+            return self._tile_png_rgba_transparent()
+        except Exception:
             return self._tile_png_rgba_transparent()
 
 
     # =========================================================================
-    # ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ
+    # Вспомогательные функции GDAL
     # =========================================================================
     def _warp_to_mercator(self, input_path, output_path):
-        print(f"[Warp] Запуск gdalwarp для файла: {input_path}")
         cmd = [
             "gdalwarp",
             "-t_srs", "EPSG:3857",
@@ -287,10 +355,8 @@ class OrthoController:
             output_path
         ]
         subprocess.check_call(cmd)
-        print(f"[Warp] Файл успешно переведён в EPSG:3857: {output_path}")
 
     def _create_preview(self, input_path, output_path):
-        print(f"[Preview] Создание превью PNG: {output_path}")
         cmd = [
             "gdal_translate",
             "-of", "PNG",
@@ -299,133 +365,71 @@ class OrthoController:
             output_path
         ]
         subprocess.check_call(cmd)
-        print(f"[Preview] Превью сохранено: {output_path}")
 
     def _generate_tiles(self, tiff_path, dest_folder, logs):
-        """
-        Генерируем тайлы через "python -m osgeo_utils.gdal2tiles"
-        (начиная с GDAL 3.3, gdal2tiles лежит в osgeo_utils).
-
-        Включаем многопроцессность (--processes) с числом потоков = количеству ядер,
-        чтобы использовать 100% ресурсов CPU. 
-        Добавляем --verbose для детального вывода.
-        Читаем вывод построчно, логируем в реальном времени.
-        Диапазон зумов 0-20.
-        """
         import multiprocessing
-        nproc = multiprocessing.cpu_count()  # все CPU
-
-        start_msg = f"[Tiles] Старт генерации тайлов для: {tiff_path}"
-        print(start_msg)
-        logs.append(start_msg)
-
+        nproc = multiprocessing.cpu_count()
         cmd = [
             sys.executable,
             "-m", "osgeo_utils.gdal2tiles",
             "--profile=mercator",
             "--xyz",
-            "--verbose",
             "--processes", str(nproc),
             "-z", "0-20",
             tiff_path,
             dest_folder
         ]
-        cmd_msg = f"[Tiles] Команда: {' '.join(cmd)}"
-        print(cmd_msg)
-        logs.append(cmd_msg)
-
+        
         process = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True
         )
-
-        # Читаем stdout построчно, логируем прогресс
-        while True:
-            line = process.stdout.readline()
-            if not line:
-                break
-            line_stripped = line.strip()
-            print(f"[Tiles - stdout] {line_stripped}")
-            logs.append(f"[Tiles - stdout] {line_stripped}")
-
-        # Теперь считываем оставшиеся строки из stderr (если есть)
-        while True:
-            line_err = process.stderr.readline()
-            if not line_err:
-                break
-            line_err_stripped = line_err.strip()
-            print(f"[Tiles - stderr] {line_err_stripped}")
-            logs.append(f"[Tiles - stderr] {line_err_stripped}")
-
-        retcode = process.wait()
-        if retcode != 0:
-            error_msg = f"[Tiles] gdal2tiles завершился с ошибкой (код {retcode})."
-            print(error_msg)
-            logs.append(error_msg)
-            raise Exception(error_msg)
-        else:
-            done_msg = "[Tiles] Генерация тайлов успешно завершена."
-            print(done_msg)
-            logs.append(done_msg)
+        out, err = process.communicate()
+        
+        if process.returncode != 0:
+            raise Exception(f"gdal2tiles error: {err}")
+        logs.append("Тайлы успешно сгенерированы.")
 
     def _get_crs_from_gdalinfo(self, path):
         import json
-        process = subprocess.Popen(
-            ["gdalinfo", "-json", path],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True
-        )
-        out, err = process.communicate()
-        if process.returncode != 0:
-            raise Exception(f"Ошибка gdalinfo: {err}")
-
-        data = json.loads(out)
-        coord_system = data.get("coordinateSystem", {})
-        cs_data = coord_system.get("data", {})
-        epsg_code = cs_data.get("code")
-        if epsg_code:
-            return f"EPSG:{epsg_code}"
-
-        wkt = coord_system.get("wkt", "")
-        match = re.search(r'AUTHORITY$$"EPSG","(\d+)"$$', wkt)
-        if match:
-            return f"EPSG:{match.group(1)}"
+        process = subprocess.Popen(["gdalinfo", "-json", path], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        out, _ = process.communicate()
+        try:
+            data = json.loads(out)
+            if "coordinateSystem" in data and "wkt" in data["coordinateSystem"]:
+                return "EPSG:3857" if "3857" in data["coordinateSystem"]["wkt"] else "UNKNOWN"
+            if "coordinateSystem" in data and "data" in data["coordinateSystem"]:
+                 if data["coordinateSystem"]["data"].get("code") == 3857: return "EPSG:3857"
+        except: pass
         return "UNKNOWN"
 
     def _get_bounds_from_gdalinfo(self, path):
         import json
-        process = subprocess.Popen(
-            ["gdalinfo", "-json", path],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True
-        )
-        out, err = process.communicate()
-        if process.returncode != 0:
-            raise Exception(f"gdalinfo error: {err}")
+        process = subprocess.Popen(["gdalinfo", "-json", path], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        out, _ = process.communicate()
+        try:
+            data = json.loads(out)
+            coords = data.get("cornerCoordinates", {})
+            
+            # Безопасное извлечение координат
+            def get_coord(key, idx):
+                val = coords.get(key)
+                if val and len(val) > idx: return val[idx]
+                return 0.0
 
-        data = json.loads(out)
-        corner_coords = data.get("cornerCoordinates")
-        if not corner_coords:
-            raise Exception("Не найдены cornerCoordinates в gdalinfo -json.")
-
-        coords_list = [
-            corner_coords["upperLeft"],
-            corner_coords["lowerLeft"],
-            corner_coords["upperRight"],
-            corner_coords["lowerRight"]
-        ]
-        xs = [c[0] for c in coords_list]
-        ys = [c[1] for c in coords_list]
-
-        west = min(xs)
-        east = max(xs)
-        south = min(ys)
-        north = max(ys)
-        return {"north": north, "south": south, "east": east, "west": west}
+            all_x = [get_coord("upperLeft", 0), get_coord("lowerRight", 0), get_coord("upperRight", 0), get_coord("lowerLeft", 0)]
+            all_y = [get_coord("upperLeft", 1), get_coord("lowerRight", 1), get_coord("upperRight", 1), get_coord("lowerLeft", 1)]
+            
+            return {
+                "north": max(all_y), 
+                "south": min(all_y), 
+                "east": max(all_x), 
+                "west": min(all_x)
+            }
+        except:
+            return {"north": 0, "south": 0, "east": 0, "west": 0}
 
     def _tile_png_rgba_transparent(self):
         img = Image.new("RGBA", (256, 256), (0, 0, 0, 0))

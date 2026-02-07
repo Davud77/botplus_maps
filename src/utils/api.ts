@@ -2,8 +2,8 @@
 
 // [HARD FIX] Определение адреса API
 // Мы проверяем адрес в браузере. Если это localhost, значит мы в разработке
-// и должны стучаться на порт бэкенда (5580).
-// В продакшене (на реальном домене) API_BASE будет пустой строкой (относительный путь).
+// и должны стучаться на порт бэкенда (или фронтенда, если работает прокси).
+// В данном случае стучимся на текущий хост (5580), чтобы сработал setupProxy.js
 
 const isLocalhost = 
   typeof window !== 'undefined' && 
@@ -84,8 +84,9 @@ export interface BBox {
 /* -------------------- Низкоуровневые вызовы (с обработкой ошибок) -------------------- */
 
 async function handleResponse<T>(res: Response, url: string): Promise<T> {
-  // [FIX] Проверка на HTML (ошибка "Unexpected token <")
   const contentType = res.headers.get("content-type");
+  
+  // [FIX] Проверка на HTML (ошибки прокси/роутинга)
   if (contentType && contentType.includes("text/html")) {
     const text = await res.text();
     // Пытаемся вытащить заголовок из HTML ошибки для ясности
@@ -99,11 +100,22 @@ async function handleResponse<T>(res: Response, url: string): Promise<T> {
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     let errorMessage = `Request failed: ${res.status}`;
+    
     try {
+      // Пытаемся распарсить JSON ошибки от бэкенда
       const jsonErr = JSON.parse(text);
-      if (jsonErr.message) errorMessage = jsonErr.message;
+      
+      // [FIX] Python Flask часто возвращает 'error', а не 'message'
+      if (jsonErr.message) {
+        errorMessage = jsonErr.message;
+      } else if (jsonErr.error) {
+        errorMessage = jsonErr.error;
+      } else if (jsonErr.detail) {
+        errorMessage = jsonErr.detail;
+      }
     } catch (e) {
-      if (text) errorMessage += ` ${text}`;
+      // Если не JSON, добавляем сырой текст
+      if (text) errorMessage += ` | Response: ${text.substring(0, 100)}`;
     }
     throw new Error(errorMessage);
   }
@@ -182,20 +194,21 @@ export async function authLogout(): Promise<ApiResp> {
 /* -------------------- Data API -------------------- */
 
 // --- Панорамы ---
+// [FIX] Добавлен префикс /api для маршрутизации через прокси
 export async function fetchPanoramas<T = any>(): Promise<T> {
-  return apiGet<T>("/panoramas");
+  return apiGet<T>("/api/panoramas");
 }
 
 export async function updatePanoTags(id: number, tags: string): Promise<ApiOk> {
-  return apiPut<ApiOk>(`/pano_info/${id}`, { tags });
+  return apiPut<ApiOk>(`/api/pano_info/${id}`, { tags });
 }
 
 export async function deletePano(id: number): Promise<ApiOk> {
-  return apiDelete<ApiOk>(`/pano_info/${id}`);
+  return apiDelete<ApiOk>(`/api/pano_info/${id}`);
 }
 
 export async function uploadFiles<T = any>(formData: FormData): Promise<T> {
-  const url = `${API_BASE}/upload`;
+  const url = `${API_BASE}/api/upload`; // [FIX] Добавлен префикс /api
   const res = await fetch(url, {
     method: "POST",
     credentials: "include",
@@ -205,21 +218,36 @@ export async function uploadFiles<T = any>(formData: FormData): Promise<T> {
 }
 
 // --- Ортофото ---
+// [FIX] Добавлен префикс /api
 export async function fetchOrthophotos(): Promise<OrthoItem[]> {
-  const items = await apiGet<OrthoItem[]>("/orthophotos");
+  const items = await apiGet<OrthoItem[]>("/api/orthophotos");
   
   // [FIX] Добавляем полный путь к картинке в режиме разработки
   return items.map(item => ({
     ...item,
+    // Если url начинается с /api или /, добавляем API_BASE
     url: (isLocalhost && item.url.startsWith('/')) ? `${API_BASE}${item.url}` : item.url
   }));
 }
 
+// [NEW] Специальная функция для загрузки ортофотопланов
+// Использует правильный endpoint /api/upload_ortho
+export async function uploadOrthoFiles<T = any>(formData: FormData): Promise<T> {
+  const url = `${API_BASE}/api/upload_ortho`;
+  const res = await fetch(url, {
+    method: "POST",
+    credentials: "include",
+    body: formData,
+  });
+  return handleResponse<T>(res, url);
+}
+
 export async function deleteOrtho(id: number): Promise<ApiOk> {
-  return apiDelete<ApiOk>(`/orthophotos/${id}`);
+  return apiDelete<ApiOk>(`/api/orthophotos/${id}`);
 }
 
 /* -------------------- Vector / PostGIS API -------------------- */
+// Здесь префикс /api уже был, оставляем как есть
 
 export async function fetchVectorDbs(): Promise<VectorDbItem[]> {
   return apiGet<VectorDbItem[]>("/api/vector/databases");
