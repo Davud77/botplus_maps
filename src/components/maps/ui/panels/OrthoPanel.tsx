@@ -1,11 +1,11 @@
 import React, { useEffect } from 'react';
 import { BasePanel } from './BasePanel';
 import { useMapStore } from '../../hooks/useMapStore';
-import L from 'leaflet'; // Импортируем типы Leaflet
+import L from 'leaflet';
 
 interface OrthoPanelProps {
   onClose: () => void;
-  map: L.Map | null; // Добавляем проп для карты
+  map: L.Map | null;
 }
 
 export const OrthoPanel: React.FC<OrthoPanelProps> = ({ onClose, map }) => {
@@ -17,70 +17,88 @@ export const OrthoPanel: React.FC<OrthoPanelProps> = ({ onClose, map }) => {
 
   return (
     <BasePanel title="Ортофотопланы" onClose={onClose}>
-      {isLoadingOrtho && <div style={{textAlign:'center', color:'#888'}}>Загрузка списка...</div>}
+      {isLoadingOrtho && <div className="loading-state">Загрузка списка...</div>}
       
       {!isLoadingOrtho && orthoImages.length === 0 && (
-        <div style={{textAlign:'center', color:'#ccc'}}>Список пуст</div>
+        <div className="empty-state">Список пуст</div>
       )}
 
-      {orthoImages.map(ortho => {
-        const isActive = selectedOrthoIds.includes(ortho.id);
-        
-        return (
-          <div key={ortho.id} className={`ortho-item ${isActive ? 'active' : ''}`}>
-            <div className="ortho-info">
-              <div className="ortho-title">{ortho.filename}</div>
-              {/* Кнопка "Найти на карте" */}
-              <button 
-                className="zoom-btn"
-                onClick={(e) => { 
-                  e.stopPropagation(); 
-                  // Проверяем, существует ли карта перед вызовом
-                  if (map) {
-                    fitToBounds(ortho.id, map); 
-                  } else {
-                    console.warn("Map instance is not ready");
-                  }
-                }}
-                title="Показать на карте"
-                disabled={!map} // Блокируем кнопку, если карта не прогрузилась
-              >
-                🔍
-              </button>
+      <div className="ortho-list">
+        {orthoImages.map(ortho => {
+          const isActive = selectedOrthoIds.includes(ortho.id);
+          
+          return (
+            <div key={ortho.id} className={`ortho-card ${isActive ? 'active-card' : ''}`}>
+              
+              {/* 1. Заголовок */}
+              <div className="ortho-header" title={ortho.filename}>
+                {ortho.filename}
+              </div>
+
+              {/* 2. Картинка (Заглушка) */}
+              <div className="ortho-preview">
+                {/* В будущем сюда можно подставить реальный URL превью */}
+                <img 
+                  src={`https://placehold.co/100x150/eef2f5/909090?text=Ortho+Preview`} 
+                  alt="preview" 
+                />
+                {isActive && <div className="active-badge"></div>}
+              </div>
+
+              {/* 3. Панель действий */}
+              <div className="ortho-actions">
+                {/* Кнопка: Показать на карте (Зум) */}
+                <button 
+                  className="action-btn zoom-btn"
+                  onClick={(e) => { 
+                    e.stopPropagation(); 
+                    if (map) fitToBounds(ortho.id, map); 
+                  }}
+                  title="Приблизить к слою"
+                  disabled={!map}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <circle cx="11" cy="11" r="8"></circle>
+                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                    <line x1="11" y1="8" x2="11" y2="14"></line>
+                    <line x1="8" y1="11" x2="14" y2="11"></line>
+                  </svg>
+                </button>
+
+                <div className="divider"></div>
+
+                {/* Кнопка: Глаз (Вкл/Выкл) */}
+                <button 
+                  className={`action-btn eye-btn ${isActive ? 'visible' : ''}`}
+                  onClick={() => toggleOrtho(ortho.id)}
+                  title={isActive ? "Скрыть слой" : "Показать слой"}
+                >
+                  {isActive ? (
+                    // Открытый глаз
+                    <>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                        <circle cx="12" cy="12" r="3"></circle>
+                      </svg>
+                    </>
+                  ) : (
+                    // Закрытый глаз
+                    <>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M1 1l22 22"></path>
+                        <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"></path>
+                      </svg>
+                    </>
+                  )}
+                </button>
+              </div>
+
             </div>
-            
-            <label className="toggle-switch">
-              <input 
-                type="checkbox" 
-                checked={isActive} 
-                onChange={() => toggleOrtho(ortho.id)} 
-              />
-              <span className="slider round"></span>
-            </label>
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
 
-      <style>{`
-        .ortho-item {
-          display: flex; justify-content: space-between; align-items: center;
-          padding: 10px; background: #f9f9f9; border-radius: 6px; margin-bottom: 8px;
-          border: 1px solid #eee;
-        }
-        .ortho-item.active { background: #e3f2fd; border-color: #bbdefb; }
-        .ortho-title { font-size: 13px; font-weight: 500; word-break: break-all; margin-right: 10px;}
-        .ortho-info { flex: 1; display: flex; align-items: center; gap: 8px; }
-        .zoom-btn { border: none; background: none; cursor: pointer; font-size: 14px; opacity: 0.6; }
-        .zoom-btn:hover { opacity: 1; transform: scale(1.1); }
 
-        /* Toggle Switch CSS */
-        .toggle-switch { position: relative; display: inline-block; width: 34px; height: 20px; }
-        .toggle-switch input { opacity: 0; width: 0; height: 0; }
-        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 34px; }
-        .slider:before { position: absolute; content: ""; height: 14px; width: 14px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; }
-        input:checked + .slider { background-color: #2196F3; }
-        input:checked + .slider:before { transform: translateX(14px); }
-      `}</style>
     </BasePanel>
   );
 };

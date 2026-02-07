@@ -49,18 +49,6 @@ const LAYERS: LayerOption[] = [
     image: "/images/EsriTopo.png" 
   },
 
-  // --- 3. Яндекс (Специфическая проекция, но часто работает) ---
-  { 
-    name: "Yandex Satellite", 
-    url: "https://core-sat.maps.yandex.net/tiles?l=sat&x={x}&y={y}&z={z}&scale=1&lang=ru_RU", 
-    image: "/images/YandexSat.png" 
-  },
-  { 
-    name: "Yandex Maps", 
-    url: "https://vec01.maps.yandex.net/tiles?l=map&x={x}&y={y}&z={z}&scale=1&lang=ru_RU", 
-    image: "/images/YandexMap.png" 
-  },
-
   // --- 4. Стильные / Минимализм (Для наложения CAD данных) ---
   { 
     name: "CartoDB Dark", 
@@ -145,12 +133,7 @@ export const BaseLayersPanel: React.FC<{ onClose: () => void }> = ({ onClose }) 
       </div>
 
       <style>{`
-        /* Контейнер для скролла, если слоев много */
-        .layers-container {
-          max-height: 400px; /* Ограничиваем высоту */
-          overflow-y: auto;  /* Добавляем скролл */
-          padding-right: 4px; /* Отступ для скроллбара */
-        }
+
 
         /* Кастомизация скроллбара (опционально) */
         .layers-container::-webkit-scrollbar { width: 6px; }
