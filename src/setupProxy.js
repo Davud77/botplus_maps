@@ -4,10 +4,19 @@ module.exports = function(app) {
   app.use(
     '/api',
     createProxyMiddleware({
-      target: 'http://localhost:5000', // Адрес вашего Python сервера
+      target: 'https://api.botplus.ru', // Целевой сервер (продакшн API)
       changeOrigin: true,
-      // Если ваш Flask не использует префикс /api, раскомментируйте строку ниже:
-      // pathRewrite: { '^/api': '' },
+      secure: false, // Игнорировать ошибки SSL, если они возникнут
+      pathRewrite: {
+        '^/api': '', // Убираем префикс /api, чтобы сервер получил запрос /panoramas
+      },
+      onProxyRes: function (proxyRes, req, res) {
+        // Логируем заголовки для отладки, если нужно
+        // console.log('Proxy Headers:', proxyRes.headers);
+      },
+      onError: function (err, req, res) {
+        console.error('Proxy Error:', err);
+      }
     })
   );
 };

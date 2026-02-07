@@ -1,3 +1,5 @@
+# server/controllers/pano_controller.py
+
 from flask import Blueprint, request, jsonify, send_file
 # ВАЖНО: Убедитесь, что установлен пакет flask-cors (pip install flask-cors)
 from flask_cors import cross_origin
@@ -50,6 +52,7 @@ class PanoController:
         """
         Возвращает список панорам. 
         Поддерживает фильтрацию по Bounding Box (north, south, east, west) для карты.
+        Это предотвращает ошибку 502 при загрузке большого количества точек.
         """
         conn = None
         try:
@@ -99,7 +102,7 @@ class PanoController:
             cur.execute(query, params)
             rows = cur.fetchall()
 
-            # 3. Формируем ответ JSON
+            # 3. Формируем ответ JSON в формате для PanoLayer.tsx
             results = []
             for row in rows:
                 results.append({
@@ -198,8 +201,6 @@ class PanoController:
 
         uploaded_files = request.files.getlist("files")
         
-        # Данные формы (теги, user_id)
-        # tags = request.form.get("tags", "") 
         try:
             user_id = int(request.form.get("user_id", 1))
         except ValueError:

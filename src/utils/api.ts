@@ -1,15 +1,23 @@
 // src/utils/api.ts
 
-// [FIX] Определяем правильный адрес API
-// В разработке (локально) используем прямой адрес бэкенда (5580)
-// В продакшене (Docker) используем относительный путь
-const API_BASE = process.env.NODE_ENV === 'development' 
-  ? 'http://localhost:5580' 
-  : '';
+// [HARD FIX] Определение адреса API
+// Мы проверяем адрес в браузере. Если это localhost, значит мы в разработке
+// и должны стучаться на порт бэкенда (5580).
+// В продакшене (на реальном домене) API_BASE будет пустой строкой (относительный путь).
+
+const isLocalhost = 
+  typeof window !== 'undefined' && 
+  (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+
+// Если localhost -> 'http://localhost:5580', иначе -> ''
+const API_BASE = isLocalhost ? 'http://localhost:5580' : '';
+
+console.log('API Base URL configured as:', API_BASE || '(relative path)');
 
 /* -------------------- Общие типы -------------------- */
 export interface ApiOk {
   status: "ok";
+  message?: string;
   [k: string]: any;
 }
 
@@ -42,7 +50,7 @@ export interface OrthoItem {
     south: number;
     east: number;
     west: number;
-  };
+  } | null;
 }
 
 // Векторные слои
@@ -83,12 +91,21 @@ async function handleResponse<T>(res: Response, url: string): Promise<T> {
     // Пытаемся вытащить заголовок из HTML ошибки для ясности
     const titleMatch = text.match(/<title>(.*?)<\/title>/i);
     const title = titleMatch ? titleMatch[1] : "HTML Page returned";
+    
+    console.error(`API Error: Received HTML from ${url}`, text.substring(0, 200));
     throw new Error(`Ошибка API (${res.status}): Сервер вернул HTML вместо JSON по адресу ${url}. Вероятно, неправильный путь. Заголовок: ${title}`);
   }
 
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    throw new Error(`Request failed: ${res.status} ${text}`);
+    let errorMessage = `Request failed: ${res.status}`;
+    try {
+      const jsonErr = JSON.parse(text);
+      if (jsonErr.message) errorMessage = jsonErr.message;
+    } catch (e) {
+      if (text) errorMessage += ` ${text}`;
+    }
+    throw new Error(errorMessage);
   }
 
   return res.json();
@@ -99,6 +116,7 @@ async function apiGet<T = any>(path: string): Promise<T> {
   const res = await fetch(url, {
     method: "GET",
     credentials: "include", // Важно для кук
+    headers: { "Accept": "application/json" }
   });
   return handleResponse<T>(res, url);
 }
@@ -148,7 +166,7 @@ export type MeResponse =
       };
     };
 
-// [FIX] Добавлен префикс /api к путям авторизации, так как в app.py url_prefix="/api/auth"
+// [FIX] Добавлен префикс /api к путям авторизации
 export async function authMe(): Promise<MeResponse> {
   return apiGet<MeResponse>("/api/auth/me");
 }
@@ -164,7 +182,6 @@ export async function authLogout(): Promise<ApiResp> {
 /* -------------------- Data API -------------------- */
 
 // --- Панорамы ---
-// [NOTE] В app.py pano_blueprint зарегистрирован без префикса, поэтому пути от корня
 export async function fetchPanoramas<T = any>(): Promise<T> {
   return apiGet<T>("/panoramas");
 }
@@ -188,9 +205,14 @@ export async function uploadFiles<T = any>(formData: FormData): Promise<T> {
 }
 
 // --- Ортофото ---
-// [NOTE] В app.py ortho_blueprint зарегистрирован без префикса
 export async function fetchOrthophotos(): Promise<OrthoItem[]> {
-  return apiGet<OrthoItem[]>("/orthophotos");
+  const items = await apiGet<OrthoItem[]>("/orthophotos");
+  
+  // [FIX] Добавляем полный путь к картинке в режиме разработки
+  return items.map(item => ({
+    ...item,
+    url: (isLocalhost && item.url.startsWith('/')) ? `${API_BASE}${item.url}` : item.url
+  }));
 }
 
 export async function deleteOrtho(id: number): Promise<ApiOk> {
@@ -198,7 +220,6 @@ export async function deleteOrtho(id: number): Promise<ApiOk> {
 }
 
 /* -------------------- Vector / PostGIS API -------------------- */
-// [NOTE] В app.py vector_bp зарегистрирован с префиксом /api
 
 export async function fetchVectorDbs(): Promise<VectorDbItem[]> {
   return apiGet<VectorDbItem[]>("/api/vector/databases");
@@ -230,7 +251,6 @@ export async function fetchLayerData(
   let url = `/api/vector/layers/${dbName}/${tableName}/data?schema=${schema}`;
   
   if (bounds) {
-    // Добавляем параметры границ экрана к запросу
     url += `&min_lng=${bounds.minLng}&min_lat=${bounds.minLat}&max_lng=${bounds.maxLng}&max_lat=${bounds.maxLat}`;
   }
   
