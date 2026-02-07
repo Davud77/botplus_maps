@@ -25,7 +25,7 @@ const MAX_MARKERS_PER_REQUEST = 1000;
 
 // === ВАЖНОЕ ИЗМЕНЕНИЕ ===
 // Устанавливаем адрес, который точно работает у вас локально
-const API_ENDPOINT = '/panoramas'; 
+const API_ENDPOINT = '/api/panoramas'; 
 
 const PanoLayer: React.FC<PanoLayerProps> = ({
   selectedMarker = null,

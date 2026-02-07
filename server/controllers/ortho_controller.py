@@ -23,13 +23,13 @@ class OrthoController:
         self.db = Database()
         self.ortho_manager = OrthoManager(self.db)
         
-        # Локальное хранилище (используется для временных файлов GDAL и хранения тайлов)
+        # Локальное хранилище (используется только для временного анализа GDAL)
         self.storage = LocalStorage(config.ORTHO_FOLDER)
         
-        # MinIO хранилище (для постоянного хранения оригиналов ортофотопланов)
+        # MinIO хранилище (для постоянного хранения файлов)
         self.minio = MinioStorage()
         
-        # При инициализации проверяем и создаем бакет 'orthophotos', если нужно
+        # При инициализации проверяем и создаем бакет 'orthophotos'
         if self.minio.client:
             try:
                 if not self.minio.client.bucket_exists("orthophotos"):
@@ -47,7 +47,7 @@ class OrthoController:
                                view_func=controller.get_orthophotos, 
                                methods=["GET"])
         
-        # 2. Загрузка (Upload)
+        # 2. Загрузка (Упрощенная: Upload -> Bounds -> DB -> MinIO)
         blueprint.add_url_rule("/upload_ortho", 
                                view_func=controller.upload_ortho, 
                                methods=["POST"])
@@ -72,7 +72,7 @@ class OrthoController:
                                view_func=controller.delete_ortho, 
                                methods=["DELETE"])
 
-        # 7. Тайлы (XYZ)
+        # 7. Тайлы (Заглушка, так как генерация отключена)
         blueprint.add_url_rule("/orthophotos/<int:ortho_id>/tiles/<int:z>/<int:x>/<int:y>.png",
                                view_func=controller.get_ortho_tile,
                                methods=["GET"])
@@ -86,7 +86,6 @@ class OrthoController:
             orthos = self.ortho_manager.get_all_orthos()
             results = []
             for o in orthos:
-                # Безопасный парсинг границ
                 b = None
                 if o.bounds:
                     try:
@@ -110,7 +109,7 @@ class OrthoController:
 
 
     # =========================================================================
-    # 2. Загрузка GeoTIFF (Основная логика)
+    # 2. Загрузка GeoTIFF (БЕЗ процессинга: только сохранение)
     # =========================================================================
     def upload_ortho(self):
         uploaded_files = request.files.getlist("files")
@@ -129,79 +128,45 @@ class OrthoController:
             original_filename = file.filename
             try:
                 logs.append(f"Обработка файла: {original_filename}")
-                base_name, ext = os.path.splitext(original_filename)
-
-                # 1. Временное сохранение на диск (GDAL требует путь к файлу)
+                
+                # 1. Временное сохранение на диск (для gdalinfo)
                 input_path = os.path.join(config.ORTHO_FOLDER, original_filename)
                 file.save(input_path)
                 logs.append(f"Временный файл сохранен: {input_path}")
 
-                # 2. Проверка проекции и конвертация (Warp) в EPSG:3857
+                # 2. Считываем проекцию (просто для лога/инфо)
                 current_crs = self._get_crs_from_gdalinfo(input_path)
-                final_tiff_filename = f"{base_name}_3857.tif"
-                final_tiff_path = os.path.join(config.ORTHO_FOLDER, final_tiff_filename)
+                logs.append(f"Обнаружена проекция: {current_crs}")
 
-                if current_crs != "EPSG:3857":
-                    logs.append(f"Проекция {current_crs}. Выполняем Warp в EPSG:3857...")
-                    try:
-                        self._warp_to_mercator(input_path, final_tiff_path)
-                    except subprocess.CalledProcessError as e:
-                        raise Exception("Ошибка gdalwarp. Возможно, файл не имеет геопривязки.")
-                    
-                    # Удаляем исходный файл, он больше не нужен
-                    if os.path.exists(input_path):
-                        os.remove(input_path)
-                else:
-                    os.rename(input_path, final_tiff_path)
-                    logs.append("Проекция корректна.")
+                # 3. Считываем границы (Bounds)
+                bounds = self._get_bounds_from_gdalinfo(input_path)
+                logs.append("Границы (bounds) считаны.")
 
-                # 3. Генерация превью (PNG)
-                preview_filename = f"{base_name}_3857_preview.png"
-                preview_path = os.path.join(config.ORTHO_FOLDER, preview_filename)
-                self._create_preview(final_tiff_path, preview_path)
-                logs.append("Превью создано.")
-
-                # 4. Получение границ изображения (Bounds)
-                bounds = self._get_bounds_from_gdalinfo(final_tiff_path)
-
-                # 5. Сохранение в БД
-                # ВАЖНО: передаем url=None, так как модель теперь это поддерживает
+                # 4. Сохранение в БД
+                # Сохраняем оригинальное имя файла, url=None (динамический)
                 ortho_obj = Ortho(
-                    filename=final_tiff_filename, 
+                    filename=original_filename, 
                     bounds=json.dumps(bounds),
                     url=None 
                 )
                 ortho_id = self.ortho_manager.insert_ortho(ortho_obj)
                 logs.append(f"Запись добавлена в БД. ID={ortho_id}")
 
-                # 6. Генерация тайлов (XYZ)
-                # Тайлы генерируются локально в папку tiles/ID
-                tiles_folder = os.path.join(config.TILES_FOLDER, str(ortho_id))
-                os.makedirs(tiles_folder, exist_ok=True)
-                logs.append("Генерация тайлов...")
-                self._generate_tiles(final_tiff_path, tiles_folder, logs)
-
-                # 7. Загрузка оригиналов в MinIO
+                # 5. Загрузка оригинала в MinIO
                 if self.minio.client:
                     logs.append("Загрузка в MinIO (бакет 'orthophotos')...")
                     
-                    # Загрузка основного TIFF
-                    with open(final_tiff_path, 'rb') as f:
-                        self.minio.save_file(f, final_tiff_filename, content_type="image/tiff")
+                    with open(input_path, 'rb') as f:
+                        self.minio.save_file(f, original_filename, content_type="image/tiff")
                     
-                    # Загрузка превью PNG
-                    with open(preview_path, 'rb') as f:
-                        self.minio.save_file(f, preview_filename, content_type="image/png")
-                    
-                    logs.append("Файлы успешно загружены в облако.")
+                    logs.append("Файл успешно загружен в облако.")
 
-                    # 8. Очистка локальных оригиналов
-                    # Тайлы оставляем, оригиналы удаляем, чтобы не забивать диск
-                    if os.path.exists(final_tiff_path): os.remove(final_tiff_path)
-                    if os.path.exists(preview_path): os.remove(preview_path)
-                    logs.append("Локальные временные файлы удалены.")
+                    # 6. Очистка: удаляем локальный файл, так как он уже в облаке
+                    if os.path.exists(input_path):
+                        os.remove(input_path)
+                    logs.append("Локальный временный файл удален.")
                 else:
-                    logs.append("ПРЕДУПРЕЖДЕНИЕ: MinIO недоступен. Файлы остались на диске.")
+                    logs.append("ПРЕДУПРЕЖДЕНИЕ: MinIO недоступен. Файл остался на диске сервера.")
 
                 successful_uploads.append(original_filename)
 
@@ -216,7 +181,7 @@ class OrthoController:
         self.minio.bucket_name = original_bucket_name
 
         return jsonify({
-            "message": "Процесс завершен",
+            "message": "Загрузка завершена",
             "successful_uploads": successful_uploads,
             "failed_uploads": failed_uploads,
             "logs": logs
@@ -254,7 +219,7 @@ class OrthoController:
             if not ortho:
                 return jsonify({"error": "Not found"}), 404
 
-            # Пытаемся отдать из MinIO (бакет orthophotos)
+            # Пытаемся отдать из MinIO
             original_bucket = self.minio.bucket_name
             self.minio.bucket_name = "orthophotos"
             
@@ -270,7 +235,7 @@ class OrthoController:
             if response:
                 return response
             
-            # Fallback: пробуем отдать локально (если вдруг файл остался)
+            # Fallback: локально
             return self.storage.send_local_file(ortho.filename, mimetype="image/tiff")
             
         except Exception as e:
@@ -292,7 +257,7 @@ class OrthoController:
 
 
     # =========================================================================
-    # 6. Удалить (БД + MinIO + Тайлы)
+    # 6. Удалить (БД + MinIO)
     # =========================================================================
     def delete_ortho(self, ortho_id):
         try:
@@ -300,26 +265,16 @@ class OrthoController:
             if not existing:
                 return jsonify({"error": "Not found"}), 404
 
-            # 1. Удаляем локальные тайлы
-            tiles_path = os.path.join(config.TILES_FOLDER, str(ortho_id))
-            if os.path.exists(tiles_path):
-                import shutil
-                shutil.rmtree(tiles_path)
-
-            # 2. Удаляем файлы из MinIO
+            # 1. Удаляем из MinIO
             if self.minio.client:
                 orig_bucket = self.minio.bucket_name
                 self.minio.bucket_name = "orthophotos"
                 
-                # Удаляем сам файл
                 self.minio.delete_file(existing.filename)
-                # Удаляем превью (предполагаем имя)
-                preview_name = existing.filename.replace(".tif", "_preview.png")
-                self.minio.delete_file(preview_name)
                 
                 self.minio.bucket_name = orig_bucket
 
-            # 3. Удаляем запись из БД
+            # 2. Удаляем запись из БД
             self.ortho_manager.delete_ortho(ortho_id)
 
             return jsonify({"status": "success"}), 200
@@ -329,69 +284,16 @@ class OrthoController:
 
 
     # =========================================================================
-    # 7. Получить тайл (Локально)
+    # 7. Получить тайл (Заглушка)
     # =========================================================================
     def get_ortho_tile(self, ortho_id, z, x, y):
-        try:
-            tile_path = os.path.join(config.TILES_FOLDER, str(ortho_id), str(z), str(x), f"{y}.png")
-            if os.path.exists(tile_path):
-                return self.storage.send_local_file(tile_path, mimetype="image/png")
-            return self._tile_png_rgba_transparent()
-        except Exception:
-            return self._tile_png_rgba_transparent()
+        # Так как тайлы не генерируются, всегда отдаем прозрачный пиксель
+        return self._tile_png_rgba_transparent()
 
 
     # =========================================================================
-    # Вспомогательные функции GDAL
+    # Вспомогательные функции GDAL (только чтение инфо)
     # =========================================================================
-    def _warp_to_mercator(self, input_path, output_path):
-        cmd = [
-            "gdalwarp",
-            "-t_srs", "EPSG:3857",
-            "-r", "bilinear",
-            "-co", "COMPRESS=DEFLATE",
-            "-overwrite",
-            input_path,
-            output_path
-        ]
-        subprocess.check_call(cmd)
-
-    def _create_preview(self, input_path, output_path):
-        cmd = [
-            "gdal_translate",
-            "-of", "PNG",
-            "-outsize", "2048", "0",
-            input_path,
-            output_path
-        ]
-        subprocess.check_call(cmd)
-
-    def _generate_tiles(self, tiff_path, dest_folder, logs):
-        import multiprocessing
-        nproc = multiprocessing.cpu_count()
-        cmd = [
-            sys.executable,
-            "-m", "osgeo_utils.gdal2tiles",
-            "--profile=mercator",
-            "--xyz",
-            "--processes", str(nproc),
-            "-z", "0-20",
-            tiff_path,
-            dest_folder
-        ]
-        
-        process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True
-        )
-        out, err = process.communicate()
-        
-        if process.returncode != 0:
-            raise Exception(f"gdal2tiles error: {err}")
-        logs.append("Тайлы успешно сгенерированы.")
-
     def _get_crs_from_gdalinfo(self, path):
         import json
         process = subprocess.Popen(["gdalinfo", "-json", path], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -399,9 +301,13 @@ class OrthoController:
         try:
             data = json.loads(out)
             if "coordinateSystem" in data and "wkt" in data["coordinateSystem"]:
-                return "EPSG:3857" if "3857" in data["coordinateSystem"]["wkt"] else "UNKNOWN"
+                # Просто возвращаем WKT или код, если есть
+                wkt = data["coordinateSystem"]["wkt"]
+                if "EPSG" in wkt: return "EPSG Found"
+                return "Unknown/Custom"
             if "coordinateSystem" in data and "data" in data["coordinateSystem"]:
-                 if data["coordinateSystem"]["data"].get("code") == 3857: return "EPSG:3857"
+                 code = data["coordinateSystem"]["data"].get("code")
+                 if code: return f"EPSG:{code}"
         except: pass
         return "UNKNOWN"
 
@@ -413,7 +319,6 @@ class OrthoController:
             data = json.loads(out)
             coords = data.get("cornerCoordinates", {})
             
-            # Безопасное извлечение координат
             def get_coord(key, idx):
                 val = coords.get(key)
                 if val and len(val) > idx: return val[idx]
