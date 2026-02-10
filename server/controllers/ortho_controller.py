@@ -34,9 +34,26 @@ class OrthoController:
         # При инициализации проверяем и создаем бакет 'orthophotos'
         if self.minio.client:
             try:
-                if not self.minio.client.bucket_exists("orthophotos"):
-                    self.minio.client.make_bucket("orthophotos")
-                    print("Bucket 'orthophotos' created successfully.")
+                bucket_name = "orthophotos"
+                if not self.minio.client.bucket_exists(bucket_name):
+                    self.minio.client.make_bucket(bucket_name)
+                    print(f"Bucket '{bucket_name}' created successfully.")
+                
+                # [FIX] Устанавливаем политику Public Read, чтобы TiTiler мог читать без ключей по HTTP
+                policy = {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Principal": {"AWS": ["*"]},
+                            "Action": ["s3:GetObject"],
+                            "Resource": [f"arn:aws:s3:::{bucket_name}/*"]
+                        }
+                    ]
+                }
+                self.minio.client.set_bucket_policy(bucket_name, json.dumps(policy))
+                print(f"Bucket '{bucket_name}' policy set to PUBLIC READ.")
+                
             except Exception as e:
                 print(f"MinIO init warning: {e}")
 
@@ -278,7 +295,7 @@ class OrthoController:
             new_filename = f"{clean_name}_3857_cog.tif"
             output_path = os.path.join(temp_dir, new_filename)
 
-            # [FIX] Удаляем старый файл назначения, если он существует (решает 'Output dataset exists')
+            # [FIX] Удаляем старый файл назначения, если он существует
             if os.path.exists(output_path):
                 try:
                     os.remove(output_path)
@@ -442,27 +459,28 @@ class OrthoController:
     # =========================================================================
     def get_ortho_tile(self, ortho_id, z, x, y):
         try:
-            # 1. Получаем имя файла из БД
             ortho = self.ortho_manager.get_ortho_by_id(ortho_id)
             if not ortho:
                 return jsonify({"error": "Not found"}), 404
 
-            # 2. Формируем URL к TiTiler (внутренняя сеть Docker)
-            # TiTiler работает на порту 8000 внутри сети
-            titiler_host = "http://titiler:8000"
-            s3_url = f"s3://orthophotos/{ortho.filename}"
+            # [FIX] ВАЖНО: Используем порт 80 (внутренний порт TiTiler)
+            titiler_host = "http://titiler:80"
             
-            # Параметры запроса
+            # [FIX] Используем HTTP URL для доступа к MinIO, минуя S3 Auth
+            # "minio" - это имя сервиса в docker-compose, 9000 - внутренний порт API
+            s3_url = f"http://minio:9000/orthophotos/{ortho.filename}"
+            
             params = {
                 "url": s3_url,
                 "rescale": "0,255"
             }
             
-            tile_url = f"{titiler_host}/cog/tiles/WebMercatorQuad/{z}/{x}/{y}@1x"
+            # [FIX] Убрали @1x (TiTiler валидация)
+            tile_url = f"{titiler_host}/cog/tiles/WebMercatorQuad/{z}/{x}/{y}"
             
-            # 3. Делаем запрос к TiTiler (Backend-to-Backend)
-            # Это обходит проблемы CORS, так как запрос идет внутри сервера
-            resp = requests.get(tile_url, params=params)
+            # 3. Делаем запрос к TiTiler
+            # Timeout нужен, чтобы не вешать воркер
+            resp = requests.get(tile_url, params=params, timeout=5)
             
             if resp.status_code != 200:
                 print(f"TiTiler Error ({resp.status_code}): {resp.text}")
@@ -471,13 +489,11 @@ class OrthoController:
             # 4. Отдаем картинку клиенту
             response = make_response(resp.content)
             response.headers.set("Content-Type", "image/png")
-            # Можно добавить кэширование
             response.headers.set("Cache-Control", "public, max-age=3600")
             return response
 
         except Exception as e:
             traceback.print_exc()
-            # Возвращаем прозрачный пиксель при ошибке
             return self._tile_png_rgba_transparent()
 
 
@@ -505,19 +521,13 @@ class OrthoController:
                     return "EPSG:4326 (WGS84)"
 
                 # 2. Определяем МСК-05 (Республика Дагестан) по уникальным параметрам
-                # Центральный меридиан: 46.8916666667
-                # Смещение по Y (False Northing): -4542821.516
-                
-                # Проверка по Proj4 (самая надежная)
                 if "46.8916666667" in proj4 or "46.891667" in proj4:
                     return "MSK-05 (Dagestan)"
                 
-                # Проверка по WKT строке (если Proj4 нет)
                 wkt_dump = json.dumps(cs)
                 if "46.8916666667" in wkt_dump:
                     return "MSK-05 (Dagestan)"
                 
-                # Если ничего не нашли, но есть WKT - возвращаем тип
                 if wkt and 'PROJCRS' in wkt:
                     return "Custom / Unknown Projection"
 

@@ -1,4 +1,3 @@
-version: '3.8'
 
 services:
   # --- 1. База данных (PostGIS) ---
@@ -115,13 +114,16 @@ services:
       - AWS_SECRET_ACCESS_KEY=minioadmin
       - AWS_REGION=us-east-1
       
-      # Адрес MinIO внутри сети Docker
+      # Адрес MinIO внутри сети
       - AWS_ENDPOINT_URL=http://minio:9000
       
-      # [FIX] Обязательно для MinIO: принудительный Path Style
+      # [FIX] Включаем режим без подписи (для публичного бакета)
+      # Это исправит ошибку 500 "Access Key Id ... does not exist"
+      - AWS_NO_SIGN_REQUEST=YES
+      
+      # [FIX] Принудительный Path Style для MinIO
       - AWS_S3_FORCE_PATH_STYLE=true
       
-      - AWS_NO_SIGN_REQUEST=NO
       - AWS_VIRTUAL_HOSTING=FALSE
       - AWS_HTTPS=FALSE
       
