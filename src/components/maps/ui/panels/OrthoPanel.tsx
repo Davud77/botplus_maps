@@ -1,7 +1,13 @@
+// src/components/maps/ui/panels/OrthoPanel.tsx
+
 import React, { useEffect } from 'react';
 import { BasePanel } from './BasePanel';
 import { useMapStore } from '../../hooks/useMapStore';
 import L from 'leaflet';
+
+// [FIX] Встроенная SVG заглушка (Data URI) для превью
+// Используем размеры 100x150 для вертикальной ориентации
+const NO_IMAGE_PLACEHOLDER = `data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='150' viewBox='0 0 100 150'%3E%3Crect width='100' height='150' fill='%23eeeeee'/%3E%3Ctext x='50' y='75' font-family='sans-serif' font-size='12' text-anchor='middle' fill='%23999999'%3EOrtho%3C/text%3E%3C/svg%3E`;
 
 interface OrthoPanelProps {
   onClose: () => void;
@@ -37,10 +43,12 @@ export const OrthoPanel: React.FC<OrthoPanelProps> = ({ onClose, map }) => {
 
               {/* 2. Картинка (Заглушка) */}
               <div className="ortho-preview">
-                {/* В будущем сюда можно подставить реальный URL превью */}
                 <img 
-                  src={`https://placehold.co/100x150/eef2f5/909090?text=Ortho+Preview`} 
-                  alt="preview" 
+                  // Пытаемся показать URL, если это картинка. 
+                  // Если это TIFF (download link), сработает onError и покажет заглушку.
+                  src={ortho.url || NO_IMAGE_PLACEHOLDER} 
+                  alt="preview"
+                  onError={(e) => { (e.target as HTMLImageElement).src = NO_IMAGE_PLACEHOLDER; }}
                 />
                 {isActive && <div className="active-badge"></div>}
               </div>
@@ -97,8 +105,6 @@ export const OrthoPanel: React.FC<OrthoPanelProps> = ({ onClose, map }) => {
           );
         })}
       </div>
-
-
     </BasePanel>
   );
 };

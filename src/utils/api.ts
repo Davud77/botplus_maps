@@ -51,6 +51,8 @@ export interface OrthoItem {
     east: number;
     west: number;
   } | null;
+  crs?: string;        // [NEW] Система координат (например, "EPSG:3857")
+  upload_date?: string; // [NEW] Дата загрузки
 }
 
 // Векторные слои
@@ -240,6 +242,11 @@ export async function uploadOrthoFiles<T = any>(formData: FormData): Promise<T> 
     body: formData,
   });
   return handleResponse<T>(res, url);
+}
+
+// [NEW] Перепроецирование ортофотоплана (конвертация в Google Maps / Web Mercator)
+export async function reprojectOrtho(id: number): Promise<ApiOk> {
+  return apiPost<ApiOk>(`/api/orthophotos/${id}/reproject`);
 }
 
 export async function deleteOrtho(id: number): Promise<ApiOk> {

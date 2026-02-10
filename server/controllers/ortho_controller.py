@@ -15,6 +15,8 @@ import sys
 import traceback
 from io import BytesIO
 from PIL import Image
+# [FIX] Добавляем requests для проксирования
+import requests
 
 ortho_blueprint = Blueprint("ortho", __name__)
 
@@ -72,10 +74,15 @@ class OrthoController:
                                view_func=controller.delete_ortho, 
                                methods=["DELETE"])
 
-        # 7. Тайлы (Заглушка, теперь тайлы отдает TiTiler, но роут оставим для совместимости)
+        # 7. Тайлы (ПРОКСИ на TiTiler)
         blueprint.add_url_rule("/orthophotos/<int:ortho_id>/tiles/<int:z>/<int:x>/<int:y>.png",
                                view_func=controller.get_ortho_tile,
                                methods=["GET"])
+                               
+        # 8. Перепроецирование (Новый роут)
+        blueprint.add_url_rule("/orthophotos/<int:ortho_id>/reproject", 
+                               view_func=controller.reproject_ortho, 
+                               methods=["POST"])
 
 
     # =========================================================================
@@ -93,11 +100,17 @@ class OrthoController:
                     except Exception:
                         pass 
                 
+                # Пытаемся получить CRS из объекта или угадать по имени файла
+                crs_val = getattr(o, 'crs', None)
+                if not crs_val and o.filename and "_3857" in o.filename:
+                    crs_val = "EPSG:3857"
+
                 item = {
                     "id": o.id,
                     "filename": o.filename,
                     "url": f"/api/orthophotos/{o.id}/download",
                     "bounds": b if b else {"north": 0, "south": 0, "east": 0, "west": 0},
+                    "crs": crs_val,
                     "upload_date": str(o.upload_date) if hasattr(o, 'upload_date') else None
                 }
                 results.append(item)
@@ -109,7 +122,7 @@ class OrthoController:
 
 
     # =========================================================================
-    # 2. Загрузка GeoTIFF с конвертацией в COG (Cloud Optimized GeoTIFF)
+    # 2. Загрузка GeoTIFF с конвертацией в COG
     # =========================================================================
     def upload_ortho(self):
         uploaded_files = request.files.getlist("files")
@@ -120,77 +133,97 @@ class OrthoController:
         if not uploaded_files:
             return jsonify({"message": "Нет файлов для загрузки"}), 400
 
-        # Сохраняем текущее имя бакета и переключаемся на 'orthophotos'
         original_bucket_name = self.minio.bucket_name
         self.minio.bucket_name = "orthophotos"
+        
+        # Используем папку data/temp/orthos
+        temp_dir = "data/temp/orthos" 
+        
+        if not os.path.exists(temp_dir):
+            try:
+                os.makedirs(temp_dir, exist_ok=True)
+                logs.append(f"Создана временная директория: {temp_dir}")
+            except OSError as e:
+                return jsonify({"error": f"Не удалось создать директорию {temp_dir}: {e}"}), 500
 
         for file in uploaded_files:
             original_filename = file.filename
             
-            # Генерируем имя для COG версии (например, map.tif -> map_cog.tif)
             name_part, ext_part = os.path.splitext(original_filename)
             cog_filename = f"{name_part}_cog.tif"
 
             try:
                 logs.append(f"Обработка файла: {original_filename}")
                 
-                # 1. Временное сохранение исходника на диск (для GDAL)
-                input_path = os.path.join(config.ORTHO_FOLDER, original_filename)
-                cog_path = os.path.join(config.ORTHO_FOLDER, cog_filename)
+                input_path = os.path.join(temp_dir, original_filename)
+                cog_path = os.path.join(temp_dir, cog_filename)
                 
+                # 1. Сохраняем локально
                 file.save(input_path)
                 logs.append(f"Временный файл сохранен: {input_path}")
 
-                # 2. КОНВЕРТАЦИЯ В COG
-                # TiTiler требует COG для быстрой работы с MinIO без скачивания всего файла
-                logs.append("Начинаю конвертацию в COG (Cloud Optimized GeoTIFF)...")
+                # 2. Определяем проекцию (включая проверку на МСК-05)
+                initial_crs = self._get_crs_from_gdalinfo(input_path)
+                logs.append(f"Обнаружена проекция: {initial_crs}")
+
+                # 3. КОНВЕРТАЦИЯ В COG
+                logs.append("Начинаю конвертацию в COG...")
                 
-                # gdal_translate -of COG -co COMPRESS=DEFLATE ...
                 cmd = [
                     "gdal_translate", input_path, cog_path,
                     "-of", "COG",
-                    "-co", "COMPRESS=DEFLATE",        # Сжатие
-                    "-co", "PREDICTOR=2",             # Оптимизация для растров
-                    "-co", "NUM_THREADS=ALL_CPUS",    # Использовать все ядра
+                    "-co", "COMPRESS=DEFLATE",
+                    "-co", "PREDICTOR=2",
+                    "-co", "NUM_THREADS=ALL_CPUS",
                     "-co", "OVERVIEWS=IGNORE_EXISTING"
                 ]
                 
                 process = subprocess.run(cmd, capture_output=True, text=True)
-                
                 if process.returncode != 0:
                     raise Exception(f"GDAL Error: {process.stderr}")
                 
                 logs.append("Конвертация в COG успешно завершена.")
 
-                # 3. Считываем границы (Bounds) уже с НОВОГО COG файла
+                # 4. Считываем границы
                 bounds = self._get_bounds_from_gdalinfo(cog_path)
                 logs.append("Границы (bounds) считаны.")
 
-                # 4. Сохранение в БД
-                # Важно: сохраняем имя именно COG файла, так как TiTiler будет искать его
+                # 5. Сохранение в БД
                 ortho_obj = Ortho(
                     filename=cog_filename, 
                     bounds=json.dumps(bounds),
                     url=None 
                 )
+                # Присваиваем CRS объекту (манагер сам разберется, сохранять или нет)
+                ortho_obj.crs = initial_crs
+                
                 ortho_id = self.ortho_manager.insert_ortho(ortho_obj)
+                
+                # Если insert не поддерживает CRS сразу (старый код), обновляем через update
+                try:
+                    self.ortho_manager.update_ortho(ortho_id, {"crs": initial_crs})
+                except:
+                    pass
+
                 logs.append(f"Запись добавлена в БД. ID={ortho_id}")
 
-                # 5. Загрузка COG в MinIO
+                # 6. Загрузка в MinIO
                 if self.minio.client:
-                    logs.append("Загрузка COG в MinIO (бакет 'orthophotos')...")
-                    
-                    with open(cog_path, 'rb') as f:
-                        self.minio.save_file(f, cog_filename, content_type="image/tiff")
-                    
+                    logs.append("Загрузка COG в MinIO...")
+                    self.minio.client.fput_object(
+                        "orthophotos", 
+                        cog_filename, 
+                        cog_path, 
+                        content_type="image/tiff"
+                    )
                     logs.append("Файл успешно загружен в облако.")
 
-                    # 6. Очистка: удаляем оба временных файла
+                    # Очистка
                     if os.path.exists(input_path): os.remove(input_path)
                     if os.path.exists(cog_path): os.remove(cog_path)
                     logs.append("Локальные временные файлы удалены.")
                 else:
-                    logs.append("ПРЕДУПРЕЖДЕНИЕ: MinIO недоступен. Файл остался на диске сервера.")
+                    logs.append("ПРЕДУПРЕЖДЕНИЕ: MinIO недоступен.")
 
                 successful_uploads.append(original_filename)
 
@@ -201,7 +234,7 @@ class OrthoController:
                 logs.append(error_msg)
                 failed_uploads.append(original_filename)
                 
-                # Попытка удалить мусор при ошибке
+                # Очистка при ошибке
                 if 'input_path' in locals() and os.path.exists(input_path):
                     try: os.remove(input_path)
                     except: pass
@@ -209,7 +242,6 @@ class OrthoController:
                     try: os.remove(cog_path)
                     except: pass
 
-        # Восстанавливаем имя бакета
         self.minio.bucket_name = original_bucket_name
 
         return jsonify({
@@ -218,6 +250,101 @@ class OrthoController:
             "failed_uploads": failed_uploads,
             "logs": logs
         }), 200
+
+
+    # =========================================================================
+    # [НОВОЕ] Перепроецирование в EPSG:3857 (Google)
+    # =========================================================================
+    def reproject_ortho(self, ortho_id):
+        temp_dir = "data/temp/orthos"
+        if not os.path.exists(temp_dir):
+            os.makedirs(temp_dir, exist_ok=True)
+
+        try:
+            ortho = self.ortho_manager.get_ortho_by_id(ortho_id)
+            if not ortho:
+                return jsonify({"error": "Ortho not found"}), 404
+
+            print(f"Starting reprojection for Ortho ID {ortho_id} ({ortho.filename})")
+
+            # 1. Скачиваем файл из MinIO
+            local_path = os.path.join(temp_dir, ortho.filename)
+            self.minio.client.fget_object("orthophotos", ortho.filename, local_path)
+            print(f"Downloaded to {local_path}")
+
+            # 2. Формируем имя нового файла
+            name_part, ext = os.path.splitext(ortho.filename)
+            clean_name = name_part.replace("_cog", "").replace("_3857", "")
+            new_filename = f"{clean_name}_3857_cog.tif"
+            output_path = os.path.join(temp_dir, new_filename)
+
+            # [FIX] Удаляем старый файл назначения, если он существует (решает 'Output dataset exists')
+            if os.path.exists(output_path):
+                try:
+                    os.remove(output_path)
+                    print(f"Removed existing target file: {output_path}")
+                except Exception as e:
+                    print(f"Warning: Could not remove target file: {e}")
+
+            # 3. Выполняем gdalwarp (с флагом -overwrite)
+            cmd = [
+                "gdalwarp", 
+                "-t_srs", "EPSG:3857",
+                "-r", "bilinear",
+                "-of", "COG",
+                "-co", "COMPRESS=DEFLATE",
+                "-co", "PREDICTOR=2",
+                "-co", "NUM_THREADS=ALL_CPUS",
+                "-overwrite",  # Важный флаг для предотвращения ошибок
+                local_path, output_path
+            ]
+
+            process = subprocess.run(cmd, capture_output=True, text=True)
+            if process.returncode != 0:
+                print(f"GDAL Error: {process.stderr}")
+                raise Exception(f"GDAL Warp Error: {process.stderr}")
+
+            print("Reprojection finished.")
+
+            # 4. Считываем новые границы
+            new_bounds = self._get_bounds_from_gdalinfo(output_path)
+            
+            # 5. Загружаем новый файл в MinIO
+            self.minio.client.fput_object(
+                "orthophotos", 
+                new_filename, 
+                output_path, 
+                content_type="image/tiff"
+            )
+            print(f"Uploaded new file: {new_filename}")
+
+            # 6. Удаляем старый файл (опционально, сейчас удаляем)
+            try:
+                self.minio.delete_file(ortho.filename)
+            except Exception as e:
+                print(f"Could not delete old file from MinIO: {e}")
+
+            # 7. Обновляем БД (имя файла, границы и CRS)
+            update_data = {
+                "filename": new_filename,
+                "bounds": json.dumps(new_bounds),
+                "crs": "EPSG:3857"
+            }
+            self.ortho_manager.update_ortho(ortho_id, update_data)
+
+            # 8. Очистка локальных файлов
+            if os.path.exists(local_path): os.remove(local_path)
+            if os.path.exists(output_path): os.remove(output_path)
+
+            return jsonify({
+                "message": "Reprojection successful",
+                "filename": new_filename,
+                "crs": "EPSG:3857"
+            }), 200
+
+        except Exception as e:
+            traceback.print_exc()
+            return jsonify({"error": str(e)}), 500
 
 
     # =========================================================================
@@ -234,7 +361,8 @@ class OrthoController:
                 "id": ortho.id,
                 "filename": ortho.filename,
                 "url": f"/api/orthophotos/{ortho.id}/download",
-                "bounds": b
+                "bounds": b,
+                "crs": getattr(ortho, 'crs', None)
             }
             return jsonify(result), 200
         except Exception as e:
@@ -251,7 +379,6 @@ class OrthoController:
             if not ortho:
                 return jsonify({"error": "Not found"}), 404
 
-            # Пытаемся отдать из MinIO
             original_bucket = self.minio.bucket_name
             self.minio.bucket_name = "orthophotos"
             
@@ -267,7 +394,6 @@ class OrthoController:
             if response:
                 return response
             
-            # Fallback: локально
             return self.storage.send_local_file(ortho.filename, mimetype="image/tiff")
             
         except Exception as e:
@@ -297,16 +423,12 @@ class OrthoController:
             if not existing:
                 return jsonify({"error": "Not found"}), 404
 
-            # 1. Удаляем из MinIO
             if self.minio.client:
                 orig_bucket = self.minio.bucket_name
                 self.minio.bucket_name = "orthophotos"
-                
                 self.minio.delete_file(existing.filename)
-                
                 self.minio.bucket_name = orig_bucket
 
-            # 2. Удаляем запись из БД
             self.ortho_manager.delete_ortho(ortho_id)
 
             return jsonify({"status": "success"}), 200
@@ -316,33 +438,93 @@ class OrthoController:
 
 
     # =========================================================================
-    # 7. Получить тайл (Заглушка)
+    # 7. Получить тайл (ПРОКСИ на TiTiler)
     # =========================================================================
     def get_ortho_tile(self, ortho_id, z, x, y):
-        # Так как тайлы теперь отдает сервис TiTiler, этот метод
-        # возвращает прозрачный пиксель (заглушка для совместимости)
-        return self._tile_png_rgba_transparent()
+        try:
+            # 1. Получаем имя файла из БД
+            ortho = self.ortho_manager.get_ortho_by_id(ortho_id)
+            if not ortho:
+                return jsonify({"error": "Not found"}), 404
+
+            # 2. Формируем URL к TiTiler (внутренняя сеть Docker)
+            # TiTiler работает на порту 8000 внутри сети
+            titiler_host = "http://titiler:8000"
+            s3_url = f"s3://orthophotos/{ortho.filename}"
+            
+            # Параметры запроса
+            params = {
+                "url": s3_url,
+                "rescale": "0,255"
+            }
+            
+            tile_url = f"{titiler_host}/cog/tiles/WebMercatorQuad/{z}/{x}/{y}@1x"
+            
+            # 3. Делаем запрос к TiTiler (Backend-to-Backend)
+            # Это обходит проблемы CORS, так как запрос идет внутри сервера
+            resp = requests.get(tile_url, params=params)
+            
+            if resp.status_code != 200:
+                print(f"TiTiler Error ({resp.status_code}): {resp.text}")
+                return jsonify({"error": "TiTiler failed"}), resp.status_code
+
+            # 4. Отдаем картинку клиенту
+            response = make_response(resp.content)
+            response.headers.set("Content-Type", "image/png")
+            # Можно добавить кэширование
+            response.headers.set("Cache-Control", "public, max-age=3600")
+            return response
+
+        except Exception as e:
+            traceback.print_exc()
+            # Возвращаем прозрачный пиксель при ошибке
+            return self._tile_png_rgba_transparent()
 
 
     # =========================================================================
-    # Вспомогательные функции GDAL (только чтение инфо)
+    # Вспомогательные функции GDAL (с определением МСК-05)
     # =========================================================================
     def _get_crs_from_gdalinfo(self, path):
         import json
-        process = subprocess.Popen(["gdalinfo", "-json", path], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        out, _ = process.communicate()
         try:
+            # Используем флаг -proj4 для более точного определения параметров
+            process = subprocess.Popen(["gdalinfo", "-json", "-proj4", path], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            out, _ = process.communicate()
             data = json.loads(out)
-            if "coordinateSystem" in data and "wkt" in data["coordinateSystem"]:
-                # Просто возвращаем WKT или код, если есть
-                wkt = data["coordinateSystem"]["wkt"]
-                if "EPSG" in wkt: return "EPSG Found"
-                return "Unknown/Custom"
-            if "coordinateSystem" in data and "data" in data["coordinateSystem"]:
-                 code = data["coordinateSystem"]["data"].get("code")
-                 if code: return f"EPSG:{code}"
-        except: pass
-        return "UNKNOWN"
+            
+            # Проверяем наличие информации о системе координат
+            if "coordinateSystem" in data:
+                cs = data["coordinateSystem"]
+                wkt = cs.get("wkt", "")
+                proj4 = cs.get("proj4", "")
+                
+                # 1. Проверяем стандартные коды EPSG
+                if 'ID["EPSG",3857]' in wkt or "Pseudo-Mercator" in wkt:
+                    return "EPSG:3857 (Google)"
+                if 'ID["EPSG",4326]' in wkt:
+                    return "EPSG:4326 (WGS84)"
+
+                # 2. Определяем МСК-05 (Республика Дагестан) по уникальным параметрам
+                # Центральный меридиан: 46.8916666667
+                # Смещение по Y (False Northing): -4542821.516
+                
+                # Проверка по Proj4 (самая надежная)
+                if "46.8916666667" in proj4 or "46.891667" in proj4:
+                    return "MSK-05 (Dagestan)"
+                
+                # Проверка по WKT строке (если Proj4 нет)
+                wkt_dump = json.dumps(cs)
+                if "46.8916666667" in wkt_dump:
+                    return "MSK-05 (Dagestan)"
+                
+                # Если ничего не нашли, но есть WKT - возвращаем тип
+                if wkt and 'PROJCRS' in wkt:
+                    return "Custom / Unknown Projection"
+
+            return "Unknown"
+        except Exception as e:
+            print(f"Error detecting CRS: {e}")
+            return "Unknown"
 
     def _get_bounds_from_gdalinfo(self, path):
         import json

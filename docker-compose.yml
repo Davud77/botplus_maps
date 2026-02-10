@@ -1,3 +1,4 @@
+version: '3.8'
 
 services:
   # --- 1. База данных (PostGIS) ---
@@ -10,7 +11,7 @@ services:
       POSTGRES_PASSWORD: botplus_password
       POSTGRES_DB: botplus_db
     ports:
-      - "5432:5432" # Прямой доступ (опционально)
+      - "5432:5432"
     volumes:
       - ./data/pg_data:/var/lib/postgresql/data
     healthcheck:
@@ -28,8 +29,8 @@ services:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
     ports:
-      - "9000:9000" # API S3
-      - "9001:9001" # Web Console (откройте в браузере)
+      - "9000:9000" # API
+      - "9001:9001" # Console
     volumes:
       - ./data/minio_data:/data
     healthcheck:
@@ -47,21 +48,18 @@ services:
       db:
         condition: service_healthy
     environment:
-      # Автоматическая конфигурация (если образ поддерживает)
-      # Или используйте volume с конфигом, как у вас было
       DB_USER: botplus_user
       DB_PASSWORD: botplus_password
       DB_HOST: db
       DB_NAME: botplus_db
       AUTH_TYPE: md5
     volumes:
-       # Если у вас есть свои конфиги, раскомментируйте:
        - ./pgbouncer/pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini
        - ./pgbouncer/userlist.txt:/etc/pgbouncer/userlist.txt
     ports:
       - "6432:6432"
 
-  # --- 4. Основное приложение ---
+  # --- 4. Основное приложение (Backend) ---
   app:
     build:
       context: .
@@ -78,17 +76,19 @@ services:
       PYTHONPATH: /app/server
       SECRET_KEY: ${SECRET_KEY:-change-me}
       
-      # Настройки БД (через PgBouncer)
+      # Настройки БД
       DATABASE_URL: postgresql://botplus_user:botplus_password@pgbouncer:6432/qgisdb
       
-      # Настройки MinIO
+      # Настройки MinIO (для Python backend)
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
       MINIO_BUCKET_NAME: panoramas
-      MINIO_SECURE: "False" # False для локальной работы без HTTPS
+      MINIO_SECURE: "False"
       
-      UPLOAD_FOLDER: /app/server/uploads # Для временных файлов
+      # Пути
+      UPLOAD_FOLDER: /app/server/uploads 
+      ORTHO_FOLDER: /app/data/temp/orthos
     volumes:
       - ./data:/app/data
       - ./server/uploads:/app/server/uploads
@@ -101,34 +101,39 @@ services:
       timeout: 5s
       retries: 3
 
-
-
- # --- 5. TiTiler (Tile Server) ---
+  # --- 5. TiTiler (Tile Server) ---
   titiler:
     image: ghcr.io/developmentseed/titiler:latest
     container_name: titiler
     ports:
-      - "8000:80" # Внешний порт 8000 -> Внутренний 80
+      - "8000:80"
+    depends_on:
+      - minio
     environment:
-      # --- Настройки MinIO (Важно для GDAL) ---
+      # --- Настройки MinIO ---
       - AWS_ACCESS_KEY_ID=minioadmin
       - AWS_SECRET_ACCESS_KEY=minioadmin
-      - AWS_REGION=us-east-1              # Обязательно
-      - AWS_S3_ENDPOINT=minio:9000        # [FIX] Без http:// и без _URL
+      - AWS_REGION=us-east-1
+      
+      # Адрес MinIO внутри сети Docker
+      - AWS_ENDPOINT_URL=http://minio:9000
+      
+      # [FIX] Обязательно для MinIO: принудительный Path Style
+      - AWS_S3_FORCE_PATH_STYLE=true
+      
       - AWS_NO_SIGN_REQUEST=NO
       - AWS_VIRTUAL_HOSTING=FALSE
-      - AWS_HTTPS=FALSE                   # Говорит GDAL использовать http
+      - AWS_HTTPS=FALSE
       
       # --- Разрешаем CORS ---
       - TITILER_API_CORS_ORIGIN=*
       
       # --- Оптимизация GDAL ---
-      - CPL_VSIL_CURL_ALLOWED_EXTENSIONS=.tif,.tiff
+      - CPL_VSIL_CURL_ALLOWED_EXTENSIONS=.tif,.tiff,.png,.jpeg,.jpg
       - GDAL_CACHEMAX=200
       - GDAL_DISABLE_READDIR_ON_OPEN=EMPTY_DIR
       - GDAL_INGESTED_BYTES_AT_OPEN=32768
       - GDAL_HTTP_MERGE_CONSECUTIVE_RANGES=YES
       - GDAL_HTTP_MULTIPLEX=YES
       - GDAL_HTTP_VERSION=2
-    depends_on:
-      - minio
+      - GDAL_HTTP_UNSAFESSL=YES

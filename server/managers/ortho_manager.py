@@ -6,12 +6,14 @@ import json
 class OrthoManager:
     def __init__(self, db):
         self.db = db
-        # Создаем таблицу при инициализации, если её нет
+        # Создаем таблицу и проверяем структуру при инициализации
         self._ensure_table()
 
     def _ensure_table(self):
-        # [FIX] Используем синтаксис PostgreSQL (SERIAL вместо AUTOINCREMENT)
-        query = """
+        cursor = self.db.get_cursor()
+        
+        # 1. Создание таблицы (если нет)
+        query_create = """
         CREATE TABLE IF NOT EXISTS orthophotos (
             id SERIAL PRIMARY KEY,
             filename TEXT NOT NULL,
@@ -21,38 +23,60 @@ class OrthoManager:
         )
         """
         try:
-            cursor = self.db.get_cursor()
-            cursor.execute(query)
+            cursor.execute(query_create)
             self.db.commit()
         except Exception as e:
             print(f"Error creating table orthophotos: {e}")
-            # [FIX] Обязательный rollback при ошибке в Postgres
+            if self.db.connection:
+                self.db.connection.rollback()
+
+        # 2. МИГРАЦИЯ: Добавляем колонку CRS, если её нет
+        # Это предотвращает ошибку 'column "crs" does not exist' на старых базах
+        try:
+            query_migrate = "ALTER TABLE orthophotos ADD COLUMN IF NOT EXISTS crs TEXT;"
+            cursor.execute(query_migrate)
+            self.db.commit()
+        except Exception as e:
+            # Игнорируем ошибку, если колонка уже есть или что-то пошло не так (но логируем)
+            print(f"Migration warning (adding crs column): {e}")
             if self.db.connection:
                 self.db.connection.rollback()
 
     def get_all_orthos(self):
         try:
             cursor = self.db.get_cursor()
-            query = "SELECT id, filename, bounds FROM orthophotos ORDER BY id DESC"
+            # [UPDATED] Добавляем crs в выборку
+            query = "SELECT id, filename, bounds, url, crs, upload_date FROM orthophotos ORDER BY id DESC"
             cursor.execute(query)
             rows = cursor.fetchall()
             
             orthos = []
             for row in rows:
-                # Psycopg2 с RealDictCursor возвращает dict
+                # Обработка разных типов курсоров (dict vs tuple)
                 if isinstance(row, dict):
                     r_id = row["id"]
                     r_name = row["filename"]
                     r_bounds = row["bounds"]
+                    r_url = row["url"]
+                    r_crs = row.get("crs")
+                    r_date = row["upload_date"]
                 else:
-                    # Fallback на случай другого курсора
-                    r_id, r_name, r_bounds = row[0], row[1], row[2]
+                    r_id = row[0]
+                    r_name = row[1]
+                    r_bounds = row[2]
+                    r_url = row[3]
+                    r_crs = row[4] if len(row) > 4 else None
+                    r_date = row[5] if len(row) > 5 else None
 
                 ortho = Ortho(
                     filename=r_name,
-                    bounds=r_bounds
+                    bounds=r_bounds,
+                    url=r_url,
+                    ortho_id=r_id,
+                    upload_date=r_date
                 )
-                ortho.id = r_id
+                # Динамически добавляем атрибут crs, так как он может не быть в __init__ модели
+                ortho.crs = r_crs
                 orthos.append(ortho)
                 
             return orthos
@@ -64,8 +88,8 @@ class OrthoManager:
     def get_ortho_by_id(self, ortho_id):
         try:
             cursor = self.db.get_cursor()
-            # [FIX] Используем %s для Postgres
-            query = "SELECT id, filename, bounds FROM orthophotos WHERE id = %s"
+            # [UPDATED] Добавляем crs в выборку
+            query = "SELECT id, filename, bounds, url, crs, upload_date FROM orthophotos WHERE id = %s"
             cursor.execute(query, (ortho_id,))
             row = cursor.fetchone()
             
@@ -74,14 +98,25 @@ class OrthoManager:
                     r_id = row["id"]
                     r_name = row["filename"]
                     r_bounds = row["bounds"]
+                    r_url = row["url"]
+                    r_crs = row.get("crs")
+                    r_date = row["upload_date"]
                 else:
-                    r_id, r_name, r_bounds = row[0], row[1], row[2]
+                    r_id = row[0]
+                    r_name = row[1]
+                    r_bounds = row[2]
+                    r_url = row[3]
+                    r_crs = row[4] if len(row) > 4 else None
+                    r_date = row[5] if len(row) > 5 else None
 
                 ortho = Ortho(
                     filename=r_name,
-                    bounds=r_bounds
+                    bounds=r_bounds,
+                    url=r_url,
+                    ortho_id=r_id,
+                    upload_date=r_date
                 )
-                ortho.id = r_id
+                ortho.crs = r_crs
                 return ortho
             return None
         except Exception:
@@ -92,15 +127,19 @@ class OrthoManager:
     def insert_ortho(self, ortho):
         try:
             cursor = self.db.get_cursor()
-            # [FIX] Используем %s вместо ? и RETURNING id (так работает Postgres)
+            
+            # [UPDATED] Добавляем сохранение CRS
+            # Используем безопасное получение атрибута, если модель еще не обновлена
+            crs_val = getattr(ortho, 'crs', None)
+            url_val = getattr(ortho, 'url', None)
+
             query = """
-                INSERT INTO orthophotos (filename, bounds, url)
-                VALUES (%s, %s, %s)
+                INSERT INTO orthophotos (filename, bounds, url, crs)
+                VALUES (%s, %s, %s, %s)
                 RETURNING id
             """
-            url_val = getattr(ortho, 'url', None)
             
-            cursor.execute(query, (ortho.filename, ortho.bounds, url_val))
+            cursor.execute(query, (ortho.filename, ortho.bounds, url_val, crs_val))
             
             # Получаем ID новой записи
             row = cursor.fetchone()
@@ -126,8 +165,14 @@ class OrthoManager:
             set_clause = []
             values = []
             for field, value in updated_fields.items():
-                set_clause.append(f"{field} = %s") # [FIX] %s
-                values.append(value)
+                # Простая защита от SQL инъекций через имена полей (хотя тут ожидаются ключи из кода)
+                # Разрешаем обновлять только известные поля
+                if field in ['filename', 'bounds', 'url', 'crs']:
+                    set_clause.append(f"{field} = %s")
+                    values.append(value)
+
+            if not set_clause:
+                return
 
             set_clause_str = ", ".join(set_clause)
             query = f"UPDATE orthophotos SET {set_clause_str} WHERE id = %s"
@@ -143,7 +188,7 @@ class OrthoManager:
     def delete_ortho(self, ortho_id):
         try:
             cursor = self.db.get_cursor()
-            query = "DELETE FROM orthophotos WHERE id = %s" # [FIX] %s
+            query = "DELETE FROM orthophotos WHERE id = %s"
             cursor.execute(query, (ortho_id,))
             self.db.commit()
         except Exception:
