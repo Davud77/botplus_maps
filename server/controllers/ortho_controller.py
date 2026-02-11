@@ -66,37 +66,42 @@ class OrthoController:
                                view_func=controller.get_orthophotos, 
                                methods=["GET"])
         
-        # 2. Загрузка (Upload -> COG Convert -> Bounds -> DB -> MinIO)
+        # 2. Быстрая Загрузка (Upload -> Bounds -> DB -> MinIO)
         blueprint.add_url_rule("/upload_ortho", 
                                view_func=controller.upload_ortho, 
                                methods=["POST"])
         
-        # 3. Инфо
+        # 3. Обработка (COG Convert) - Вызывается отдельно
+        blueprint.add_url_rule("/orthophotos/<int:ortho_id>/process", 
+                               view_func=controller.process_ortho_cog, 
+                               methods=["POST"])
+
+        # 4. Инфо
         blueprint.add_url_rule("/orthophotos/<int:ortho_id>", 
                                view_func=controller.get_ortho, 
                                methods=["GET"])
         
-        # 4. Скачать файл
+        # 5. Скачать файл
         blueprint.add_url_rule("/orthophotos/<int:ortho_id>/download", 
                                view_func=controller.download_ortho_file, 
                                methods=["GET"])
         
-        # 5. Обновить
+        # 6. Обновить
         blueprint.add_url_rule("/orthophotos/<int:ortho_id>", 
                                view_func=controller.update_ortho, 
                                methods=["PUT"])
         
-        # 6. Удалить
+        # 7. Удалить
         blueprint.add_url_rule("/orthophotos/<int:ortho_id>", 
                                view_func=controller.delete_ortho, 
                                methods=["DELETE"])
 
-        # 7. Тайлы (ПРОКСИ на TiTiler)
+        # 8. Тайлы (ПРОКСИ на TiTiler)
         blueprint.add_url_rule("/orthophotos/<int:ortho_id>/tiles/<int:z>/<int:x>/<int:y>.png",
                                view_func=controller.get_ortho_tile,
                                methods=["GET"])
                                
-        # 8. Перепроецирование (Новый роут)
+        # 9. Перепроецирование
         blueprint.add_url_rule("/orthophotos/<int:ortho_id>/reproject", 
                                view_func=controller.reproject_ortho, 
                                methods=["POST"])
@@ -117,7 +122,6 @@ class OrthoController:
                     except Exception:
                         pass 
                 
-                # Пытаемся получить CRS из объекта или угадать по имени файла
                 crs_val = getattr(o, 'crs', None)
                 if not crs_val and o.filename and "_3857" in o.filename:
                     crs_val = "EPSG:3857"
@@ -139,7 +143,7 @@ class OrthoController:
 
 
     # =========================================================================
-    # 2. Загрузка GeoTIFF с конвертацией в COG
+    # 2. Быстрая загрузка (БЕЗ конвертации)
     # =========================================================================
     def upload_ortho(self):
         uploaded_files = request.files.getlist("files")
@@ -153,70 +157,41 @@ class OrthoController:
         original_bucket_name = self.minio.bucket_name
         self.minio.bucket_name = "orthophotos"
         
-        # Используем папку data/temp/orthos
+        # Папка для временного хранения
         temp_dir = "data/temp/orthos" 
-        
         if not os.path.exists(temp_dir):
             try:
                 os.makedirs(temp_dir, exist_ok=True)
-                logs.append(f"Создана временная директория: {temp_dir}")
             except OSError as e:
                 return jsonify({"error": f"Не удалось создать директорию {temp_dir}: {e}"}), 500
 
         for file in uploaded_files:
-            original_filename = file.filename
-            
-            name_part, ext_part = os.path.splitext(original_filename)
-            cog_filename = f"{name_part}_cog.tif"
-
+            filename = file.filename
             try:
-                logs.append(f"Обработка файла: {original_filename}")
+                logs.append(f"Начало загрузки: {filename}")
+                input_path = os.path.join(temp_dir, filename)
                 
-                input_path = os.path.join(temp_dir, original_filename)
-                cog_path = os.path.join(temp_dir, cog_filename)
-                
-                # 1. Сохраняем локально
+                # 1. Временное сохранение
                 file.save(input_path)
-                logs.append(f"Временный файл сохранен: {input_path}")
+                logs.append("Файл сохранен локально.")
 
-                # 2. Определяем проекцию (включая проверку на МСК-05)
+                # 2. Считывание границ и CRS (с оригинала)
+                # Это работает быстро, так как gdalinfo читает только заголовки
+                bounds = self._get_bounds_from_gdalinfo(input_path)
                 initial_crs = self._get_crs_from_gdalinfo(input_path)
-                logs.append(f"Обнаружена проекция: {initial_crs}")
+                logs.append(f"Границы считаны. Проекция: {initial_crs}")
 
-                # 3. КОНВЕРТАЦИЯ В COG
-                logs.append("Начинаю конвертацию в COG...")
-                
-                cmd = [
-                    "gdal_translate", input_path, cog_path,
-                    "-of", "COG",
-                    "-co", "COMPRESS=DEFLATE",
-                    "-co", "PREDICTOR=2",
-                    "-co", "NUM_THREADS=ALL_CPUS",
-                    "-co", "OVERVIEWS=IGNORE_EXISTING"
-                ]
-                
-                process = subprocess.run(cmd, capture_output=True, text=True)
-                if process.returncode != 0:
-                    raise Exception(f"GDAL Error: {process.stderr}")
-                
-                logs.append("Конвертация в COG успешно завершена.")
-
-                # 4. Считываем границы
-                bounds = self._get_bounds_from_gdalinfo(cog_path)
-                logs.append("Границы (bounds) считаны.")
-
-                # 5. Сохранение в БД
+                # 3. Запись в БД (имя файла оригинальное, без _cog)
                 ortho_obj = Ortho(
-                    filename=cog_filename, 
+                    filename=filename, 
                     bounds=json.dumps(bounds),
                     url=None 
                 )
-                # Присваиваем CRS объекту (манагер сам разберется, сохранять или нет)
                 ortho_obj.crs = initial_crs
                 
                 ortho_id = self.ortho_manager.insert_ortho(ortho_obj)
                 
-                # Если insert не поддерживает CRS сразу (старый код), обновляем через update
+                # Обновляем CRS явно, если insert не сработал (для надежности)
                 try:
                     self.ortho_manager.update_ortho(ortho_id, {"crs": initial_crs})
                 except:
@@ -224,39 +199,34 @@ class OrthoController:
 
                 logs.append(f"Запись добавлена в БД. ID={ortho_id}")
 
-                # 6. Загрузка в MinIO
+                # 4. Загрузка ОРИГИНАЛА в MinIO
                 if self.minio.client:
-                    logs.append("Загрузка COG в MinIO...")
+                    logs.append("Загрузка файла в облако...")
                     self.minio.client.fput_object(
                         "orthophotos", 
-                        cog_filename, 
-                        cog_path, 
+                        filename, 
+                        input_path, 
                         content_type="image/tiff"
                     )
-                    logs.append("Файл успешно загружен в облако.")
+                    logs.append("Файл успешно загружен в MinIO.")
 
-                    # Очистка
+                    # 5. Очистка
                     if os.path.exists(input_path): os.remove(input_path)
-                    if os.path.exists(cog_path): os.remove(cog_path)
-                    logs.append("Локальные временные файлы удалены.")
+                    logs.append("Временный файл удален.")
                 else:
-                    logs.append("ПРЕДУПРЕЖДЕНИЕ: MinIO недоступен.")
+                    logs.append("Ошибка: MinIO недоступен.")
 
-                successful_uploads.append(original_filename)
+                successful_uploads.append(filename)
 
             except Exception as err:
-                error_msg = f"Ошибка обработки {original_filename}: {err}"
+                error_msg = f"Ошибка загрузки {filename}: {err}"
                 print(error_msg)
                 traceback.print_exc()
                 logs.append(error_msg)
-                failed_uploads.append(original_filename)
+                failed_uploads.append(filename)
                 
-                # Очистка при ошибке
                 if 'input_path' in locals() and os.path.exists(input_path):
                     try: os.remove(input_path)
-                    except: pass
-                if 'cog_path' in locals() and os.path.exists(cog_path):
-                    try: os.remove(cog_path)
                     except: pass
 
         self.minio.bucket_name = original_bucket_name
@@ -267,6 +237,96 @@ class OrthoController:
             "failed_uploads": failed_uploads,
             "logs": logs
         }), 200
+
+
+    # =========================================================================
+    # 3. Обработка (Конвертация в COG) - по требованию
+    # =========================================================================
+    def process_ortho_cog(self, ortho_id):
+        temp_dir = "data/temp/orthos"
+        os.makedirs(temp_dir, exist_ok=True)
+        logs = []
+
+        try:
+            ortho = self.ortho_manager.get_ortho_by_id(ortho_id)
+            if not ortho:
+                return jsonify({"error": "Ortho not found"}), 404
+
+            logs.append(f"Начало обработки ID {ortho_id} ({ortho.filename})")
+
+            # 1. Скачиваем оригинал из MinIO
+            local_path = os.path.join(temp_dir, ortho.filename)
+            self.minio.client.fget_object("orthophotos", ortho.filename, local_path)
+            logs.append("Файл скачан из хранилища.")
+
+            # 2. Формируем имя COG файла
+            name_part, ext = os.path.splitext(ortho.filename)
+            # Избегаем дублирования _cog, если файл уже обработан или назван так
+            if name_part.endswith("_cog"):
+                cog_filename = ortho.filename
+            else:
+                cog_filename = f"{name_part}_cog.tif"
+            
+            cog_path = os.path.join(temp_dir, cog_filename)
+
+            # 3. Запуск GDAL Convert
+            logs.append("Запуск gdal_translate (COG conversion)...")
+            cmd = [
+                "gdal_translate", local_path, cog_path,
+                "-of", "COG",
+                "-co", "COMPRESS=DEFLATE",
+                "-co", "PREDICTOR=2",
+                "-co", "NUM_THREADS=ALL_CPUS",
+                "-co", "OVERVIEWS=IGNORE_EXISTING"
+            ]
+            
+            process = subprocess.run(cmd, capture_output=True, text=True)
+            if process.returncode != 0:
+                raise Exception(f"GDAL Error: {process.stderr}")
+            
+            logs.append("Конвертация завершена успешно.")
+
+            # 4. Загружаем оптимизированный файл в MinIO
+            self.minio.client.fput_object(
+                "orthophotos", 
+                cog_filename, 
+                cog_path, 
+                content_type="image/tiff"
+            )
+            logs.append("COG файл загружен в MinIO.")
+
+            # 5. Обновляем БД (новое имя файла и уточненные границы)
+            bounds = self._get_bounds_from_gdalinfo(cog_path)
+            # На всякий случай проверяем CRS еще раз
+            crs = self._get_crs_from_gdalinfo(cog_path)
+            
+            self.ortho_manager.update_ortho(ortho_id, {
+                "filename": cog_filename,
+                "bounds": json.dumps(bounds),
+                "crs": crs
+            })
+
+            # 6. Удаляем старый оригинал из MinIO (если имя изменилось)
+            if ortho.filename != cog_filename:
+                try:
+                    self.minio.delete_file(ortho.filename)
+                    logs.append(f"Старый исходник ({ortho.filename}) удален.")
+                except Exception as e:
+                    logs.append(f"Warning: Не удалось удалить старый файл: {e}")
+
+            # 7. Очистка локальных файлов
+            if os.path.exists(local_path): os.remove(local_path)
+            if os.path.exists(cog_path): os.remove(cog_path)
+
+            return jsonify({
+                "message": "Processing successful",
+                "logs": logs,
+                "new_filename": cog_filename
+            }), 200
+
+        except Exception as e:
+            traceback.print_exc()
+            return jsonify({"error": str(e), "logs": logs}), 500
 
 
     # =========================================================================
@@ -299,9 +359,8 @@ class OrthoController:
             if os.path.exists(output_path):
                 try:
                     os.remove(output_path)
-                    print(f"Removed existing target file: {output_path}")
-                except Exception as e:
-                    print(f"Warning: Could not remove target file: {e}")
+                except Exception:
+                    pass
 
             # 3. Выполняем gdalwarp (с флагом -overwrite)
             cmd = [
@@ -312,7 +371,7 @@ class OrthoController:
                 "-co", "COMPRESS=DEFLATE",
                 "-co", "PREDICTOR=2",
                 "-co", "NUM_THREADS=ALL_CPUS",
-                "-overwrite",  # Важный флаг для предотвращения ошибок
+                "-overwrite",
                 local_path, output_path
             ]
 
@@ -335,7 +394,7 @@ class OrthoController:
             )
             print(f"Uploaded new file: {new_filename}")
 
-            # 6. Удаляем старый файл (опционально, сейчас удаляем)
+            # 6. Удаляем старый файл (опционально)
             try:
                 self.minio.delete_file(ortho.filename)
             except Exception as e:
@@ -365,7 +424,7 @@ class OrthoController:
 
 
     # =========================================================================
-    # 3. Получить инфо
+    # 4. Получить инфо
     # =========================================================================
     def get_ortho(self, ortho_id):
         try:
@@ -388,7 +447,7 @@ class OrthoController:
 
 
     # =========================================================================
-    # 4. Скачать файл (из MinIO)
+    # 5. Скачать файл (из MinIO)
     # =========================================================================
     def download_ortho_file(self, ortho_id):
         try:
@@ -419,7 +478,7 @@ class OrthoController:
 
 
     # =========================================================================
-    # 5. Обновить данные
+    # 6. Обновить данные
     # =========================================================================
     def update_ortho(self, ortho_id):
         try:
@@ -432,7 +491,7 @@ class OrthoController:
 
 
     # =========================================================================
-    # 6. Удалить (БД + MinIO)
+    # 7. Удалить (БД + MinIO)
     # =========================================================================
     def delete_ortho(self, ortho_id):
         try:
@@ -455,7 +514,7 @@ class OrthoController:
 
 
     # =========================================================================
-    # 7. Получить тайл (ПРОКСИ на TiTiler)
+    # 8. Получить тайл (ПРОКСИ на TiTiler)
     # =========================================================================
     def get_ortho_tile(self, ortho_id, z, x, y):
         try:
@@ -467,7 +526,6 @@ class OrthoController:
             titiler_host = "http://titiler:80"
             
             # [FIX] Используем HTTP URL для доступа к MinIO, минуя S3 Auth
-            # "minio" - это имя сервиса в docker-compose, 9000 - внутренний порт API
             s3_url = f"http://minio:9000/orthophotos/{ortho.filename}"
             
             params = {
@@ -475,11 +533,9 @@ class OrthoController:
                 "rescale": "0,255"
             }
             
-            # [FIX] Убрали @1x (TiTiler валидация)
             tile_url = f"{titiler_host}/cog/tiles/WebMercatorQuad/{z}/{x}/{y}"
             
             # 3. Делаем запрос к TiTiler
-            # Timeout нужен, чтобы не вешать воркер
             resp = requests.get(tile_url, params=params, timeout=5)
             
             if resp.status_code != 200:

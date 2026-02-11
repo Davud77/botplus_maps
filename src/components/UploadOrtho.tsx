@@ -1,241 +1,247 @@
 // src/components/UploadOrtho.tsx
-import React, { useState, useRef, DragEvent } from 'react';
-// [FIX] Используем нашу функцию API вместо прямого axios
-import { uploadOrthoFiles } from '../utils/api';
+import React, { useState, useRef, useEffect, DragEvent } from 'react';
+import Header from './Header';
+
+// ... (API_URL и интерфейсы остались без изменений) ...
+const API_URL = process.env.NODE_ENV === 'development' 
+  ? 'http://localhost:5580' 
+  : '';
 
 interface FileItem {
   file: File;
-  status: 'pending' | 'uploading' | 'success' | 'failed';
-  message?: string;      // сообщение об ошибке или успехе
-  logs?: string[];       // детальные логи от бэкенда
-  previewUrl?: string;   // можно подставить ссылку на preview
+  status: 'pending' | 'uploading' | 'processing' | 'success' | 'failed';
+  progress: number;
+  message?: string;
+}
+
+interface LogEntry {
+  time: string;
+  text: string;
+  type: 'info' | 'success' | 'error' | 'warning';
 }
 
 const UploadOrtho: React.FC = () => {
   const [files, setFiles] = useState<FileItem[]>([]);
+  const [globalLogs, setGlobalLogs] = useState<LogEntry[]>([]);
   const [isDragging, setIsDragging] = useState<boolean>(false);
-  const logRef = useRef<HTMLDivElement | null>(null); // для скролла лога
+  
+  const logRef = useRef<HTMLDivElement | null>(null);
+  // 1. Создаем реф для скрытого инпута
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Добавляем файлы в список (без загрузки)
+  // ... (addLog и useEffect для логов без изменений) ...
+  const addLog = (text: string, type: LogEntry['type'] = 'info') => {
+    const time = new Date().toLocaleTimeString('ru-RU');
+    setGlobalLogs(prev => [...prev, { time, text, type }]);
+  };
+
+  useEffect(() => {
+    if (logRef.current) {
+      logRef.current.scrollTop = logRef.current.scrollHeight;
+    }
+  }, [globalLogs]);
+
+
+  // --- Управление файлами ---
   const handleFilesAddition = (newFiles: FileList) => {
     const validFiles: FileItem[] = Array.from(newFiles).map((f) => ({
       file: f,
       status: 'pending',
-      message: 'Ожидает загрузки...',
-      previewUrl: '' 
+      progress: 0,
+      message: 'Ожидает очереди',
     }));
     setFiles((prev) => [...prev, ...validFiles]);
+    addLog(`Добавлено файлов в очередь: ${validFiles.length}`);
   };
 
-  // Drag'n'Drop events
+  // 2. Обработчик клика по контейнеру
+  const handleContainerClick = () => {
+    // Программно кликаем по скрытому инпуту
+    fileInputRef.current?.click();
+  };
+
+  // --- Drag'n'Drop ---
   const handleDragOver = (e: DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDragging(true);
+    e.preventDefault(); e.stopPropagation(); setIsDragging(true);
   };
-
   const handleDragLeave = (e: DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDragging(false);
+    e.preventDefault(); e.stopPropagation(); setIsDragging(false);
   };
-
   const handleDrop = (e: DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDragging(false);
-    if (e.dataTransfer?.files?.length) {
-      handleFilesAddition(e.dataTransfer.files);
-    }
+    e.preventDefault(); e.stopPropagation(); setIsDragging(false);
+    if (e.dataTransfer?.files?.length) handleFilesAddition(e.dataTransfer.files);
   };
 
-  // Загрузка всех добавленных файлов
+  // ... (uploadSingleFile и handleUploadAll без изменений) ...
+  const uploadSingleFile = (index: number, fileItem: FileItem) => {
+    return new Promise<void>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      const formData = new FormData();
+      formData.append('files', fileItem.file);
+
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable) {
+          const percentComplete = Math.round((event.loaded / event.total) * 100);
+          setFiles(prev => prev.map((item, i) => {
+            if (i !== index) return item;
+            return { ...item, status: 'uploading', progress: percentComplete, message: `Загрузка: ${percentComplete}%` };
+          }));
+        }
+      };
+
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            const response = JSON.parse(xhr.responseText);
+            setFiles(prev => prev.map((item, i) => 
+              i === index ? { ...item, status: 'success', progress: 100, message: 'Готово' } : item
+            ));
+            addLog(`[${fileItem.file.name}] Успешно обработан.`, 'success');
+            if (response.logs && Array.isArray(response.logs)) {
+              response.logs.forEach((logLine: string) => {
+                addLog(`[SERVER] ${fileItem.file.name}: ${logLine}`, 'info');
+              });
+            }
+            resolve();
+          } catch (e) {
+            addLog(`[${fileItem.file.name}] Ошибка парсинга ответа сервера`, 'error');
+            reject(e);
+          }
+        } else {
+          addLog(`[${fileItem.file.name}] Ошибка сервера: ${xhr.status} ${xhr.statusText}`, 'error');
+          reject(new Error(xhr.statusText));
+        }
+      };
+
+      xhr.onerror = () => {
+        addLog(`[${fileItem.file.name}] Сетевая ошибка`, 'error');
+        reject(new Error('Network Error'));
+      };
+
+      addLog(`[${fileItem.file.name}] Начало загрузки...`, 'info');
+      setFiles(prev => prev.map((item, i) => 
+        i === index ? { ...item, status: 'uploading', message: 'Начало передачи...' } : item
+      ));
+
+      xhr.open('POST', `${API_URL}/api/upload_ortho`);
+      xhr.send(formData);
+    });
+  };
+
   const handleUploadAll = async () => {
     if (files.length === 0) return;
+    const indicesToUpload = files
+      .map((f, index) => (f.status === 'pending' || f.status === 'failed' ? index : -1))
+      .filter(i => i !== -1);
 
-    // Создаем копию массива для мутаций статусов
-    const updatedFiles = [...files];
-
-    // Проходим по файлам и загружаем только "pending"
-    for (let i = 0; i < updatedFiles.length; i++) {
-      if (updatedFiles[i].status === 'pending') {
-        
-        // Ставим статус "Загрузка"
-        updatedFiles[i].status = 'uploading';
-        updatedFiles[i].message = 'Загрузка и обработка (GDAL)...';
-        setFiles([...updatedFiles]); // Обновляем UI
-
-        const formData = new FormData();
-        // Бэкенд ожидает поле 'files'
-        formData.append('files', updatedFiles[i].file);
-
-        try {
-          // [FIX] Вызываем api.ts (автоматически подставит правильный хост и /api/upload_ortho)
-          const response = await uploadOrthoFiles(formData);
-          
-          updatedFiles[i].status = 'success';
-          updatedFiles[i].message = response.message || 'Успешно загружен и обработан';
-          // Если бэкенд возвращает логи обработки, сохраним их
-          if (response.logs && Array.isArray(response.logs)) {
-             updatedFiles[i].logs = response.logs;
-          }
-
-        } catch (error: any) {
-          console.error(`Ошибка загрузки файла ${updatedFiles[i].file.name}:`, error);
-          updatedFiles[i].status = 'failed';
-          updatedFiles[i].message = error.message || 'Ошибка при загрузке';
-        }
-        
-        // Обновляем состояние после завершения (успех или ошибка)
-        setFiles([...updatedFiles]);
-        scrollLogToBottom();
+    if (indicesToUpload.length === 0) {
+      addLog('Нет файлов для загрузки', 'warning');
+      return;
+    }
+    addLog(`Запуск пакетной загрузки: ${indicesToUpload.length} файлов`, 'info');
+    for (const index of indicesToUpload) {
+      try {
+        await uploadSingleFile(index, files[index]);
+      } catch (error: any) {
+        setFiles(prev => prev.map((item, i) => 
+          i === index ? { ...item, status: 'failed', message: 'Ошибка' } : item
+        ));
+        addLog(`[ERROR] ${files[index].file.name}: ${error.message || 'Unknown error'}`, 'error');
       }
     }
+    addLog('Пакетная обработка завершена', 'info');
   };
 
-  // Удаляем файл из списка
   const handleRemoveFile = (index: number) => {
     setFiles((prev) => prev.filter((_, idx) => idx !== index));
   };
 
-  // Прокрутить лог вниз
-  const scrollLogToBottom = () => {
-    // Небольшая задержка, чтобы DOM успел обновиться
-    setTimeout(() => {
-        if (logRef.current) {
-            logRef.current.scrollTop = logRef.current.scrollHeight;
-        }
-    }, 100);
-  };
-
   return (
-    <div className="tag-container">
+    <div className="contend">
+      <Header />
+      <div className="tag-container">
+        <div className="mini">
+          <div className={`mini_pano ${isDragging ? 'dragging' : ''}`}>
+            
+            <div className="mini_header">
+              <h3>Загрузка ортофотопланов (GeoTIFF)</h3>
+              <div className="functions">
+                <button onClick={(e) => { e.stopPropagation(); setFiles([]); setGlobalLogs([]); }} className="secondary-button">Очистить</button>
+                <button onClick={(e) => { e.stopPropagation(); handleUploadAll(); }} className="primary-button">Загрузить все</button>
+              </div>
+            </div>
 
-      <div className="mini">
-        {/* Отображение "загружаемых" файлов */}
-        <div className={`mini_pano ${isDragging ? 'dragging' : ''}`} style={{ minHeight: '300px', display: 'flex', flexDirection: 'column' }}>
-          <div className="mini_header">
-            <h3>Загрузка ортофотопланов (GeoTIFF)</h3>
-            <div className="functions">
-              <button onClick={() => setFiles([])} className="secondary-button">Очистить</button>
-              <button onClick={handleUploadAll} className="primary-button">Загрузить все</button>
+            {/* Зона загрузки: Клик по ней вызывает инпут */}
+            <div
+              className="drag-drop-container"
+              onClick={handleContainerClick} // <--- ВАЖНО: Клик по всей зоне
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+            >
+              {files.length === 0 && (
+                <div className="drag-drop-placeholder">
+                   {isDragging ? 'Отпустите файлы здесь' : 'Перетащите .tif файлы или нажмите для выбора'}
+                </div>
+              )}
+              
+              {/* Скрытый инпут */}
+              <input 
+                ref={fileInputRef}
+                type="file"
+                accept=".tif,.tiff"
+                multiple
+                onChange={(e) => { if (e.target.files) handleFilesAddition(e.target.files); }}
+                style={{ display: 'none' }} // <--- ВАЖНО: Скрыт
+              />
+
+              <div className="file-list">
+                {files.map((item, idx) => (
+                  <div key={idx} className="thumbnail" onClick={(e) => e.stopPropagation() /* Чтобы клик по файлу не открывал диалог снова (опционально) */ }>
+                    
+                    {item.status === 'uploading' && (
+                       <div className="progress-line" style={{ width: `${item.progress}%` }} />
+                    )}
+
+                    <div className={`file-icon ${item.status}`}>
+                        {item.status === 'success' ? '✅' : (item.status === 'failed' ? '❌' : '📄')}
+                    </div>
+
+                    <div className="file-info">
+                      <div className="file-name">{item.file.name}</div>
+                      <div className="file-meta">
+                         <span>{(item.file.size / 1024 / 1024).toFixed(2)} MB</span>
+                         <span className={`file-status ${item.status}`}>{item.message}</span>
+                      </div>
+                    </div>
+
+                    {item.status !== 'uploading' && item.status !== 'processing' && (
+                        <button 
+                            className="btn-remove"
+                            onClick={(e) => { 
+                                e.stopPropagation(); // <--- ВАЖНО: Остановить всплытие, иначе откроется окно выбора
+                                handleRemoveFile(idx); 
+                            }}
+                        >
+                        &times;
+                        </button>
+                    )}
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
 
-          {/* Drag'n'Drop зона */}
-          <div
-            className="drag-drop-container"
-            onDragOver={handleDragOver}
-            onDragLeave={handleDragLeave}
-            onDrop={handleDrop}
-            style={{ flex: 1, position: 'relative', border: '2px dashed #ccc', margin: '10px', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: isDragging ? '#eeffff' : 'transparent' }}
-          >
-            {files.length === 0 && (
-                <p style={{pointerEvents: 'none', color: '#888'}}>
-                    {isDragging ? 'Отпустите файлы здесь' : 'Перетащите файлы .tif или кликните для выбора'}
-                </p>
-            )}
-            
-            <input
-              type="file"
-              accept=".tif,.tiff"
-              multiple
-              onChange={(e) => {
-                if (e.target.files) handleFilesAddition(e.target.files);
-              }}
-              style={{
-                position: 'absolute',
-                width: '100%',
-                height: '100%',
-                opacity: 0,
-                cursor: 'pointer',
-                top: 0,
-                left: 0
-              }}
-            />
-
-            {/* Список файлов внутри дропзоны или под ней, как удобнее. 
-                В вашем дизайне список был внутри mini_pano, рендерим его поверх инпута (с pointer-events на кнопках) 
-            */}
-            {files.length > 0 && (
-                <div className="file-list-overlay" style={{ 
-                    position: 'absolute', 
-                    top: 0, 
-                    left: 0, 
-                    width: '100%', 
-                    height: '100%', 
-                    overflowY: 'auto', 
-                    padding: '10px', 
-                    zIndex: 2,
-                    pointerEvents: 'none' // Чтобы клики проходили сквозь пустое место к инпуту
-                }}>
-                    {files.map((item, idx) => (
-                        <div
-                        key={idx}
-                        className={`thumbnail ${item.status}`}
-                        style={{ 
-                            justifyContent: 'space-between', 
-                            alignItems: 'center', 
-                            background: 'white', 
-                            marginBottom: '5px', 
-                            padding: '10px',
-                            borderRadius: '4px',
-                            boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-                            pointerEvents: 'auto' // Вернуть клики элементам списка
-                        }}
-                        >
-                        <div style={{ display: 'flex', alignItems: 'center', overflow: 'hidden' }}>
-                            <div className="thumbnail-icon" style={{ 
-                                width: '40px', 
-                                height: '40px', 
-                                background: item.status === 'success' ? '#e6fffa' : '#eee', 
-                                display: 'flex', 
-                                alignItems: 'center', 
-                                justifyContent: 'center',
-                                marginRight: '10px',
-                                borderRadius: '4px',
-                                fontSize: '20px'
-                            }}>
-                                {item.status === 'success' ? '✅' : '🗺️'}
-                            </div>
-                            <div className="thumbnail-name" style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                            <div style={{fontWeight: 'bold'}}>{item.file.name}</div>
-                            <div style={{ fontSize: '12px', color: '#666' }}>
-                                {(item.file.size / 1024 / 1024).toFixed(2)} MB — {item.message}
-                            </div>
-                            </div>
-                        </div>
-                        
-                        <div>
-                            {/* Кнопка для удаления из очереди (если еще не загружается) */}
-                            {item.status !== 'uploading' && (
-                                <button 
-                                    onClick={(e) => { e.stopPropagation(); handleRemoveFile(idx); }}
-                                    style={{ background: 'transparent', color: 'red', border: 'none', cursor: 'pointer', fontSize: '16px' }}
-                                >
-                                &times;
-                                </button>
-                            )}
-                        </div>
-                        </div>
-                    ))}
-                </div>
-            )}
+          <div className="log-terminal" ref={logRef}>
+            <div className="log-prompt">root@console: ~/upload_logs $</div>
+            {globalLogs.map((log, idx) => (
+              <div key={idx} className="log-entry">
+                <span className="log-time">[{log.time}]</span>
+                <span className={`log-text ${log.type}`}>{log.text}</span>
+              </div>
+            ))}
           </div>
-        </div>
 
-        {/* Лог загрузок (технический) */}
-        <div className="mini_log" ref={logRef} style={{ marginTop: '10px', maxHeight: '200px', overflowY: 'auto', background: '#222', color: '#0f0', padding: '10px', borderRadius: '4px', fontFamily: 'monospace', fontSize: '12px' }}>
-          <div>--- Лог операций ---</div>
-          {files.flatMap((f) => {
-              if (!f.logs) return [];
-              return f.logs.map(l => `[${f.file.name}] ${l}`);
-          }).map((logLine, idx) => (
-              <div key={idx}>{logLine}</div>
-          ))}
-          {files.map((f, idx) => (
-              (f.status === 'failed') ? <div key={`err-${idx}`} style={{color: 'red'}}>[ERROR] {f.file.name}: {f.message}</div> : null
-          ))}
         </div>
       </div>
     </div>

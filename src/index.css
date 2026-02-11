@@ -13,7 +13,7 @@
   --color-surface-alt: #2a2a2a;
   --color-text: #ffffff;
   --color-text-light: #cccccc;
-  --color-border: #333333;
+  --color-border: #33333333;
   --color-hover: #262626;
 
   --radius-base: 6px;
@@ -788,7 +788,16 @@ input:focus, textarea:focus {
    Upload (panoramas)
    ============================= */
 
-.tag-container { margin: 30px; }
+.tag-container { 
+    position: relative;
+    text-align: center;
+    top: 80px;
+    width: 100%; 
+}
+
+
+
+
 .mini { margin: 30px; }
 
 .mini_pano, .mini_log {
@@ -919,15 +928,14 @@ input:focus, textarea:focus {
 
 .drag-drop-container {
   display: flex;
-  justify-content: center;
+  flex-direction: column;
   align-items: center;
   height: 100%;
-  width: 98%;
   border: 2px dashed var(--color-border);
   border-radius: var(--radius-base);
   cursor: pointer;
-  margin: 0 auto;
   background-color: var(--color-surface-alt);
+  margin-bottom: 20px;
 }
 .drag-drop-container p { font-size: 20px; color: var(--color-text); }
 .mini_pano.dragging .drag-drop-container { border-color: var(--color-primary); }
@@ -1006,7 +1014,7 @@ input:focus, textarea:focus {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 20px;
+  margin: 20px 0;
 }
 .mini_header h3 { margin: 0; color: var(--color-text); font-size: 18px; font-weight: 600; }
 
@@ -1353,3 +1361,178 @@ h3 { margin: 0; color: var(--color-text); }
         .slider:before { position: absolute; content: ""; height: 14px; width: 14px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; }
         input:checked + .slider { background-color: #2196F3; }
         input:checked + .slider:before { transform: translateX(14px); }
+
+
+
+
+ /* UploadOrtho.css */
+
+/* ... (contend, tag-container, mini, mini_pano, mini_header, functions, buttons - без изменений) ... */
+.contend { /* ... */ }
+.tag-container { /* ... */ }
+.mini { /* ... */ }
+.mini_pano { /* ... */ }
+.mini_pano.dragging {
+  border-color: #2196f3;
+  background-color: rgba(33, 150, 243, 0.05);
+}
+.mini_header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+.functions {
+  display: flex;
+  gap: 10px;
+}
+.secondary-button, .primary-button {
+  cursor: pointer;
+  padding: 6px 12px;
+  border-radius: 4px;
+  border: none;
+  font-size: 14px;
+}
+
+/* --- Drag & Drop зона --- */
+.drag-drop-container {
+  position: relative;
+  min-height: 150px;
+  border: 2px dashed var(--color-border);
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  /* justify-content: center; <-- Убрал, чтобы список файлов начинался сверху */
+  overflow: hidden;
+  cursor: pointer; /* Показываем, что зона кликабельна */
+  transition: background-color 0.2s;
+}
+
+.drag-drop-container:hover {
+  background-color: var(--color-bg);
+}
+
+.drag-drop-placeholder {
+  text-align: center;
+  color: #888;
+  padding: 40px 20px; /* Больше отступов, чтобы по центру было красиво */
+  pointer-events: none;
+}
+
+/* --- Список файлов --- */
+.file-list {
+  padding: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  overflow-y: auto;
+  /* pointer-events: auto; <-- Больше не нужно переопределять */
+}
+
+.thumbnail {
+  position: relative;
+  display: flex;
+  align-items: center;
+  padding: 8px;
+  margin-bottom: 8px;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+  cursor: default; /* Курсор на файле обычный, а не "рука" (если не хотим вызывать загрузку по клику на файл) */
+}
+
+/* Прогресс бар */
+.progress-line {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  height: 4px;
+  background: #4caf50;
+  transition: width 0.2s ease;
+}
+
+/* Иконка */
+.file-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  margin-right: 10px;
+  flex-shrink: 0;
+  background-color: #f5f5f5;
+}
+.file-icon.success { background-color: #e6fffa; }
+.file-icon.failed { background-color: #ffe6e6; }
+
+/* Информация */
+.file-info {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+      flex-direction: column;
+    align-items: flex-start;
+}
+.file-name {
+  font-weight: 600;
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.file-meta {
+  font-size: 11px;
+  color: #666;
+  display: flex;
+  justify-content: space-between;
+  margin-top: 2px;
+      flex-direction: column;
+      align-items: flex-start;
+}
+.file-status { font-weight: bold; color: #888; }
+.file-status.uploading { color: #2196f3; }
+.file-status.success { color: #4caf50; }
+.file-status.failed { color: #f44336; }
+
+/* Кнопка удаления */
+.btn-remove {
+  background: transparent;
+  border: none;
+  color: #aaa;
+  cursor: pointer;
+  font-size: 18px;
+  margin-left: 8px;
+  padding: 4px; /* Чуть увеличил область клика */
+  line-height: 1;
+  border-radius: 4px;
+}
+.btn-remove:hover {
+  color: #f44336;
+  background-color: rgba(244, 67, 54, 0.1);
+}
+
+/* --- Логи (без изменений) --- */
+.log-terminal {
+  margin-top: 10px;
+  height: 30vh;
+  overflow-y: auto;
+  background: #1e1e1e;
+  color: #d4d4d4;
+  padding: 12px;
+  border-radius: 6px;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 12px;
+  border: 1px solid #333;
+}
+.log-prompt {
+  border-bottom: 1px solid #333;
+  padding-bottom: 4px;
+  margin-bottom: 4px;
+  color: #888;
+}
+.log-entry { margin-bottom: 2px; display: flex; }
+.log-time { color: #569cd6; margin-right: 8px; min-width: 70px; }
+.log-text { color: #d4d4d4; word-break: break-all; }
+.log-text.error { color: #f44336; }
+.log-text.success { color: #4caf50; }
+.log-text.warning { color: #ff9800; }
