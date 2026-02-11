@@ -66,7 +66,7 @@ def create_app():
         SESSION_COOKIE_SECURE=getattr(config, "COOKIE_SECURE", False),
         SESSION_COOKIE_HTTPONLY=True,
         JSON_AS_ASCII=False,
-        MAX_CONTENT_LENGTH=1024 * 1024 * 1024,  # Upload limit 1 GB
+        MAX_CONTENT_LENGTH= 4 * 1024 * 1024 * 1024,  # Upload limit 1 GB
     )
 
     # ---------------- COMPRESSION SETTINGS (GZIP) ----------------

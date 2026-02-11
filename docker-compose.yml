@@ -63,7 +63,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    command: gunicorn --workers 8 --worker-class gevent --bind 0.0.0.0:5000 "server.app:create_app()"
+    command: gunicorn --workers 8 --worker-class gevent --timeout 300 --keep-alive 5 --bind 0.0.0.0:5000 "server.app:create_app()"
     depends_on:
       pgbouncer:
         condition: service_started
