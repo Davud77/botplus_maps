@@ -1,630 +1,131 @@
-# ./backend/controllers/ortho_controller.py
-
 from flask import Blueprint, jsonify, request, make_response
 from managers.ortho_manager import OrthoManager
 from database import Database
-from models.ortho import Ortho
-# Импортируем оба класса хранилища
-from storage import LocalStorage, MinioStorage
-import config
+from services.task_service import TaskService
+from services.storage_service import StorageService
+from services.gdal_service import GdalService
+from services.ortho_service import OrthoService
 import json
-import subprocess
-import os
-import re
-import sys
-import traceback
-from io import BytesIO
-from PIL import Image
-# [FIX] Добавляем requests для проксирования
-import requests
 
 ortho_blueprint = Blueprint("ortho", __name__)
 
 class OrthoController:
     def __init__(self):
+        # Инициализация зависимостей
         self.db = Database()
         self.ortho_manager = OrthoManager(self.db)
         
-        # Локальное хранилище (используется только для временного анализа GDAL)
-        self.storage = LocalStorage(config.ORTHO_FOLDER)
+        # Сервисы
+        self.task_service = TaskService()
+        self.storage_service = StorageService()
+        self.gdal_service = GdalService()
         
-        # MinIO хранилище (для постоянного хранения файлов)
-        self.minio = MinioStorage()
-        
-        # При инициализации проверяем и создаем бакет 'orthophotos'
-        if self.minio.client:
-            try:
-                bucket_name = "orthophotos"
-                if not self.minio.client.bucket_exists(bucket_name):
-                    self.minio.client.make_bucket(bucket_name)
-                    print(f"Bucket '{bucket_name}' created successfully.")
-                
-                # [FIX] Устанавливаем политику Public Read, чтобы TiTiler мог читать без ключей по HTTP
-                policy = {
-                    "Version": "2012-10-17",
-                    "Statement": [
-                        {
-                            "Effect": "Allow",
-                            "Principal": {"AWS": ["*"]},
-                            "Action": ["s3:GetObject"],
-                            "Resource": [f"arn:aws:s3:::{bucket_name}/*"]
-                        }
-                    ]
-                }
-                self.minio.client.set_bucket_policy(bucket_name, json.dumps(policy))
-                print(f"Bucket '{bucket_name}' policy set to PUBLIC READ.")
-                
-            except Exception as e:
-                print(f"MinIO init warning: {e}")
+        # Оркестратор
+        self.ortho_service = OrthoService(
+            self.db, 
+            self.ortho_manager, 
+            self.storage_service, 
+            self.gdal_service, 
+            self.task_service
+        )
 
     @staticmethod
     def register_routes(blueprint):
-        controller = OrthoController()
+        c = OrthoController()
 
-        # 1. Список
-        blueprint.add_url_rule("/orthophotos", 
-                               view_func=controller.get_orthophotos, 
-                               methods=["GET"])
-        
-        # 2. Быстрая Загрузка (Upload -> Bounds -> DB -> MinIO)
-        blueprint.add_url_rule("/upload_ortho", 
-                               view_func=controller.upload_ortho, 
-                               methods=["POST"])
-        
-        # 3. Обработка (COG Convert) - Вызывается отдельно
-        blueprint.add_url_rule("/orthophotos/<int:ortho_id>/process", 
-                               view_func=controller.process_ortho_cog, 
-                               methods=["POST"])
+        blueprint.add_url_rule("/orthophotos", view_func=c.get_orthophotos, methods=["GET"])
+        blueprint.add_url_rule("/upload_ortho", view_func=c.upload_ortho, methods=["POST"])
+        blueprint.add_url_rule("/orthophotos/<int:ortho_id>/process", view_func=c.process_ortho_cog, methods=["POST"])
+        blueprint.add_url_rule("/orthophotos/<int:ortho_id>", view_func=c.get_ortho, methods=["GET"])
+        blueprint.add_url_rule("/orthophotos/<int:ortho_id>/download", view_func=c.download_ortho_file, methods=["GET"])
+        blueprint.add_url_rule("/orthophotos/<int:ortho_id>", view_func=c.update_ortho, methods=["PUT"])
+        blueprint.add_url_rule("/orthophotos/<int:ortho_id>", view_func=c.delete_ortho, methods=["DELETE"])
+        blueprint.add_url_rule("/orthophotos/<int:ortho_id>/tiles/<int:z>/<int:x>/<int:y>.png", view_func=c.get_ortho_tile, methods=["GET"])
+        blueprint.add_url_rule("/orthophotos/<int:ortho_id>/reproject", view_func=c.reproject_ortho, methods=["POST"])
+        blueprint.add_url_rule("/tasks/<task_id>", view_func=c.get_task_status, methods=["GET"])
 
-        # 4. Инфо
-        blueprint.add_url_rule("/orthophotos/<int:ortho_id>", 
-                               view_func=controller.get_ortho, 
-                               methods=["GET"])
-        
-        # 5. Скачать файл
-        blueprint.add_url_rule("/orthophotos/<int:ortho_id>/download", 
-                               view_func=controller.download_ortho_file, 
-                               methods=["GET"])
-        
-        # 6. Обновить
-        blueprint.add_url_rule("/orthophotos/<int:ortho_id>", 
-                               view_func=controller.update_ortho, 
-                               methods=["PUT"])
-        
-        # 7. Удалить
-        blueprint.add_url_rule("/orthophotos/<int:ortho_id>", 
-                               view_func=controller.delete_ortho, 
-                               methods=["DELETE"])
+    # --- Handlers ---
 
-        # 8. Тайлы (ПРОКСИ на TiTiler)
-        blueprint.add_url_rule("/orthophotos/<int:ortho_id>/tiles/<int:z>/<int:x>/<int:y>.png",
-                               view_func=controller.get_ortho_tile,
-                               methods=["GET"])
-                               
-        # 9. Перепроецирование
-        blueprint.add_url_rule("/orthophotos/<int:ortho_id>/reproject", 
-                               view_func=controller.reproject_ortho, 
-                               methods=["POST"])
-
-
-    # =========================================================================
-    # 1. Список ортофотопланов
-    # =========================================================================
     def get_orthophotos(self):
-        try:
-            orthos = self.ortho_manager.get_all_orthos()
-            results = []
-            for o in orthos:
-                b = None
-                if o.bounds:
-                    try:
-                        b = json.loads(o.bounds)
-                    except Exception:
-                        pass 
-                
-                crs_val = getattr(o, 'crs', None)
-                if not crs_val and o.filename and "_3857" in o.filename:
-                    crs_val = "EPSG:3857"
+        return jsonify(self.ortho_service.get_all()), 200
 
-                item = {
-                    "id": o.id,
-                    "filename": o.filename,
-                    "url": f"/api/orthophotos/{o.id}/download",
-                    "bounds": b if b else {"north": 0, "south": 0, "east": 0, "west": 0},
-                    "crs": crs_val,
-                    "upload_date": str(o.upload_date) if hasattr(o, 'upload_date') else None
-                }
-                results.append(item)
-            return jsonify(results), 200
-        except Exception as e:
-            print("ERROR in get_orthophotos:")
-            traceback.print_exc()
-            return jsonify({"error": str(e)}), 500
-
-
-    # =========================================================================
-    # 2. Быстрая загрузка (БЕЗ конвертации)
-    # =========================================================================
     def upload_ortho(self):
-        uploaded_files = request.files.getlist("files")
-        successful_uploads = []
-        failed_uploads = []
-        logs = []
-
-        if not uploaded_files:
-            return jsonify({"message": "Нет файлов для загрузки"}), 400
-
-        original_bucket_name = self.minio.bucket_name
-        self.minio.bucket_name = "orthophotos"
+        files = request.files.getlist("files")
+        if not files:
+            return jsonify({"message": "Нет файлов"}), 400
         
-        # Папка для временного хранения
-        temp_dir = "data/temp/orthos" 
-        if not os.path.exists(temp_dir):
-            try:
-                os.makedirs(temp_dir, exist_ok=True)
-            except OSError as e:
-                return jsonify({"error": f"Не удалось создать директорию {temp_dir}: {e}"}), 500
-
-        for file in uploaded_files:
-            filename = file.filename
-            try:
-                logs.append(f"Начало загрузки: {filename}")
-                input_path = os.path.join(temp_dir, filename)
-                
-                # 1. Временное сохранение
-                file.save(input_path)
-                logs.append("Файл сохранен локально.")
-
-                # 2. Считывание границ и CRS (с оригинала)
-                # Это работает быстро, так как gdalinfo читает только заголовки
-                bounds = self._get_bounds_from_gdalinfo(input_path)
-                initial_crs = self._get_crs_from_gdalinfo(input_path)
-                logs.append(f"Границы считаны. Проекция: {initial_crs}")
-
-                # 3. Запись в БД (имя файла оригинальное, без _cog)
-                ortho_obj = Ortho(
-                    filename=filename, 
-                    bounds=json.dumps(bounds),
-                    url=None 
-                )
-                ortho_obj.crs = initial_crs
-                
-                ortho_id = self.ortho_manager.insert_ortho(ortho_obj)
-                
-                # Обновляем CRS явно, если insert не сработал (для надежности)
-                try:
-                    self.ortho_manager.update_ortho(ortho_id, {"crs": initial_crs})
-                except:
-                    pass
-
-                logs.append(f"Запись добавлена в БД. ID={ortho_id}")
-
-                # 4. Загрузка ОРИГИНАЛА в MinIO
-                if self.minio.client:
-                    logs.append("Загрузка файла в облако...")
-                    self.minio.client.fput_object(
-                        "orthophotos", 
-                        filename, 
-                        input_path, 
-                        content_type="image/tiff"
-                    )
-                    logs.append("Файл успешно загружен в MinIO.")
-
-                    # 5. Очистка
-                    if os.path.exists(input_path): os.remove(input_path)
-                    logs.append("Временный файл удален.")
-                else:
-                    logs.append("Ошибка: MinIO недоступен.")
-
-                successful_uploads.append(filename)
-
-            except Exception as err:
-                error_msg = f"Ошибка загрузки {filename}: {err}"
-                print(error_msg)
-                traceback.print_exc()
-                logs.append(error_msg)
-                failed_uploads.append(filename)
-                
-                if 'input_path' in locals() and os.path.exists(input_path):
-                    try: os.remove(input_path)
-                    except: pass
-
-        self.minio.bucket_name = original_bucket_name
-
+        success, failed, logs = self.ortho_service.handle_upload(files)
         return jsonify({
             "message": "Загрузка завершена",
-            "successful_uploads": successful_uploads,
-            "failed_uploads": failed_uploads,
+            "successful_uploads": success,
+            "failed_uploads": failed,
             "logs": logs
         }), 200
 
-
-    # =========================================================================
-    # 3. Обработка (Конвертация в COG) - по требованию
-    # =========================================================================
     def process_ortho_cog(self, ortho_id):
-        temp_dir = "data/temp/orthos"
-        os.makedirs(temp_dir, exist_ok=True)
-        logs = []
+        task_id = self.ortho_service.start_cog_process(ortho_id)
+        if not task_id:
+            return jsonify({"error": "Ortho not found"}), 404
+        return jsonify({"task_id": task_id, "status": "started"}), 202
 
-        try:
-            ortho = self.ortho_manager.get_ortho_by_id(ortho_id)
-            if not ortho:
-                return jsonify({"error": "Ortho not found"}), 404
-
-            logs.append(f"Начало обработки ID {ortho_id} ({ortho.filename})")
-
-            # 1. Скачиваем оригинал из MinIO
-            local_path = os.path.join(temp_dir, ortho.filename)
-            self.minio.client.fget_object("orthophotos", ortho.filename, local_path)
-            logs.append("Файл скачан из хранилища.")
-
-            # 2. Формируем имя COG файла
-            name_part, ext = os.path.splitext(ortho.filename)
-            # Избегаем дублирования _cog, если файл уже обработан или назван так
-            if name_part.endswith("_cog"):
-                cog_filename = ortho.filename
-            else:
-                cog_filename = f"{name_part}_cog.tif"
-            
-            cog_path = os.path.join(temp_dir, cog_filename)
-
-            # 3. Запуск GDAL Convert
-            logs.append("Запуск gdal_translate (COG conversion)...")
-            cmd = [
-                "gdal_translate", local_path, cog_path,
-                "-of", "COG",
-                "-co", "COMPRESS=DEFLATE",
-                "-co", "PREDICTOR=2",
-                "-co", "NUM_THREADS=ALL_CPUS",
-                "-co", "OVERVIEWS=IGNORE_EXISTING"
-            ]
-            
-            process = subprocess.run(cmd, capture_output=True, text=True)
-            if process.returncode != 0:
-                raise Exception(f"GDAL Error: {process.stderr}")
-            
-            logs.append("Конвертация завершена успешно.")
-
-            # 4. Загружаем оптимизированный файл в MinIO
-            self.minio.client.fput_object(
-                "orthophotos", 
-                cog_filename, 
-                cog_path, 
-                content_type="image/tiff"
-            )
-            logs.append("COG файл загружен в MinIO.")
-
-            # 5. Обновляем БД (новое имя файла и уточненные границы)
-            bounds = self._get_bounds_from_gdalinfo(cog_path)
-            # На всякий случай проверяем CRS еще раз
-            crs = self._get_crs_from_gdalinfo(cog_path)
-            
-            self.ortho_manager.update_ortho(ortho_id, {
-                "filename": cog_filename,
-                "bounds": json.dumps(bounds),
-                "crs": crs
-            })
-
-            # 6. Удаляем старый оригинал из MinIO (если имя изменилось)
-            if ortho.filename != cog_filename:
-                try:
-                    self.minio.delete_file(ortho.filename)
-                    logs.append(f"Старый исходник ({ortho.filename}) удален.")
-                except Exception as e:
-                    logs.append(f"Warning: Не удалось удалить старый файл: {e}")
-
-            # 7. Очистка локальных файлов
-            if os.path.exists(local_path): os.remove(local_path)
-            if os.path.exists(cog_path): os.remove(cog_path)
-
-            return jsonify({
-                "message": "Processing successful",
-                "logs": logs,
-                "new_filename": cog_filename
-            }), 200
-
-        except Exception as e:
-            traceback.print_exc()
-            return jsonify({"error": str(e), "logs": logs}), 500
-
-
-    # =========================================================================
-    # [НОВОЕ] Перепроецирование в EPSG:3857 (Google)
-    # =========================================================================
     def reproject_ortho(self, ortho_id):
-        temp_dir = "data/temp/orthos"
-        if not os.path.exists(temp_dir):
-            os.makedirs(temp_dir, exist_ok=True)
+        task_id = self.ortho_service.start_reproject_process(ortho_id)
+        if not task_id:
+            return jsonify({"error": "Ortho not found"}), 404
+        return jsonify({"task_id": task_id, "status": "started"}), 202
 
-        try:
-            ortho = self.ortho_manager.get_ortho_by_id(ortho_id)
-            if not ortho:
-                return jsonify({"error": "Ortho not found"}), 404
-
-            print(f"Starting reprojection for Ortho ID {ortho_id} ({ortho.filename})")
-
-            # 1. Скачиваем файл из MinIO
-            local_path = os.path.join(temp_dir, ortho.filename)
-            self.minio.client.fget_object("orthophotos", ortho.filename, local_path)
-            print(f"Downloaded to {local_path}")
-
-            # 2. Формируем имя нового файла
-            name_part, ext = os.path.splitext(ortho.filename)
-            clean_name = name_part.replace("_cog", "").replace("_3857", "")
-            new_filename = f"{clean_name}_3857_cog.tif"
-            output_path = os.path.join(temp_dir, new_filename)
-
-            # [FIX] Удаляем старый файл назначения, если он существует
-            if os.path.exists(output_path):
-                try:
-                    os.remove(output_path)
-                except Exception:
-                    pass
-
-            # 3. Выполняем gdalwarp (с флагом -overwrite)
-            cmd = [
-                "gdalwarp", 
-                "-t_srs", "EPSG:3857",
-                "-r", "bilinear",
-                "-of", "COG",
-                "-co", "COMPRESS=DEFLATE",
-                "-co", "PREDICTOR=2",
-                "-co", "NUM_THREADS=ALL_CPUS",
-                "-overwrite",
-                local_path, output_path
-            ]
-
-            process = subprocess.run(cmd, capture_output=True, text=True)
-            if process.returncode != 0:
-                print(f"GDAL Error: {process.stderr}")
-                raise Exception(f"GDAL Warp Error: {process.stderr}")
-
-            print("Reprojection finished.")
-
-            # 4. Считываем новые границы
-            new_bounds = self._get_bounds_from_gdalinfo(output_path)
-            
-            # 5. Загружаем новый файл в MinIO
-            self.minio.client.fput_object(
-                "orthophotos", 
-                new_filename, 
-                output_path, 
-                content_type="image/tiff"
-            )
-            print(f"Uploaded new file: {new_filename}")
-
-            # 6. Удаляем старый файл (опционально)
-            try:
-                self.minio.delete_file(ortho.filename)
-            except Exception as e:
-                print(f"Could not delete old file from MinIO: {e}")
-
-            # 7. Обновляем БД (имя файла, границы и CRS)
-            update_data = {
-                "filename": new_filename,
-                "bounds": json.dumps(new_bounds),
-                "crs": "EPSG:3857"
-            }
-            self.ortho_manager.update_ortho(ortho_id, update_data)
-
-            # 8. Очистка локальных файлов
-            if os.path.exists(local_path): os.remove(local_path)
-            if os.path.exists(output_path): os.remove(output_path)
-
-            return jsonify({
-                "message": "Reprojection successful",
-                "filename": new_filename,
-                "crs": "EPSG:3857"
-            }), 200
-
-        except Exception as e:
-            traceback.print_exc()
-            return jsonify({"error": str(e)}), 500
-
-
-    # =========================================================================
-    # 4. Получить инфо
-    # =========================================================================
     def get_ortho(self, ortho_id):
-        try:
-            ortho = self.ortho_manager.get_ortho_by_id(ortho_id)
-            if not ortho:
-                return jsonify({"error": "Not found"}), 404
+        ortho = self.ortho_manager.get_ortho_by_id(ortho_id)
+        if not ortho:
+            return jsonify({"error": "Not found"}), 404
+        
+        b = json.loads(ortho.bounds) if ortho.bounds else None
+        return jsonify({
+            "id": ortho.id,
+            "filename": ortho.filename,
+            "url": f"/api/orthophotos/{ortho.id}/download",
+            "bounds": b,
+            "crs": getattr(ortho, 'crs', None),
+            "is_visible": getattr(ortho, 'is_visible', False)
+        }), 200
 
-            b = json.loads(ortho.bounds) if ortho.bounds else None
-            result = {
-                "id": ortho.id,
-                "filename": ortho.filename,
-                "url": f"/api/orthophotos/{ortho.id}/download",
-                "bounds": b,
-                "crs": getattr(ortho, 'crs', None)
-            }
-            return jsonify(result), 200
-        except Exception as e:
-            traceback.print_exc()
-            return jsonify({"error": str(e)}), 500
-
-
-    # =========================================================================
-    # 5. Скачать файл (из MinIO)
-    # =========================================================================
     def download_ortho_file(self, ortho_id):
-        try:
-            ortho = self.ortho_manager.get_ortho_by_id(ortho_id)
-            if not ortho:
-                return jsonify({"error": "Not found"}), 404
+        ortho = self.ortho_manager.get_ortho_by_id(ortho_id)
+        if not ortho:
+            return jsonify({"error": "Not found"}), 404
+        return self.storage_service.send_file(ortho.filename)
 
-            original_bucket = self.minio.bucket_name
-            self.minio.bucket_name = "orthophotos"
-            
-            response = None
-            if self.minio.client:
-                try:
-                    response = self.minio.send_local_file(ortho.filename, mimetype="image/tiff")
-                except Exception as e:
-                    print(f"MinIO download failed: {e}")
-            
-            self.minio.bucket_name = original_bucket
-            
-            if response:
-                return response
-            
-            return self.storage.send_local_file(ortho.filename, mimetype="image/tiff")
-            
-        except Exception as e:
-            traceback.print_exc()
-            return jsonify({"error": str(e)}), 500
-
-
-    # =========================================================================
-    # 6. Обновить данные
-    # =========================================================================
     def update_ortho(self, ortho_id):
         try:
-            data = request.json
-            self.ortho_manager.update_ortho(ortho_id, data)
+            self.ortho_manager.update_ortho(ortho_id, request.json)
             return jsonify({"status": "success"}), 200
         except Exception as e:
-            traceback.print_exc()
             return jsonify({"error": str(e)}), 500
 
-
-    # =========================================================================
-    # 7. Удалить (БД + MinIO)
-    # =========================================================================
     def delete_ortho(self, ortho_id):
-        try:
-            existing = self.ortho_manager.get_ortho_by_id(ortho_id)
-            if not existing:
-                return jsonify({"error": "Not found"}), 404
+        ortho = self.ortho_manager.get_ortho_by_id(ortho_id)
+        if not ortho:
+            return jsonify({"error": "Not found"}), 404
+        
+        self.storage_service.delete_file(ortho.filename)
+        self.ortho_manager.delete_ortho(ortho_id)
+        return jsonify({"status": "success"}), 200
 
-            if self.minio.client:
-                orig_bucket = self.minio.bucket_name
-                self.minio.bucket_name = "orthophotos"
-                self.minio.delete_file(existing.filename)
-                self.minio.bucket_name = orig_bucket
-
-            self.ortho_manager.delete_ortho(ortho_id)
-
-            return jsonify({"status": "success"}), 200
-        except Exception as e:
-            traceback.print_exc()
-            return jsonify({"error": str(e)}), 500
-
-
-    # =========================================================================
-    # 8. Получить тайл (ПРОКСИ на TiTiler)
-    # =========================================================================
     def get_ortho_tile(self, ortho_id, z, x, y):
-        try:
-            ortho = self.ortho_manager.get_ortho_by_id(ortho_id)
-            if not ortho:
-                return jsonify({"error": "Not found"}), 404
-
-            # [FIX] ВАЖНО: Используем порт 80 (внутренний порт TiTiler)
-            titiler_host = "http://titiler:80"
-            
-            # [FIX] Используем HTTP URL для доступа к MinIO, минуя S3 Auth
-            s3_url = f"http://minio:9000/orthophotos/{ortho.filename}"
-            
-            params = {
-                "url": s3_url,
-                "rescale": "0,255"
-            }
-            
-            tile_url = f"{titiler_host}/cog/tiles/WebMercatorQuad/{z}/{x}/{y}"
-            
-            # 3. Делаем запрос к TiTiler
-            resp = requests.get(tile_url, params=params, timeout=5)
-            
-            if resp.status_code != 200:
-                print(f"TiTiler Error ({resp.status_code}): {resp.text}")
-                return jsonify({"error": "TiTiler failed"}), resp.status_code
-
-            # 4. Отдаем картинку клиенту
-            response = make_response(resp.content)
-            response.headers.set("Content-Type", "image/png")
-            response.headers.set("Cache-Control", "public, max-age=3600")
-            return response
-
-        except Exception as e:
-            traceback.print_exc()
-            return self._tile_png_rgba_transparent()
-
-
-    # =========================================================================
-    # Вспомогательные функции GDAL (с определением МСК-05)
-    # =========================================================================
-    def _get_crs_from_gdalinfo(self, path):
-        import json
-        try:
-            # Используем флаг -proj4 для более точного определения параметров
-            process = subprocess.Popen(["gdalinfo", "-json", "-proj4", path], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-            out, _ = process.communicate()
-            data = json.loads(out)
-            
-            # Проверяем наличие информации о системе координат
-            if "coordinateSystem" in data:
-                cs = data["coordinateSystem"]
-                wkt = cs.get("wkt", "")
-                proj4 = cs.get("proj4", "")
-                
-                # 1. Проверяем стандартные коды EPSG
-                if 'ID["EPSG",3857]' in wkt or "Pseudo-Mercator" in wkt:
-                    return "EPSG:3857 (Google)"
-                if 'ID["EPSG",4326]' in wkt:
-                    return "EPSG:4326 (WGS84)"
-
-                # 2. Определяем МСК-05 (Республика Дагестан) по уникальным параметрам
-                if "46.8916666667" in proj4 or "46.891667" in proj4:
-                    return "MSK-05 (Dagestan)"
-                
-                wkt_dump = json.dumps(cs)
-                if "46.8916666667" in wkt_dump:
-                    return "MSK-05 (Dagestan)"
-                
-                if wkt and 'PROJCRS' in wkt:
-                    return "Custom / Unknown Projection"
-
-            return "Unknown"
-        except Exception as e:
-            print(f"Error detecting CRS: {e}")
-            return "Unknown"
-
-    def _get_bounds_from_gdalinfo(self, path):
-        import json
-        process = subprocess.Popen(["gdalinfo", "-json", path], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        out, _ = process.communicate()
-        try:
-            data = json.loads(out)
-            coords = data.get("cornerCoordinates", {})
-            
-            def get_coord(key, idx):
-                val = coords.get(key)
-                if val and len(val) > idx: return val[idx]
-                return 0.0
-
-            all_x = [get_coord("upperLeft", 0), get_coord("lowerRight", 0), get_coord("upperRight", 0), get_coord("lowerLeft", 0)]
-            all_y = [get_coord("upperLeft", 1), get_coord("lowerRight", 1), get_coord("upperRight", 1), get_coord("lowerLeft", 1)]
-            
-            return {
-                "north": max(all_y), 
-                "south": min(all_y), 
-                "east": max(all_x), 
-                "west": min(all_x)
-            }
-        except:
-            return {"north": 0, "south": 0, "east": 0, "west": 0}
-
-    def _tile_png_rgba_transparent(self):
-        img = Image.new("RGBA", (256, 256), (0, 0, 0, 0))
-        buf = BytesIO()
-        img.save(buf, format="PNG")
-        buf.seek(0)
-        response = make_response(buf.read())
+        content = self.ortho_service.proxy_tile(ortho_id, z, x, y)
+        if not content:
+             return jsonify({"error": "Failed"}), 404
+             
+        response = make_response(content)
         response.headers.set("Content-Type", "image/png")
+        response.headers.set("Cache-Control", "public, max-age=3600")
         return response
 
-# Регистрация роутов
+    def get_task_status(self, task_id):
+        state = self.task_service.get_state(task_id)
+        if not state:
+            return jsonify({"status": "not_found"}), 404
+        return jsonify(state), 200
+
+# Регистрация
 OrthoController.register_routes(ortho_blueprint)

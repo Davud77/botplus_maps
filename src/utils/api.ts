@@ -51,8 +51,23 @@ export interface OrthoItem {
     east: number;
     west: number;
   } | null;
-  crs?: string;        // [NEW] Система координат (например, "EPSG:3857")
-  upload_date?: string; // [NEW] Дата загрузки
+  crs?: string;        
+  upload_date?: string;
+  is_visible?: boolean; // [NEW] Видимость слоя
+}
+
+// [NEW] Тип ответа при запуске длительной задачи
+export interface TaskStartResponse {
+  task_id: string;
+  status: "started";
+}
+
+// [NEW] Тип статуса задачи
+export interface TaskStatusResponse {
+  status: "pending" | "processing" | "success" | "error";
+  progress: number;
+  result?: any;
+  error?: string;
 }
 
 // Векторные слои
@@ -233,7 +248,6 @@ export async function fetchOrthophotos(): Promise<OrthoItem[]> {
 }
 
 // [NEW] Специальная функция для загрузки ортофотопланов
-// Использует правильный endpoint /api/upload_ortho
 export async function uploadOrthoFiles<T = any>(formData: FormData): Promise<T> {
   const url = `${API_BASE}/api/upload_ortho`;
   const res = await fetch(url, {
@@ -244,9 +258,24 @@ export async function uploadOrthoFiles<T = any>(formData: FormData): Promise<T> 
   return handleResponse<T>(res, url);
 }
 
-// [NEW] Перепроецирование ортофотоплана (конвертация в Google Maps / Web Mercator)
-export async function reprojectOrtho(id: number): Promise<ApiOk> {
-  return apiPost<ApiOk>(`/api/orthophotos/${id}/reproject`);
+// [NEW] Обновление свойств ортофотоплана (например, is_visible)
+export async function updateOrtho(id: number, data: Partial<OrthoItem>): Promise<ApiOk> {
+  return apiPut<ApiOk>(`/api/orthophotos/${id}`, data);
+}
+
+// [NEW] Получение статуса задачи
+export async function getTaskStatus(taskId: string): Promise<TaskStatusResponse> {
+  return apiGet<TaskStatusResponse>(`/api/tasks/${taskId}`);
+}
+
+// [NEW] Перепроецирование (теперь возвращает Task ID)
+export async function reprojectOrtho(id: number): Promise<TaskStartResponse> {
+  return apiPost<TaskStartResponse>(`/api/orthophotos/${id}/reproject`);
+}
+
+// [NEW] Оптимизация COG (теперь возвращает Task ID)
+export async function processOrthoCog(id: number): Promise<TaskStartResponse> {
+  return apiPost<TaskStartResponse>(`/api/orthophotos/${id}/process`);
 }
 
 export async function deleteOrtho(id: number): Promise<ApiOk> {
