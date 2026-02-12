@@ -36,16 +36,6 @@ const ProfileOverview: FC<ProfileOverviewProps> = ({ user, onLogout }) => {
             <div className="info-value">davud</div>
           </div>
         </div>
-
-        <div className="section">
-          <h3>Последние действия</h3>
-          <div className="activity-list">
-            <div className="activity-item">
-              <div className="activity-date">2024-02-15 14:30</div>
-              <div className="activity-text">Загружена панорама "city_center_01"</div>
-            </div>
-          </div>
-        </div>
       </div>
     </div>
   );

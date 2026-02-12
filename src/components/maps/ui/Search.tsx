@@ -30,7 +30,6 @@ const Search: React.FC<SearchProps> = ({ handleSearch, isExpanded, setIsExpanded
         onChange={handleSearchChange}
         placeholder="Поиск по координатам"
         className="search-input"
-        style={{ textAlign: 'center' }}
       />
       <button onClick={handleButtonClick} className="search-button">
         <svg

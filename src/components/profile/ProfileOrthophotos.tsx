@@ -396,10 +396,7 @@ const ProfileOrthophotos: FC = () => {
       <div className="table-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap' }}>
         
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-            {/* Счетчик выделенных */}
-            <span style={{ fontSize: '0.9em', fontWeight: 'bold', marginRight: '5px', minWidth: '80px' }}>
-                {selectedIds.length > 0 ? `Выбрано: ${selectedIds.length}` : 'Выберите элементы'}
-            </span>
+
 
             {/* Кнопки действий */}
             <button 
@@ -450,7 +447,6 @@ const ProfileOrthophotos: FC = () => {
             
             <button 
                 className="secondary-button"
-                style={{ color: selectedIds.length > 0 && !isProcessing ? 'red' : 'inherit', borderColor: selectedIds.length > 0 && !isProcessing ? 'red' : 'inherit' }}
                 onClick={handleBulkDelete}
                 disabled={selectedIds.length === 0 || isProcessing}
                 title="Удалить"
@@ -467,7 +463,7 @@ const ProfileOrthophotos: FC = () => {
                 disabled={loadingOrthos || isProcessing}
                 title="Обновить список из БД"
             >
-                {loadingOrthos ? '⏳' : '↻ Обновить'}
+                {loadingOrthos ? '⏳' : 'Обновить'}
             </button>
             
             <Link to="/uploadortho">
@@ -608,6 +604,11 @@ const ProfileOrthophotos: FC = () => {
             </table>
         </div>
       )}
+
+                  {/* Счетчик выделенных */}
+            <span style={{ fontSize: '0.9em', fontWeight: 'bold', marginRight: '5px', minWidth: '80px' }}>
+                {selectedIds.length > 0 ? `Выбрано: ${selectedIds.length}` : 'Выберите элементы'}
+            </span>
 
       {/* 3. ПАНЕЛЬ ЛОГОВ */}
       <div style={logStyles.container}>

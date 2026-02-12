@@ -8,9 +8,8 @@ import ProfileOverview from './profile/ProfileOverview';
 import ProfileVector from './profile/ProfileVector';
 import ProfilePanoramas from './profile/ProfilePanoramas';
 import ProfileOrthophotos from './profile/ProfileOrthophotos';
-import ProfileDashboard from './profile/ProfileDashboard';
 
-type TabType = 'overview' | 'vector' | 'panoramas' | 'ortho' | 'dashboard';
+type TabType = 'overview' | 'vector' | 'panoramas' | 'ortho';
 
 const ProfilePage: FC = () => {
   const navigate = useNavigate();
@@ -26,7 +25,7 @@ const ProfilePage: FC = () => {
     <div className="background">
       <Header />
       <div className="profile-page">
-        <div className="navigation-tabs">
+        <div className="navigation-tabs header-box">
           <button className={`tab-button ${activeTab === 'overview' ? 'active' : ''}`} onClick={() => setActiveTab('overview')}>
             Обзор
           </button>
@@ -39,9 +38,6 @@ const ProfilePage: FC = () => {
           <button className={`tab-button ${activeTab === 'ortho' ? 'active' : ''}`} onClick={() => setActiveTab('ortho')}>
             Ортофотопланы
           </button>
-          <button className={`tab-button ${activeTab === 'dashboard' ? 'active' : ''}`} onClick={() => setActiveTab('dashboard')}>
-            Дашборд
-          </button>
         </div>
 
         <div className="tab-content">
@@ -49,7 +45,6 @@ const ProfilePage: FC = () => {
           {activeTab === 'vector' && <ProfileVector />}
           {activeTab === 'panoramas' && <ProfilePanoramas />}
           {activeTab === 'ortho' && <ProfileOrthophotos />}
-          {activeTab === 'dashboard' && <ProfileDashboard />}
         </div>
       </div>
     </div>
