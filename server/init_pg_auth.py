@@ -45,7 +45,6 @@ def init_auth_db():
         """)
         
         # 3. Создаем таблицу ортофотографий (ortholist)
-        # INTEGER PRIMARY KEY AUTOINCREMENT заменен на SERIAL PRIMARY KEY для PostgreSQL
         print("Creating table 'ortholist'...")
         cur.execute("""
             CREATE TABLE IF NOT EXISTS ortholist (
@@ -55,21 +54,29 @@ def init_auth_db():
             );
         """)
         
-        # 4. Создаем дефолтного администратора (admin/admin)
-        cur.execute("SELECT id FROM users WHERE username = %s", ('admin',))
+        # 4. Создаем дефолтного администратора
+        # Получаем данные из .env, если их нет — используем безопасные fallback-значения
+        admin_username = os.environ.get("DEFAULT_ADMIN_USERNAME", "admin")
+        admin_password = os.environ.get("DEFAULT_ADMIN_PASSWORD", "change_me_please")
+        
+        cur.execute("SELECT id FROM users WHERE username = %s", (admin_username,))
         if not cur.fetchone():
-            print("Creating user 'admin'...")
-            pw_hash = generate_password_hash("admin") 
-            cur.execute("INSERT INTO users (username, password) VALUES (%s, %s)", ('admin', pw_hash))
-            print("User 'admin' created! Password: admin")
+            print(f"Creating user '{admin_username}'...")
+            pw_hash = generate_password_hash(admin_password) 
+            cur.execute("INSERT INTO users (username, password) VALUES (%s, %s)", (admin_username, pw_hash))
+            print(f"User '{admin_username}' successfully created!")
             
-        # 5. Создаем дефолтного пользователя (user/password)
-        cur.execute("SELECT id FROM users WHERE username = %s", ('user',))
+        # 5. Создаем дефолтного обычного пользователя
+        # Получаем данные из .env, если их нет — используем fallback-значения
+        user_username = os.environ.get("DEFAULT_USER_USERNAME", "user")
+        user_password = os.environ.get("DEFAULT_USER_PASSWORD", "password")
+        
+        cur.execute("SELECT id FROM users WHERE username = %s", (user_username,))
         if not cur.fetchone():
-            print("Creating user 'user'...")
-            user_pw_hash = generate_password_hash("password")
-            cur.execute("INSERT INTO users (username, password) VALUES (%s, %s)", ('user', user_pw_hash))
-            print("User 'user' created! Password: password")
+            print(f"Creating user '{user_username}'...")
+            user_pw_hash = generate_password_hash(user_password)
+            cur.execute("INSERT INTO users (username, password) VALUES (%s, %s)", (user_username, user_pw_hash))
+            print(f"User '{user_username}' successfully created!")
         
         conn.commit()
         cur.close()

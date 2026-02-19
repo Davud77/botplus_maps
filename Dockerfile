@@ -52,6 +52,8 @@ RUN python -m pip install --upgrade pip setuptools wheel \
 RUN pip install --no-cache-dir GDAL==$(gdal-config --version)
 
 # Код бэкенда
+# ВАЖНО: Убедитесь, что файл entrypoint.sh лежит в папке server на вашем компьютере, 
+# чтобы он скопировался внутрь контейнера вместе с остальным кодом.
 COPY server ./server
 
 # Публичные файлы и сборка фронта
@@ -64,6 +66,11 @@ RUN mkdir -p /app/data /app/server/uploads /app/server/data/temp
 # Создаем непривилегированного пользователя
 RUN useradd -u 10001 -m appuser
 
+# --- НОВЫЕ СТРОКИ ДЛЯ ENTRYPOINT ---
+# Делаем скрипт исполняемым до того, как сменим права
+RUN chmod +x /app/server/entrypoint.sh
+# -----------------------------------
+
 # Отдаем пользователю appuser права на ВСЮ папку /app
 # Это гарантирует, что Flask/Gunicorn смогут создавать любые вложенные папки
 RUN chown -R appuser:appuser /app
@@ -72,4 +79,10 @@ RUN chown -R appuser:appuser /app
 USER appuser
 
 EXPOSE 5000
+
+# --- НОВЫЕ СТРОКИ ДЛЯ ENTRYPOINT ---
+# Указываем скрипт инициализации как главную точку входа
+ENTRYPOINT ["/app/server/entrypoint.sh"]
+# -----------------------------------
+
 CMD ["python", "server/app.py"]
