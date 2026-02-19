@@ -77,7 +77,7 @@ const UploadPano: React.FC = () => {
 
     try {
       // [FIX] Используем исправленный API_URL
-      const response = await fetch(`${API_URL}/upload`, {
+      const response = await fetch(`${API_URL}/api/upload`, {
         method: 'POST',
         body: formData,
       });
