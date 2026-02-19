@@ -500,7 +500,8 @@ const ProfileOrthophotos: FC = () => {
                 <th>Название</th>
                 <th>Превью</th>
                 <th>Проекция (CRS)</th>
-                <th>Статус / Прогресс</th> {/* [UPDATED] */}
+                <th style={{ textAlign: 'center' }}>COG</th> {/* <--- ДОБАВЛЕНО ---> */}
+                <th>Статус / Прогресс</th>
                 <th>Границы (W, S, E, N)</th>
                 <th style={{ textAlign: 'center' }}>Видимость</th>
                 </tr>
@@ -552,6 +553,37 @@ const ProfileOrthophotos: FC = () => {
                             }}>
                             {ortho.crs || 'Не определено'}
                             </span>
+                        </td>
+
+                        {/* <--- ДОБАВЛЕНА ЯЧЕЙКА COG ---> */}
+                        <td style={{ textAlign: 'center' }}>
+                            {ortho.is_cog ? (
+                                <span style={{
+                                    display: 'inline-block',
+                                    background: '#e6fffa',
+                                    color: '#007a5e',
+                                    padding: '4px 8px',
+                                    borderRadius: '12px',
+                                    border: '1px solid #b7eb8f',
+                                    fontSize: '0.8em',
+                                    fontWeight: 500
+                                }}>
+                                    Да
+                                </span>
+                            ) : (
+                                <span style={{
+                                    display: 'inline-block',
+                                    background: '#fff0f6',
+                                    color: '#eb2f96',
+                                    padding: '4px 8px',
+                                    borderRadius: '12px',
+                                    border: '1px solid #ffadd2',
+                                    fontSize: '0.8em',
+                                    fontWeight: 500
+                                }}>
+                                    Нет
+                                </span>
+                            )}
                         </td>
 
                         {/* [MODIFIED] Колонка Статус / Прогресс */}

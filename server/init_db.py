@@ -26,25 +26,21 @@ def init_db():
             );
         """)
         
-        # Таблица панорам
+        # Таблица панорам (согласно структуре photos_4326 в PostgreSQL)
         cursor.execute("""
-            CREATE TABLE IF NOT EXISTS panolist (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                filename TEXT,
-                latitude REAL,
-                longitude REAL,
-                user_id INTEGER,
-                file_type TEXT,
-                file_size INTEGER,
-                full_pano_width_pixels INTEGER,
-                full_pano_height_pixels INTEGER,
-                first_photo_date TEXT,
-                model TEXT,
-                altitude REAL,
-                focal_length REAL,
-                tags TEXT,
-                upload_date TEXT,
-                FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+            CREATE TABLE IF NOT EXISTS public.photos_4326 (
+                id SERIAL PRIMARY KEY,
+                geom geometry(PointZ, 4326),
+                path VARCHAR,
+                filename VARCHAR,
+                directory VARCHAR,
+                altitude NUMERIC,
+                direction NUMERIC,
+                rotation INTEGER,
+                longitude VARCHAR,
+                latitude VARCHAR,
+                "timestamp" TIMESTAMP,
+                "order" INTEGER
             );
         """)
         

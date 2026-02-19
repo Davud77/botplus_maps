@@ -6,9 +6,18 @@ from pathlib import Path
 import os
 import re
 import config
+import time
+import random
+from werkzeug.security import generate_password_hash
 
-# Try to import blueprints. 
-# If a part (e.g. Auth or Vector) is not configured, the server will still start.
+# --- Database / Repository Imports ---
+try:
+    from repositories import user_repository
+except ImportError:
+    print("Warning: Could not import user_repository. Database operations might fail.")
+    user_repository = None
+
+# --- Blueprint Imports ---
 try:
     from controllers.auth_controller import auth_blueprint
 except Exception as e:
@@ -27,7 +36,6 @@ except Exception as e:
     print(f"Warning: Could not import ortho_blueprint. {e}")
     ortho_blueprint = None
 
-# New controller for Vector (PostGIS)
 try:
     from controllers.vector import vector_bp
 except Exception as e:
@@ -39,8 +47,16 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PUBLIC_DIR   = getattr(config, "PUBLIC_DIR", PROJECT_ROOT / "public")
 BUILD_DIR    = PUBLIC_DIR / "build"
 
+# --- Парсинг CORS из .env ---
+raw_origins = os.getenv("CLIENT_ORIGINS", getattr(config, "CLIENT_ORIGINS", ""))
+if isinstance(raw_origins, str):
+    # Разбиваем строку по запятым и убираем пробелы
+    client_origins_list = [o.strip() for o in raw_origins.split(",") if o.strip()]
+else:
+    client_origins_list = list(raw_origins)
+
 # Allowed CORS origins
-ALLOWED_ORIGINS = list(getattr(config, "CLIENT_ORIGINS", [])) + [re.compile(r"^https://.*\.botplus\.ru$")]
+ALLOWED_ORIGINS = client_origins_list + [re.compile(r"^https://.*\.botplus\.ru$")]
 
 def origin_allowed(origin: str | None) -> bool:
     if not origin:
@@ -54,23 +70,72 @@ def origin_allowed(origin: str | None) -> bool:
                 return True
     return False
 
+def ensure_default_admin():
+    """
+    Checks if the default admin user exists in the database.
+    If not, creates it using credentials from config/env.
+    """
+    if user_repository is None:
+        return
+
+    # Small random delay based on PID to desynchronize workers
+    time.sleep((os.getpid() % 10) * 0.2 + random.uniform(0.1, 0.5))
+
+    # Читаем креды администратора из .env (с фоллбэком)
+    username = os.getenv("DEFAULT_ADMIN_USERNAME", getattr(config, "DEFAULT_ADMIN_USERNAME", "admin"))
+    password = os.getenv("DEFAULT_ADMIN_PASSWORD", getattr(config, "DEFAULT_ADMIN_PASSWORD", "change_me_please"))
+
+    print(f"[Worker {os.getpid()}] Startup: Checking for default admin user '{username}'...")
+
+    try:
+        existing_user = user_repository.get_user_by_username(username)
+        
+        if existing_user:
+            print(f"[Worker {os.getpid()}] Startup: User '{username}' already exists. Skipping creation.")
+        else:
+            print(f"[Worker {os.getpid()}] Startup: User '{username}' not found. Creating...")
+            pw_hash = generate_password_hash(password)
+            new_id = user_repository.create_user(username, pw_hash)
+            
+            if new_id:
+                print(f"[Worker {os.getpid()}] Startup: User '{username}' successfully created (ID: {new_id}).")
+            else:
+                check_again = user_repository.get_user_by_username(username)
+                if check_again:
+                     print(f"[Worker {os.getpid()}] Startup: User '{username}' was created by another worker.")
+                else:
+                     print(f"[Worker {os.getpid()}] Startup: Failed to create user '{username}'. Check DB connection.")
+                
+    except Exception as e:
+        print(f"[Worker {os.getpid()}] Startup Warning: Could not verify/create admin. Error: {e}")
+
 def create_app():
-    # Disable default Flask static handling, we will serve it manually for SPA
     app = Flask(__name__, static_folder=None)
-    app.secret_key = config.SECRET_KEY
+    
+    # Читаем секретные ключи из .env
+    app.secret_key = os.getenv("SECRET_KEY", getattr(config, "SECRET_KEY", "fallback-secret-key"))
+
+    # --- Безопасный парсинг настроек Cookie из .env ---
+    cookie_secure_env = os.getenv("COOKIE_SECURE", getattr(config, "COOKIE_SECURE", "False"))
+    is_cookie_secure = str(cookie_secure_env).lower() in ("true", "1", "yes", "t")
+    
+    cookie_domain = os.getenv("SESSION_COOKIE_DOMAIN", getattr(config, "SESSION_COOKIE_DOMAIN", ""))
+    if not cookie_domain:  # Если пустая строка в .env, превращаем в None
+        cookie_domain = None
+
+    cookie_samesite = os.getenv("COOKIE_SAMESITE", getattr(config, "COOKIE_SAMESITE", "Lax"))
 
     # Cookie and limit settings
     app.config.update(
-        SESSION_COOKIE_DOMAIN=(config.SESSION_COOKIE_DOMAIN or None),
-        SESSION_COOKIE_SAMESITE=getattr(config, "COOKIE_SAMESITE", "Lax"),
-        SESSION_COOKIE_SECURE=getattr(config, "COOKIE_SECURE", False),
+        SESSION_COOKIE_DOMAIN=cookie_domain,
+        SESSION_COOKIE_SAMESITE=cookie_samesite,
+        SESSION_COOKIE_SECURE=is_cookie_secure,
         SESSION_COOKIE_HTTPONLY=True,
         JSON_AS_ASCII=False,
-        MAX_CONTENT_LENGTH= 4 * 1024 * 1024 * 1024,  # Upload limit 1 GB
+        MAX_CONTENT_LENGTH= 4 * 1024 * 1024 * 1024,  # Upload limit 4 GB
     )
 
     # ---------------- COMPRESSION SETTINGS (GZIP) ----------------
-    # Critical for vector tiles (.pbf) and large JSON responses
     app.config['COMPRESS_MIMETYPES'] = [
         'text/html', 
         'text/css', 
@@ -85,7 +150,6 @@ def create_app():
     Compress(app)
 
     # ---------------- CORS ----------------
-    # Allow requests only to API
     CORS(
         app,
         resources={r"/api/*": {"origins": ALLOWED_ORIGINS}},
@@ -116,29 +180,22 @@ def create_app():
         return make_response("", 204)
 
     # ---------------- API REGISTRATION (Routing) ----------------
-    # Important: add url_prefix="/api" everywhere so the frontend can access
-    # via /api/orthophotos, /api/panoramas etc.
-    
-    # 1. Auth (Authorization)
     if auth_blueprint:
         app.register_blueprint(auth_blueprint, url_prefix="/api/auth")
     
-    # 2. Vector / PostGIS (Vector data)
     if vector_bp:
         app.register_blueprint(vector_bp, url_prefix="/api")
 
-    # 3. Pano (Panoramas)
     if pano_blueprint:
         app.register_blueprint(pano_blueprint, url_prefix="/api")
     
-    # 4. Ortho (Orthophotos)
     if ortho_blueprint:
         app.register_blueprint(ortho_blueprint, url_prefix="/api")
 
     # API Health Check
     @app.get("/api/health")
     def health():
-        return jsonify({"ok": True, "db": "postgres"})
+        return jsonify({"ok": True, "db": "postgres", "env": os.getenv("APP_ENV", "unknown")})
 
     # ---------------- STATIC SERVING (Frontend / SPA) ----------------
     
@@ -174,7 +231,6 @@ def create_app():
             return send_from_directory(public_assets, filename, conditional=True)
         return ("Not Found", 404)
 
-    # Fallback to index.html for SPA (any unknown path returns React app)
     @app.route("/", defaults={"path": ""})
     @app.route("/<path:path>")
     def spa_fallback(path: str):
@@ -192,9 +248,15 @@ def create_app():
             }, 500
         return send_from_directory(index_file.parent, index_file.name, conditional=True)
 
+    # --- INITIALIZATION CHECKS ---
+    with app.app_context():
+        # Only run admin ensure if not in a pure static context (optional, but safe)
+        ensure_default_admin()
+
     return app
 
 if __name__ == "__main__":
     application = create_app()
-    # Run on all interfaces (0.0.0.0) so Docker can forward the port
-    application.run(host="0.0.0.0", port=5000, debug=True)
+    # Read port from env, fallback to 5000
+    port = int(os.getenv("APP_PORT", 5000))
+    application.run(host="0.0.0.0", port=port, debug=(os.getenv("APP_ENV") == "development"))

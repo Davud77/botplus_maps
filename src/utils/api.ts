@@ -52,6 +52,7 @@ export interface OrthoItem {
     west: number;
   } | null;
   crs?: string;        
+  is_cog?: boolean; // [NEW] Статус COG
   upload_date?: string;
   is_visible?: boolean; // [NEW] Видимость слоя
 }

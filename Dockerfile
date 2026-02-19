@@ -25,30 +25,31 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1
 
 # Установка системных зависимостей
-# libpq-dev нужен для psycopg2 (PostgreSQL)
-# gdal-bin и libgdal-dev нужны только если вы используете GeoDjango или сложные гео-библиотеки.
-# Для простого PostGIS через SQLAlchemy они обычно НЕ нужны, но я оставил их, чтобы не сломать вашу логику.
+# gdal-bin и libgdal-dev нужны для работы сервиса ортофотопланов
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     gdal-bin \
     libgdal-dev \
-    python3-gdal \
     gcc \
+    g++ \
     ca-certificates \
     curl \
     libpq-dev \ 
  && rm -rf /var/lib/apt/lists/*
 
+# Обязательные переменные окружения для компиляции Python-пакета GDAL
+ENV CPLUS_INCLUDE_PATH=/usr/include/gdal
+ENV C_INCLUDE_PATH=/usr/include/gdal
+
 WORKDIR /app
 
-# Python зависимости
-# ВАЖНО: В server/requirements.txt должны быть добавлены:
-# minio
-# psycopg2-binary
-# GeoAlchemy2 (опционально, но удобно для PostGIS)
+# Копируем requirements и устанавливаем их
 COPY server/requirements.txt ./server/requirements.txt
 RUN python -m pip install --upgrade pip setuptools wheel \
  && pip install --no-cache-dir -r server/requirements.txt
+
+# Устанавливаем Python-пакет GDAL строго той версии, которая стоит в системе
+RUN pip install --no-cache-dir GDAL==$(gdal-config --version)
 
 # Код бэкенда
 COPY server ./server
@@ -57,14 +58,17 @@ COPY server ./server
 COPY public ./public
 COPY --from=ui /ui/build ./public/build
 
-# Создаем папки для работы
-RUN mkdir -p /app/data /app/server/uploads
+# Создаем базовые папки (с запасом под разные пути из конфигов)
+RUN mkdir -p /app/data /app/server/uploads /app/server/data/temp
 
-# Создаем пользователя
+# Создаем непривилегированного пользователя
 RUN useradd -u 10001 -m appuser
-# Меняем владельца папок, чтобы appuser мог в них писать
-RUN chown -R appuser:appuser /app/data /app/server/uploads
 
+# Отдаем пользователю appuser права на ВСЮ папку /app
+# Это гарантирует, что Flask/Gunicorn смогут создавать любые вложенные папки
+RUN chown -R appuser:appuser /app
+
+# Переключаемся на безопасного пользователя
 USER appuser
 
 EXPOSE 5000

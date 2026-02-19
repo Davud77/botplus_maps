@@ -1335,10 +1335,7 @@ h3 { margin: 0; color: var(--color-text); }
  /* UploadOrtho.css */
 
 /* ... (contend, tag-container, mini, mini_pano, mini_header, functions, buttons - без изменений) ... */
-.contend { /* ... */ }
-.tag-container { /* ... */ }
-.mini { /* ... */ }
-.mini_pano { /* ... */ }
+
 .mini_pano.dragging {
   border-color: #2196f3;
   background-color: rgba(33, 150, 243, 0.05);

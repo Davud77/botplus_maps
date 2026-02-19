@@ -23,9 +23,12 @@ pano_blueprint = Blueprint("pano", __name__)
 
 class PanoController:
     def __init__(self):
-        # [FIX] Use centralized Database class (connects via pgbouncer)
+        # Use centralized Database class (connects via pgbouncer)
         self.db = Database()
         self.storage = MinioStorage()
+        
+        # Гарантируем, что таблица photos_4326 существует!
+        self._ensure_table()
         
         # Ensure bucket exists
         if self.storage.client:
@@ -34,6 +37,34 @@ class PanoController:
                     self.storage.client.make_bucket("panoramas")
             except Exception as e:
                 logger.warning(f"MinIO bucket warning: {e}")
+
+    def _ensure_table(self):
+        """Создает таблицу photos_4326 точно как на скриншоте, если ее нет"""
+        try:
+            cursor = self.db.get_cursor()
+            query = """
+                CREATE TABLE IF NOT EXISTS public.photos_4326 (
+                    id SERIAL PRIMARY KEY,
+                    geom geometry(PointZ, 4326),
+                    path VARCHAR,
+                    filename VARCHAR,
+                    directory VARCHAR,
+                    altitude NUMERIC,
+                    direction NUMERIC,
+                    rotation INTEGER,
+                    longitude VARCHAR,
+                    latitude VARCHAR,
+                    "timestamp" TIMESTAMP,
+                    "order" INTEGER
+                );
+            """
+            cursor.execute(query)
+            self.db.commit()
+            logger.info("Table photos_4326 is ready.")
+        except Exception as e:
+            logger.warning(f"Could not initialize photos_4326: {e}")
+            if self.db.connection:
+                self.db.connection.rollback()
 
     @staticmethod
     def register_routes(blueprint):
@@ -69,7 +100,6 @@ class PanoController:
             west = request.args.get('west', type=float)
             limit = request.args.get('limit', type=int, default=5000)
 
-            # [FIX] Use self.db.get_cursor()
             cursor = self.db.get_cursor()
 
             # 2. Build Query
@@ -78,13 +108,14 @@ class PanoController:
                 query = """
                     SELECT 
                         id, 
-                        latitude::float, 
-                        longitude::float, 
+                        NULLIF(latitude, '')::float AS latitude, 
+                        NULLIF(longitude, '')::float AS longitude, 
                         filename, 
                         directory,
                         "timestamp"
                     FROM public.photos_4326
                     WHERE geom && ST_MakeEnvelope(%s, %s, %s, %s, 4326)
+                    ORDER BY id DESC
                     LIMIT %s
                 """
                 params = (west, south, east, north, limit)
@@ -93,8 +124,8 @@ class PanoController:
                 query = """
                     SELECT 
                         id, 
-                        latitude::float, 
-                        longitude::float, 
+                        NULLIF(latitude, '')::float AS latitude, 
+                        NULLIF(longitude, '')::float AS longitude, 
                         filename, 
                         directory,
                         "timestamp"
@@ -126,8 +157,8 @@ class PanoController:
                 ts = res.get("timestamp")
                 results.append({
                     "id": res["id"],
-                    "latitude": res["latitude"],
-                    "longitude": res["longitude"],
+                    "latitude": res["latitude"] if res["latitude"] is not None else 0,
+                    "longitude": res["longitude"] if res["longitude"] is not None else 0,
                     "filename": res["filename"],
                     "directory": res["directory"],
                     "timestamp": ts.isoformat() if ts else None
@@ -315,12 +346,12 @@ class PanoController:
             INSERT INTO public.photos_4326 (
                 geom, path, filename, directory, 
                 altitude, direction, rotation, 
-                longitude, latitude, "timestamp"
+                longitude, latitude, "timestamp", "order"
             ) VALUES (
                 ST_SetSRID(ST_MakePoint(%s, %s, %s), 4326),
                 %s, %s, 'panoramas', 
                 %s, %s, 0, 
-                %s, %s, %s
+                %s, %s, %s, 0
             )
         """
         values = (

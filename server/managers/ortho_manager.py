@@ -13,7 +13,6 @@ class OrthoManager:
         cursor = self.db.get_cursor()
         
         # 1. Создание таблицы (если нет)
-        # Добавляем is_visible в определение новой таблицы
         query_create = """
         CREATE TABLE IF NOT EXISTS orthophotos (
             id SERIAL PRIMARY KEY,
@@ -22,7 +21,8 @@ class OrthoManager:
             url TEXT,
             upload_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             crs TEXT,
-            is_visible BOOLEAN DEFAULT FALSE
+            is_visible BOOLEAN DEFAULT FALSE,
+            is_cog BOOLEAN DEFAULT FALSE
         )
         """
         try:
@@ -33,7 +33,9 @@ class OrthoManager:
             if self.db.connection:
                 self.db.connection.rollback()
 
-        # 2. МИГРАЦИЯ: Добавляем колонку CRS, если её нет
+        # --- МИГРАЦИИ (Добавление колонок в существующую таблицу) ---
+
+        # 2. CRS
         try:
             query_migrate_crs = "ALTER TABLE orthophotos ADD COLUMN IF NOT EXISTS crs TEXT;"
             cursor.execute(query_migrate_crs)
@@ -43,7 +45,7 @@ class OrthoManager:
             if self.db.connection:
                 self.db.connection.rollback()
 
-        # 3. МИГРАЦИЯ: Добавляем колонку is_visible, если её нет
+        # 3. is_visible
         try:
             query_migrate_vis = "ALTER TABLE orthophotos ADD COLUMN IF NOT EXISTS is_visible BOOLEAN DEFAULT FALSE;"
             cursor.execute(query_migrate_vis)
@@ -53,16 +55,39 @@ class OrthoManager:
             if self.db.connection:
                 self.db.connection.rollback()
 
+        # 4. is_cog (Cloud Optimized GeoTIFF)
+        try:
+            query_migrate_cog = "ALTER TABLE orthophotos ADD COLUMN IF NOT EXISTS is_cog BOOLEAN DEFAULT FALSE;"
+            cursor.execute(query_migrate_cog)
+            self.db.commit()
+        except Exception as e:
+            print(f"Migration warning (adding is_cog column): {e}")
+            if self.db.connection:
+                self.db.connection.rollback()
+
+        # 5. Geometry (PostGIS MultiPolygon)
+        try:
+            # Пытаемся добавить поле geometry. 
+            # Требует установленного PostGIS (CREATE EXTENSION postgis;) в базе.
+            query_migrate_geom = "ALTER TABLE orthophotos ADD COLUMN IF NOT EXISTS geometry geometry(MultiPolygon, 4326);"
+            cursor.execute(query_migrate_geom)
+            self.db.commit()
+        except Exception as e:
+            print(f"Migration warning (adding geometry column): {e}. Make sure PostGIS extension is enabled.")
+            if self.db.connection:
+                self.db.connection.rollback()
+
     def get_all_orthos(self):
         try:
             cursor = self.db.get_cursor()
-            # [UPDATED] Добавляем is_visible в выборку
-            query = "SELECT id, filename, bounds, url, crs, upload_date, is_visible FROM orthophotos ORDER BY id DESC"
+            # [UPDATED] Добавляем is_cog в выборку
+            query = "SELECT id, filename, bounds, url, crs, upload_date, is_visible, is_cog FROM orthophotos ORDER BY id DESC"
             cursor.execute(query)
             rows = cursor.fetchall()
             
             orthos = []
             for row in rows:
+                # Обработка разных типов курсоров (DictCursor vs TupleCursor)
                 if isinstance(row, dict):
                     r_id = row["id"]
                     r_name = row["filename"]
@@ -71,6 +96,7 @@ class OrthoManager:
                     r_crs = row.get("crs")
                     r_date = row["upload_date"]
                     r_vis = row.get("is_visible", False)
+                    r_cog = row.get("is_cog", False) # [NEW]
                 else:
                     r_id = row[0]
                     r_name = row[1]
@@ -79,6 +105,7 @@ class OrthoManager:
                     r_crs = row[4] if len(row) > 4 else None
                     r_date = row[5] if len(row) > 5 else None
                     r_vis = row[6] if len(row) > 6 else False
+                    r_cog = row[7] if len(row) > 7 else False # [NEW]
 
                 ortho = Ortho(
                     filename=r_name,
@@ -87,7 +114,8 @@ class OrthoManager:
                     ortho_id=r_id,
                     upload_date=r_date,
                     crs=r_crs,
-                    is_visible=r_vis  # [UPDATED] Передаем видимость
+                    is_visible=r_vis,
+                    is_cog=r_cog # [NEW]
                 )
                 orthos.append(ortho)
                 
@@ -100,8 +128,8 @@ class OrthoManager:
     def get_ortho_by_id(self, ortho_id):
         try:
             cursor = self.db.get_cursor()
-            # [UPDATED] Добавляем is_visible в выборку
-            query = "SELECT id, filename, bounds, url, crs, upload_date, is_visible FROM orthophotos WHERE id = %s"
+            # [UPDATED] Добавляем is_cog
+            query = "SELECT id, filename, bounds, url, crs, upload_date, is_visible, is_cog FROM orthophotos WHERE id = %s"
             cursor.execute(query, (ortho_id,))
             row = cursor.fetchone()
             
@@ -114,6 +142,7 @@ class OrthoManager:
                     r_crs = row.get("crs")
                     r_date = row["upload_date"]
                     r_vis = row.get("is_visible", False)
+                    r_cog = row.get("is_cog", False) # [NEW]
                 else:
                     r_id = row[0]
                     r_name = row[1]
@@ -122,6 +151,7 @@ class OrthoManager:
                     r_crs = row[4] if len(row) > 4 else None
                     r_date = row[5] if len(row) > 5 else None
                     r_vis = row[6] if len(row) > 6 else False
+                    r_cog = row[7] if len(row) > 7 else False # [NEW]
 
                 ortho = Ortho(
                     filename=r_name,
@@ -130,7 +160,8 @@ class OrthoManager:
                     ortho_id=r_id,
                     upload_date=r_date,
                     crs=r_crs,
-                    is_visible=r_vis  # [UPDATED]
+                    is_visible=r_vis,
+                    is_cog=r_cog # [NEW]
                 )
                 return ortho
             return None
@@ -145,17 +176,29 @@ class OrthoManager:
             
             crs_val = getattr(ortho, 'crs', None)
             url_val = getattr(ortho, 'url', None)
-            # [UPDATED] Получаем is_visible (по умолчанию False)
             vis_val = getattr(ortho, 'is_visible', False)
-
-            # [UPDATED] Добавляем is_visible в INSERT
-            query = """
-                INSERT INTO orthophotos (filename, bounds, url, crs, is_visible)
-                VALUES (%s, %s, %s, %s, %s)
-                RETURNING id
-            """
             
-            cursor.execute(query, (ortho.filename, ortho.bounds, url_val, crs_val, vis_val))
+            # [NEW] Извлекаем новые поля из объекта
+            cog_val = getattr(ortho, 'is_cog', False)
+            geom_wkt = getattr(ortho, 'geometry_wkt', None) # Временное поле в модели
+
+            # [UPDATED] Логика вставки
+            # Если передана геометрия (WKT), используем PostGIS функцию ST_Multi(ST_GeomFromText(..., 4326))
+            if geom_wkt:
+                query = """
+                    INSERT INTO orthophotos (filename, bounds, url, crs, is_visible, is_cog, geometry)
+                    VALUES (%s, %s, %s, %s, %s, %s, ST_Multi(ST_GeomFromText(%s, 4326)))
+                    RETURNING id
+                """
+                cursor.execute(query, (ortho.filename, ortho.bounds, url_val, crs_val, vis_val, cog_val, geom_wkt))
+            else:
+                # Если геометрии нет, вставляем без неё (будет NULL)
+                query = """
+                    INSERT INTO orthophotos (filename, bounds, url, crs, is_visible, is_cog)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    RETURNING id
+                """
+                cursor.execute(query, (ortho.filename, ortho.bounds, url_val, crs_val, vis_val, cog_val))
             
             row = cursor.fetchone()
             if isinstance(row, dict):
@@ -180,8 +223,8 @@ class OrthoManager:
             set_clause = []
             values = []
             for field, value in updated_fields.items():
-                # [UPDATED] Добавляем 'is_visible' в список разрешенных полей
-                if field in ['filename', 'bounds', 'url', 'crs', 'is_visible']:
+                # [UPDATED] Добавляем 'is_cog' в список разрешенных полей
+                if field in ['filename', 'bounds', 'url', 'crs', 'is_visible', 'is_cog']:
                     set_clause.append(f"{field} = %s")
                     values.append(value)
 

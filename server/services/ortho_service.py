@@ -46,6 +46,7 @@ class OrthoService:
                 "bounds": b if b else {"north": 0, "south": 0, "east": 0, "west": 0},
                 "crs": crs_val,
                 "is_visible": getattr(o, 'is_visible', False),
+                "is_cog": getattr(o, 'is_cog', False), # [NEW]
                 "upload_date": str(o.upload_date) if hasattr(o, 'upload_date') else None
             })
         return results
@@ -71,19 +72,31 @@ class OrthoService:
                 
                 logs.append("Файл сохранен на диск (streaming save).")
                 
+                # 1. Сбор метаданных
                 bounds = self.gdal.get_bounds(input_path)
                 crs = self.gdal.get_crs(input_path)
-                logs.append(f"Границы: {bounds}, CRS: {crs}")
+                
+                # [NEW] Проверка COG и генерация WKT геометрии
+                is_cog = self.gdal.check_is_cog(input_path)
+                footprint_wkt = self.gdal.get_footprint_wkt(input_path)
+                
+                logs.append(f"Границы: {bounds}, CRS: {crs}, COG: {is_cog}")
 
+                # 2. Создание объекта модели
                 ortho_obj = Ortho(
                     filename=filename, 
                     bounds=json.dumps(bounds),
                     url=None,
                     is_visible=False,
-                    crs=crs
+                    crs=crs,
+                    is_cog=is_cog,             # [NEW]
+                    geometry_wkt=footprint_wkt # [NEW]
                 )
+                
+                # 3. Запись в БД
                 ortho_id = self.manager.insert_ortho(ortho_obj)
                 
+                # 4. Загрузка в S3/MinIO
                 if self.storage.upload_file(filename, input_path):
                     logs.append("Файл загружен в MinIO")
                     if os.path.exists(input_path): os.remove(input_path)
@@ -103,10 +116,6 @@ class OrthoService:
     def start_cog_process(self, ortho_id):
         """
         Конвертация в COG.
-        Настройки приведены в соответствие с GeoTiff3_COG.py:
-        - BIGTIFF=IF_NEEDED (Исправляет ошибку размера)
-        - COMPRESS=NONE (Отключает сжатие)
-        - RESAMPLING=CUBIC (Улучшает качество)
         """
         ortho = self.manager.get_ortho_by_id(ortho_id)
         if not ortho: return None
@@ -126,23 +135,35 @@ class OrthoService:
                 new_filename = f"{name_part}_v2.tif" if "_cog" in name_part else f"{name_part}_cog.tif"
                 cog_path = os.path.join(self.temp_dir, new_filename)
 
-                # [FIX] Настройки из твоего скрипта GeoTiff3_COG.py
                 cmd = [
                     "gdal_translate", local_path, cog_path,
                     "-of", "COG", 
-                    "-co", "BIGTIFF=IF_NEEDED",     # <-- РЕШАЕТ ПРОБЛЕМУ "Maximum TIFF file size exceeded"
-                    "-co", "COMPRESS=NONE",         # <-- Отключаем сжатие, как просил
+                    "-co", "BIGTIFF=IF_NEEDED",
+                    "-co", "COMPRESS=NONE",
                     "-co", "NUM_THREADS=ALL_CPUS", 
                     "-co", "OVERVIEWS=IGNORE_EXISTING",
-                    "-co", "RESAMPLING=CUBIC",      # <-- Более качественное сглаживание
-                    "-co", "SPARSE_OK=TRUE"         # <-- Экономит место, если есть пустые области
+                    "-co", "RESAMPLING=CUBIC",
+                    "-co", "SPARSE_OK=TRUE"
                 ]
 
                 def on_success():
                     self.storage.upload_file(new_filename, cog_path)
                     bounds = self.gdal.get_bounds(cog_path)
                     crs = self.gdal.get_crs(cog_path)
-                    new_ortho = Ortho(filename=new_filename, bounds=json.dumps(bounds), url=None, crs=crs, is_visible=False)
+                    
+                    # [NEW] Проверяем получившийся файл
+                    is_cog = self.gdal.check_is_cog(cog_path)
+                    geom_wkt = self.gdal.get_footprint_wkt(cog_path)
+                    
+                    new_ortho = Ortho(
+                        filename=new_filename, 
+                        bounds=json.dumps(bounds), 
+                        url=None, 
+                        crs=crs, 
+                        is_visible=False,
+                        is_cog=is_cog,          # [NEW]
+                        geometry_wkt=geom_wkt   # [NEW]
+                    )
                     new_id = self.manager.insert_ortho(new_ortho)
                     return {"new_id": new_id, "new_filename": new_filename}
 
@@ -157,7 +178,6 @@ class OrthoService:
     def start_reproject_process(self, ortho_id):
         """
         Перепроецирование в Web Mercator.
-        Также применяем настройки BIGTIFF и CUBIC.
         """
         ortho = self.manager.get_ortho_by_id(ortho_id)
         if not ortho: return None
@@ -182,14 +202,13 @@ class OrthoService:
                     try: os.remove(output_path)
                     except: pass
 
-                # [FIX] Настройки GDAL Warp для больших файлов
                 cmd = [
                     "gdalwarp", 
                     "-t_srs", "EPSG:3857", 
-                    "-r", "cubic",                  # <-- Используем cubic вместо билинейного (лучше качество)
+                    "-r", "cubic",
                     "-of", "COG",
-                    "-co", "BIGTIFF=IF_NEEDED",     # <-- РЕШАЕТ ПРОБЛЕМУ
-                    "-co", "COMPRESS=NONE",         # <-- Без сжатия
+                    "-co", "BIGTIFF=IF_NEEDED",
+                    "-co", "COMPRESS=NONE",
                     "-co", "NUM_THREADS=ALL_CPUS",
                     "-co", "SPARSE_OK=TRUE",
                     "-overwrite", local_path, output_path
@@ -198,9 +217,20 @@ class OrthoService:
                 def on_success():
                     self.storage.upload_file(new_filename, output_path)
                     new_bounds = self.gdal.get_bounds(output_path)
+                    
+                    # [NEW] Генерируем метаданные для репроецированного файла
+                    # is_cog будет True, так как мы использовали -of COG
+                    is_cog = self.gdal.check_is_cog(output_path)
+                    geom_wkt = self.gdal.get_footprint_wkt(output_path)
+                    
                     new_ortho = Ortho(
-                        filename=new_filename, bounds=json.dumps(new_bounds),
-                        url=None, crs="EPSG:3857", is_visible=False
+                        filename=new_filename, 
+                        bounds=json.dumps(new_bounds),
+                        url=None, 
+                        crs="EPSG:3857", 
+                        is_visible=False,
+                        is_cog=is_cog,         # [NEW]
+                        geometry_wkt=geom_wkt  # [NEW]
                     )
                     new_id = self.manager.insert_ortho(new_ortho)
                     return {"new_id": new_id, "filename": new_filename}

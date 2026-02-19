@@ -1,8 +1,10 @@
+# server/services/gdal_service.py
 import subprocess
 import json
 import os
 import time
 import traceback
+from osgeo import gdal, osr, ogr  # Библиотеки для работы с геометрией и метаданными
 
 class GdalService:
     
@@ -65,6 +67,91 @@ class GdalService:
         except:
             return {"north": 0, "south": 0, "east": 0, "west": 0}
 
+    def check_is_cog(self, file_path):
+        """
+        Проверяет, является ли файл Cloud Optimized GeoTIFF.
+        Использует binding gdal для проверки метаданных структуры.
+        """
+        try:
+            ds = gdal.Open(file_path)
+            if not ds:
+                return False
+            
+            # Получаем метаданные структуры изображения
+            metadata = ds.GetMetadata("IMAGE_STRUCTURE")
+            layout = metadata.get("LAYOUT", "")
+            
+            # Если указано COG, значит файл оптимизирован
+            if layout == "COG":
+                return True
+                
+            return False
+        except Exception as e:
+            print(f"Error checking COG: {e}")
+            return False
+
+    def get_footprint_wkt(self, file_path):
+        """
+        Создает WKT (Well-Known Text) полигон границ изображения,
+        перепроецированный в EPSG:4326 для записи в БД.
+        """
+        try:
+            ds = gdal.Open(file_path)
+            if not ds:
+                return None
+
+            # 1. Получаем гео-трансформацию (координаты пикселей -> координаты карты)
+            gt = ds.GetGeoTransform()
+            width = ds.RasterXSize
+            height = ds.RasterYSize
+
+            # Точный расчет углов:
+            min_x = gt[0]
+            max_y = gt[3]
+            max_x = gt[0] + width * gt[1]
+            min_y = gt[3] + height * gt[5]
+
+            # Создаем кольцо (LinearRing)
+            ring = ogr.Geometry(ogr.wkbLinearRing)
+            ring.AddPoint(min_x, max_y) # TL
+            ring.AddPoint(max_x, max_y) # TR
+            ring.AddPoint(max_x, min_y) # BR
+            ring.AddPoint(min_x, min_y) # BL
+            ring.AddPoint(min_x, max_y) # Close ring
+
+            # Создаем полигон
+            poly = ogr.Geometry(ogr.wkbPolygon)
+            poly.AddGeometry(ring)
+
+            # 2. Определяем исходную и целевую проекции
+            src_wkt = ds.GetProjection()
+            if not src_wkt:
+                # Если проекции нет, вернуть None или попытаться использовать raw
+                return None
+
+            src_srs = osr.SpatialReference()
+            src_srs.ImportFromWkt(src_wkt)
+
+            tgt_srs = osr.SpatialReference()
+            tgt_srs.ImportFromEPSG(4326) # WGS 84
+            # Важно: Force traditional axis order (Long, Lat) для WKT
+            tgt_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+
+            # 3. Трансформируем геометрию
+            transform = osr.CoordinateTransformation(src_srs, tgt_srs)
+            poly.Transform(transform)
+
+            # [FIX] Принудительно убираем Z-координату (делаем 2D), 
+            # чтобы PostGIS не ругался "Geometry has Z dimension"
+            poly.FlattenTo2D()
+
+            # Возвращаем строку WKT
+            return poly.ExportToWkt()
+
+        except Exception as e:
+            print(f"Error creating footprint WKT: {e}")
+            return None
+
     def run_background_process(self, cmd, input_path, output_path, task_id, task_service, success_callback, start_percent=10):
         """
         Запускает процесс и обновляет статус через task_service.
@@ -121,6 +208,7 @@ class GdalService:
             print(f"Task {task_id}: GDAL finished.")
             
             # Финализация (вызов колбэка для БД/S3)
+            # Колбэк должен вернуть dict с результатами, который мы сохраним
             result = success_callback()
             
             current_state.update({
