@@ -12,7 +12,8 @@ services:
     ports:
       - "${POSTGRES_PORT}:5432"
     volumes:
-      - ./data/pg_data:/var/lib/postgresql/data
+      # Заменено на именованный том
+      - pg_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
@@ -31,7 +32,8 @@ services:
       - "${MINIO_API_PORT}:9000" # API
       - "${MINIO_CONSOLE_PORT}:${MINIO_CONSOLE_PORT}" # Console
     volumes:
-      - ./data/minio_data:/data
+      # Заменено на именованный том для корректной работы MinIO
+      - minio_data:/data
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 30s
@@ -105,7 +107,7 @@ services:
       # Настройки TiTiler
       TITILER_INTERNAL_URL: ${TITILER_INTERNAL_URL}
       
-      # Пути (папки temp и tasks монтируются в /app/data, поэтому отдельный volume для них не нужен)
+      # Пути 
       UPLOAD_FOLDER: ${UPLOAD_FOLDER}
       ORTHO_FOLDER: ${ORTHO_FOLDER}
       TEMP_FOLDER: ${TEMP_FOLDER}
@@ -161,3 +163,8 @@ services:
       - GDAL_HTTP_MULTIPLEX=YES
       - GDAL_HTTP_VERSION=2
       - GDAL_HTTP_UNSAFESSL=${GDAL_HTTP_UNSAFESSL}
+
+# --- ОБЪЯВЛЕНИЕ ИМЕНОВАННЫХ ТОМОВ ---
+volumes:
+  pg_data:
+  minio_data:

@@ -7,9 +7,10 @@ import {
   reprojectOrtho, 
   processOrthoCog, 
   updateOrtho, 
-  getTaskStatus, // [NEW]
+  getTaskStatus,
+  generateOrthoPreview, // [NEW] Импорт функции генерации превью
   OrthoItem,
-  TaskStartResponse // [NEW]
+  TaskStartResponse
 } from '../../utils/api';
 
 const NO_IMAGE_PLACEHOLDER = `data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='60' viewBox='0 0 100 60'%3E%3Crect width='100' height='60' fill='%23eeeeee'/%3E%3Ctext x='50' y='35' font-family='sans-serif' font-size='10' text-anchor='middle' fill='%23999999'%3ENo Preview%3C/text%3E%3C/svg%3E`;
@@ -30,11 +31,11 @@ const ProfileOrthophotos: FC = () => {
   const [visibleIds, setVisibleIds] = useState<number[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
 
-  // [NEW] Состояние для хранения прогресса отдельных файлов по их ID
+  // Состояние для хранения прогресса отдельных файлов по их ID
   // key: ortho_id, value: percentage (0-100)
   const [rowProgress, setRowProgress] = useState<Record<number, number>>({});
 
-  // [NEW] Состояние для логов и UI логов
+  // Состояние для логов и UI логов
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [showLogs, setShowLogs] = useState(true);
   const logsEndRef = useRef<HTMLDivElement>(null);
@@ -66,7 +67,7 @@ const ProfileOrthophotos: FC = () => {
       if (Array.isArray(data)) {
         setOrthos(data);
         
-        // [UPDATED] Инициализируем visibleIds на основе данных из БД
+        // Инициализируем visibleIds на основе данных из БД
         const initialVisibleIds = data
             .filter(item => item.is_visible === true)
             .map(item => item.id);
@@ -105,7 +106,7 @@ const ProfileOrthophotos: FC = () => {
     });
   };
 
-  // [UPDATED] Логика кнопки "Видимость" с сохранением в БД
+  // Логика кнопки "Видимость" с сохранением в БД
   const handleBulkToggleVisibility = async () => {
     if (selectedIds.length === 0) return;
     
@@ -143,19 +144,55 @@ const ProfileOrthophotos: FC = () => {
     }
   };
 
+  // [UPDATED] Генерация превью через новый эндпоинт
   const handleBulkCreatePreview = async () => {
     if (selectedIds.length === 0) return;
-    if (!window.confirm(`Сгенерировать превью для выбранных файлов (${selectedIds.length} шт.)?`)) return;
+    
+    // Отфильтровываем файлы, у которых УЖЕ ЕСТЬ превью
+    const itemsToProcess = orthos.filter(o => selectedIds.includes(o.id) && !o.preview_url);
+    
+    if (itemsToProcess.length === 0) {
+        alert('Для всех выбранных файлов уже сгенерированы превью.');
+        return;
+    }
+
+    if (!window.confirm(`Сгенерировать превью для выбранных файлов (${itemsToProcess.length} шт.)?`)) return;
 
     setIsProcessing(true);
-    addLog(`Запуск генерации превью для ${selectedIds.length} файлов...`, 'info');
+    addLog(`Запуск генерации превью для ${itemsToProcess.length} файлов...`, 'info');
+    
+    const initialProgress = { ...rowProgress };
+    itemsToProcess.forEach(i => initialProgress[i.id] = 0);
+    setRowProgress(initialProgress);
+
     try {
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      addLog('Запрос на генерацию превью успешно отправлен (функция в разработке)', 'success');
-      alert('Запрос на генерацию превью отправлен (функция в разработке)');
+      const tasks = await Promise.all(itemsToProcess.map(async (item) => {
+        try {
+            const response = await generateOrthoPreview(item.id);
+            return { orthoId: item.id, taskId: response.task_id, filename: item.filename };
+        } catch (e) {
+            addLog(`Ошибка запуска для ${item.filename}: ${e}`, 'error');
+            return null;
+        }
+      }));
+
+      const validTasks = tasks.filter(t => t !== null) as { orthoId: number, taskId: string, filename: string }[];
+
+      await Promise.all(validTasks.map(async (task) => {
+          try {
+              await pollTask(task.taskId, task.orthoId);
+              addLog(`Превью готово: ${task.filename}`, 'success');
+          } catch (e: any) {
+              addLog(`Ошибка генерации ${task.filename}: ${e.message}`, 'error');
+          }
+      }));
+
+      addLog('Процесс генерации превью завершен.', 'success');
+      setRowProgress({});
+      await loadOrthos();
+
     } catch (error) {
-      addLog('Ошибка при создании превью', 'error');
-      alert('Ошибка при создании превью');
+      addLog('Ошибка при массовой генерации превью', 'error');
     } finally {
       setIsProcessing(false);
     }
@@ -192,7 +229,7 @@ const ProfileOrthophotos: FC = () => {
     }
   };
 
-  // [NEW] Вспомогательная функция для поллинга задачи
+  // Вспомогательная функция для поллинга задачи
   const pollTask = async (taskId: string, orthoId: number) => {
     return new Promise<void>((resolve, reject) => {
       const interval = setInterval(async () => {
@@ -223,12 +260,24 @@ const ProfileOrthophotos: FC = () => {
     });
   };
 
-  // [MODIFIED] Массовое перепроецирование с прогрессом
+  const isGoogleProjection = (crs?: string) => {
+    if (!crs) return false;
+    return crs.includes('3857') || crs.includes('Pseudo-Mercator') || crs.includes('Google');
+  };
+
   const handleBulkReproject = async () => {
     if (selectedIds.length === 0) return;
-    const itemsToProcess = orthos.filter(o => selectedIds.includes(o.id));
     
-    if (!window.confirm(`Конвертировать выбранные (${itemsToProcess.length} шт.) в EPSG:3857?`)) return;
+    // 1. Фильтруем: оставляем ТОЛЬКО те файлы, которые ЕЩЕ НЕ в 3857
+    const itemsToProcess = orthos.filter(o => selectedIds.includes(o.id) && !isGoogleProjection(o.crs));
+    
+    // 2. Если все выбранные файлы уже в нужной проекции — прерываем
+    if (itemsToProcess.length === 0) {
+        alert('Все выбранные файлы уже находятся в проекции EPSG:3857.');
+        return;
+    }
+    
+    if (!window.confirm(`Конвертировать выбранные (${itemsToProcess.length} шт.) в EPSG:3857? (Уже готовые файлы будут пропущены)`)) return;
 
     setIsProcessing(true);
     addLog(`Запуск перепроецирования в EPSG:3857 для ${itemsToProcess.length} файлов...`, 'info');
@@ -279,12 +328,19 @@ const ProfileOrthophotos: FC = () => {
     }
   };
 
-  // [MODIFIED] Функция конвертации в COG с прогрессом
   const handleBulkProcessCOG = async () => {
     if (selectedIds.length === 0) return;
-    const itemsToProcess = orthos.filter(o => selectedIds.includes(o.id));
     
-    if (!window.confirm(`Оптимизировать выбранные (${itemsToProcess.length} шт.) в формат COG?`)) return;
+    // 1. Фильтруем: оставляем ТОЛЬКО те файлы, которые НЕ COG
+    const itemsToProcess = orthos.filter(o => selectedIds.includes(o.id) && !o.is_cog);
+    
+    // 2. Защита от пустой работы
+    if (itemsToProcess.length === 0) {
+        alert('Все выбранные файлы уже оптимизированы (COG).');
+        return;
+    }
+    
+    if (!window.confirm(`Оптимизировать выбранные (${itemsToProcess.length} шт.) в формат COG? (Уже готовые файлы будут пропущены)`)) return;
 
     setIsProcessing(true);
     addLog(`Запуск оптимизации в COG для ${itemsToProcess.length} файлов...`, 'info');
@@ -345,11 +401,6 @@ const ProfileOrthophotos: FC = () => {
     items.forEach(item => {
         window.open(item.url, '_blank');
     });
-  };
-
-  const isGoogleProjection = (crs?: string) => {
-    if (!crs) return false;
-    return crs.includes('3857') || crs.includes('Pseudo-Mercator') || crs.includes('Google');
   };
 
   // Стили для логов (встроены для простоты, лучше вынести в CSS)
@@ -500,7 +551,7 @@ const ProfileOrthophotos: FC = () => {
                 <th>Название</th>
                 <th>Превью</th>
                 <th>Проекция (CRS)</th>
-                <th style={{ textAlign: 'center' }}>COG</th> {/* <--- ДОБАВЛЕНО ---> */}
+                <th style={{ textAlign: 'center' }}>COG</th>
                 <th>Статус / Прогресс</th>
                 <th>Границы (W, S, E, N)</th>
                 <th style={{ textAlign: 'center' }}>Видимость</th>
@@ -531,8 +582,9 @@ const ProfileOrthophotos: FC = () => {
                         
                         <td>
                         <div style={{ width: '100px', height: '60px', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#eee', borderRadius: '4px' }}>
+                            {/* [UPDATED] Используем preview_url, если он есть */}
                             <img 
-                            src={ortho.url} 
+                            src={ortho.preview_url || NO_IMAGE_PLACEHOLDER} 
                             alt="preview" 
                             style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
                             onError={(e) => { (e.target as HTMLImageElement).src = NO_IMAGE_PLACEHOLDER; }}
@@ -555,7 +607,6 @@ const ProfileOrthophotos: FC = () => {
                             </span>
                         </td>
 
-                        {/* <--- ДОБАВЛЕНА ЯЧЕЙКА COG ---> */}
                         <td style={{ textAlign: 'center' }}>
                             {ortho.is_cog ? (
                                 <span style={{
@@ -586,7 +637,6 @@ const ProfileOrthophotos: FC = () => {
                             )}
                         </td>
 
-                        {/* [MODIFIED] Колонка Статус / Прогресс */}
                         <td style={{ width: '200px' }}>
                             {hasProgress ? (
                                 <div style={{ width: '100%' }}>

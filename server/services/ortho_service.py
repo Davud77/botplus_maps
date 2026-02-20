@@ -5,6 +5,7 @@ import uuid
 import threading
 import json
 import traceback
+import subprocess
 import requests
 from io import BytesIO
 from PIL import Image
@@ -43,10 +44,11 @@ class OrthoService:
                 "id": o.id,
                 "filename": o.filename,
                 "url": f"/api/orthophotos/{o.id}/download",
+                "preview_url": f"/api/orthophotos/{o.id}/preview" if getattr(o, 'preview_filename', None) else None, # [NEW]
                 "bounds": b if b else {"north": 0, "south": 0, "east": 0, "west": 0},
                 "crs": crs_val,
                 "is_visible": getattr(o, 'is_visible', False),
-                "is_cog": getattr(o, 'is_cog', False), # [NEW]
+                "is_cog": getattr(o, 'is_cog', False),
                 "upload_date": str(o.upload_date) if hasattr(o, 'upload_date') else None
             })
         return results
@@ -76,11 +78,30 @@ class OrthoService:
                 bounds = self.gdal.get_bounds(input_path)
                 crs = self.gdal.get_crs(input_path)
                 
-                # [NEW] Проверка COG и генерация WKT геометрии
+                # Проверка COG и генерация WKT геометрии
                 is_cog = self.gdal.check_is_cog(input_path)
                 footprint_wkt = self.gdal.get_footprint_wkt(input_path)
                 
                 logs.append(f"Границы: {bounds}, CRS: {crs}, COG: {is_cog}")
+
+                # [NEW] Автогенерация превью
+                preview_filename = f"{os.path.splitext(filename)[0]}_preview.png"
+                preview_path = os.path.join(self.temp_dir, preview_filename)
+                has_preview = False
+                
+                logs.append("Генерация миниатюры...")
+                try:
+                    cmd_preview = [
+                        "gdal_translate", "-of", "PNG",
+                        "-outsize", "400", "0", # Ширина 400px, высота пропорционально
+                        "-r", "nearest",
+                        input_path, preview_path
+                    ]
+                    subprocess.run(cmd_preview, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    has_preview = True
+                    logs.append("Миниатюра успешно сгенерирована.")
+                except Exception as e:
+                    logs.append(f"Внимание: Не удалось создать превью: {e}")
 
                 # 2. Создание объекта модели
                 ortho_obj = Ortho(
@@ -89,8 +110,9 @@ class OrthoService:
                     url=None,
                     is_visible=False,
                     crs=crs,
-                    is_cog=is_cog,             # [NEW]
-                    geometry_wkt=footprint_wkt # [NEW]
+                    is_cog=is_cog,             
+                    geometry_wkt=footprint_wkt,
+                    preview_filename=preview_filename if has_preview else None # [NEW]
                 )
                 
                 # 3. Запись в БД
@@ -102,6 +124,12 @@ class OrthoService:
                     if os.path.exists(input_path): os.remove(input_path)
                 else:
                     logs.append("Ошибка: MinIO недоступен")
+
+                # [NEW] Загрузка превью в хранилище
+                if has_preview:
+                    if self.storage.upload_file(preview_filename, preview_path):
+                        logs.append("Миниатюра загружена в MinIO")
+                    if os.path.exists(preview_path): os.remove(preview_path)
                 
                 successful.append(filename)
             except Exception as e:
@@ -151,7 +179,6 @@ class OrthoService:
                     bounds = self.gdal.get_bounds(cog_path)
                     crs = self.gdal.get_crs(cog_path)
                     
-                    # [NEW] Проверяем получившийся файл
                     is_cog = self.gdal.check_is_cog(cog_path)
                     geom_wkt = self.gdal.get_footprint_wkt(cog_path)
                     
@@ -161,8 +188,10 @@ class OrthoService:
                         url=None, 
                         crs=crs, 
                         is_visible=False,
-                        is_cog=is_cog,          # [NEW]
-                        geometry_wkt=geom_wkt   # [NEW]
+                        is_cog=is_cog,          
+                        geometry_wkt=geom_wkt,
+                        # Копируем превью, если оно было
+                        preview_filename=getattr(ortho, 'preview_filename', None)
                     )
                     new_id = self.manager.insert_ortho(new_ortho)
                     return {"new_id": new_id, "new_filename": new_filename}
@@ -218,8 +247,6 @@ class OrthoService:
                     self.storage.upload_file(new_filename, output_path)
                     new_bounds = self.gdal.get_bounds(output_path)
                     
-                    # [NEW] Генерируем метаданные для репроецированного файла
-                    # is_cog будет True, так как мы использовали -of COG
                     is_cog = self.gdal.check_is_cog(output_path)
                     geom_wkt = self.gdal.get_footprint_wkt(output_path)
                     
@@ -229,13 +256,61 @@ class OrthoService:
                         url=None, 
                         crs="EPSG:3857", 
                         is_visible=False,
-                        is_cog=is_cog,         # [NEW]
-                        geometry_wkt=geom_wkt  # [NEW]
+                        is_cog=is_cog,         
+                        geometry_wkt=geom_wkt,
+                        # Копируем превью, если оно было
+                        preview_filename=getattr(ortho, 'preview_filename', None)
                     )
                     new_id = self.manager.insert_ortho(new_ortho)
                     return {"new_id": new_id, "filename": new_filename}
 
                 self.gdal.run_background_process(cmd, local_path, output_path, task_id, self.tasks, on_success, start_percent=10)
+            except Exception as e:
+                traceback.print_exc()
+                self.tasks.save_state(task_id, {"status": "error", "error": str(e)})
+
+        threading.Thread(target=worker).start()
+        return task_id
+
+    # [NEW] Генерация превью по требованию
+    def start_preview_process(self, ortho_id):
+        """Ручная генерация превью для уже загруженного файла"""
+        ortho = self.manager.get_ortho_by_id(ortho_id)
+        if not ortho: return None
+
+        task_id = str(uuid.uuid4())
+        self.tasks.save_state(task_id, {"status": "pending", "progress": 0, "filename": ortho.filename})
+
+        def worker():
+            try:
+                local_path = os.path.join(self.temp_dir, ortho.filename)
+                self.tasks.save_state(task_id, {"status": "processing", "progress": 10, "message": "Скачивание исходника..."})
+                self.storage.download_file(ortho.filename, local_path)
+                
+                self.tasks.save_state(task_id, {"status": "processing", "progress": 50, "message": "Генерация миниатюры..."})
+                
+                name_part, ext = os.path.splitext(ortho.filename)
+                preview_filename = f"{name_part}_preview.png"
+                preview_path = os.path.join(self.temp_dir, preview_filename)
+
+                cmd = [
+                    "gdal_translate", "-of", "PNG", 
+                    "-outsize", "400", "0", 
+                    "-r", "nearest",
+                    local_path, preview_path
+                ]
+                subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+                self.tasks.save_state(task_id, {"status": "processing", "progress": 80, "message": "Загрузка в хранилище..."})
+                self.storage.upload_file(preview_filename, preview_path)
+                
+                # Обновляем запись в БД
+                self.manager.update_ortho(ortho_id, {"preview_filename": preview_filename})
+                
+                if os.path.exists(local_path): os.remove(local_path)
+                if os.path.exists(preview_path): os.remove(preview_path)
+                
+                self.tasks.save_state(task_id, {"status": "success", "progress": 100})
             except Exception as e:
                 traceback.print_exc()
                 self.tasks.save_state(task_id, {"status": "error", "error": str(e)})

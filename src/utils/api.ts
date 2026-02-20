@@ -45,6 +45,7 @@ export interface OrthoItem {
   id: number;
   filename: string;
   url: string;
+  preview_url?: string; // [NEW] Ссылка на миниатюру
   bounds: {
     north: number;
     south: number;
@@ -52,18 +53,18 @@ export interface OrthoItem {
     west: number;
   } | null;
   crs?: string;        
-  is_cog?: boolean; // [NEW] Статус COG
+  is_cog?: boolean; // Статус COG
   upload_date?: string;
-  is_visible?: boolean; // [NEW] Видимость слоя
+  is_visible?: boolean; // Видимость слоя
 }
 
-// [NEW] Тип ответа при запуске длительной задачи
+// Тип ответа при запуске длительной задачи
 export interface TaskStartResponse {
   task_id: string;
   status: "started";
 }
 
-// [NEW] Тип статуса задачи
+// Тип статуса задачи
 export interface TaskStatusResponse {
   status: "pending" | "processing" | "success" | "error";
   progress: number;
@@ -104,7 +105,7 @@ export interface BBox {
 async function handleResponse<T>(res: Response, url: string): Promise<T> {
   const contentType = res.headers.get("content-type");
   
-  // [FIX] Проверка на HTML (ошибки прокси/роутинга)
+  // Проверка на HTML (ошибки прокси/роутинга)
   if (contentType && contentType.includes("text/html")) {
     const text = await res.text();
     // Пытаемся вытащить заголовок из HTML ошибки для ясности
@@ -123,7 +124,7 @@ async function handleResponse<T>(res: Response, url: string): Promise<T> {
       // Пытаемся распарсить JSON ошибки от бэкенда
       const jsonErr = JSON.parse(text);
       
-      // [FIX] Python Flask часто возвращает 'error', а не 'message'
+      // Python Flask часто возвращает 'error', а не 'message'
       if (jsonErr.message) {
         errorMessage = jsonErr.message;
       } else if (jsonErr.error) {
@@ -196,7 +197,6 @@ export type MeResponse =
       };
     };
 
-// [FIX] Добавлен префикс /api к путям авторизации
 export async function authMe(): Promise<MeResponse> {
   return apiGet<MeResponse>("/api/auth/me");
 }
@@ -212,7 +212,6 @@ export async function authLogout(): Promise<ApiResp> {
 /* -------------------- Data API -------------------- */
 
 // --- Панорамы ---
-// [FIX] Добавлен префикс /api для маршрутизации через прокси
 export async function fetchPanoramas<T = any>(): Promise<T> {
   return apiGet<T>("/api/panoramas");
 }
@@ -226,7 +225,7 @@ export async function deletePano(id: number): Promise<ApiOk> {
 }
 
 export async function uploadFiles<T = any>(formData: FormData): Promise<T> {
-  const url = `${API_BASE}/api/upload`; // [FIX] Добавлен префикс /api
+  const url = `${API_BASE}/api/upload`;
   const res = await fetch(url, {
     method: "POST",
     credentials: "include",
@@ -236,19 +235,20 @@ export async function uploadFiles<T = any>(formData: FormData): Promise<T> {
 }
 
 // --- Ортофото ---
-// [FIX] Добавлен префикс /api
 export async function fetchOrthophotos(): Promise<OrthoItem[]> {
   const items = await apiGet<OrthoItem[]>("/api/orthophotos");
   
-  // [FIX] Добавляем полный путь к картинке в режиме разработки
+  // Добавляем полный путь к картинке в режиме разработки
   return items.map(item => ({
     ...item,
-    // Если url начинается с /api или /, добавляем API_BASE
-    url: (isLocalhost && item.url.startsWith('/')) ? `${API_BASE}${item.url}` : item.url
+    url: (isLocalhost && item.url.startsWith('/')) ? `${API_BASE}${item.url}` : item.url,
+    // [NEW] Подстановка API_BASE для превью
+    preview_url: (isLocalhost && item.preview_url && item.preview_url.startsWith('/')) 
+                 ? `${API_BASE}${item.preview_url}` 
+                 : item.preview_url
   }));
 }
 
-// [NEW] Специальная функция для загрузки ортофотопланов
 export async function uploadOrthoFiles<T = any>(formData: FormData): Promise<T> {
   const url = `${API_BASE}/api/upload_ortho`;
   const res = await fetch(url, {
@@ -259,24 +259,25 @@ export async function uploadOrthoFiles<T = any>(formData: FormData): Promise<T> 
   return handleResponse<T>(res, url);
 }
 
-// [NEW] Обновление свойств ортофотоплана (например, is_visible)
 export async function updateOrtho(id: number, data: Partial<OrthoItem>): Promise<ApiOk> {
   return apiPut<ApiOk>(`/api/orthophotos/${id}`, data);
 }
 
-// [NEW] Получение статуса задачи
 export async function getTaskStatus(taskId: string): Promise<TaskStatusResponse> {
   return apiGet<TaskStatusResponse>(`/api/tasks/${taskId}`);
 }
 
-// [NEW] Перепроецирование (теперь возвращает Task ID)
 export async function reprojectOrtho(id: number): Promise<TaskStartResponse> {
   return apiPost<TaskStartResponse>(`/api/orthophotos/${id}/reproject`);
 }
 
-// [NEW] Оптимизация COG (теперь возвращает Task ID)
 export async function processOrthoCog(id: number): Promise<TaskStartResponse> {
   return apiPost<TaskStartResponse>(`/api/orthophotos/${id}/process`);
+}
+
+// [NEW] API запрос для генерации превью
+export async function generateOrthoPreview(id: number): Promise<TaskStartResponse> {
+  return apiPost<TaskStartResponse>(`/api/orthophotos/${id}/generate_preview`);
 }
 
 export async function deleteOrtho(id: number): Promise<ApiOk> {
@@ -284,7 +285,6 @@ export async function deleteOrtho(id: number): Promise<ApiOk> {
 }
 
 /* -------------------- Vector / PostGIS API -------------------- */
-// Здесь префикс /api уже был, оставляем как есть
 
 export async function fetchVectorDbs(): Promise<VectorDbItem[]> {
   return apiGet<VectorDbItem[]>("/api/vector/databases");
@@ -306,7 +306,6 @@ export async function createVectorLayer(
   return apiPost<ApiOk>("/api/vector/layers/create", { dbName, tableName, geomType });
 }
 
-// Обновленная функция с поддержкой BBOX
 export async function fetchLayerData(
   dbName: string, 
   tableName: string, 

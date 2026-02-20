@@ -77,17 +77,26 @@ class OrthoManager:
             if self.db.connection:
                 self.db.connection.rollback()
 
+        # 6. Preview Filename [NEW]
+        try:
+            query_migrate_preview = "ALTER TABLE orthophotos ADD COLUMN IF NOT EXISTS preview_filename TEXT;"
+            cursor.execute(query_migrate_preview)
+            self.db.commit()
+        except Exception as e:
+            print(f"Migration warning (adding preview_filename column): {e}")
+            if self.db.connection:
+                self.db.connection.rollback()
+
     def get_all_orthos(self):
         try:
             cursor = self.db.get_cursor()
-            # [UPDATED] Добавляем is_cog в выборку
-            query = "SELECT id, filename, bounds, url, crs, upload_date, is_visible, is_cog FROM orthophotos ORDER BY id DESC"
+            # [UPDATED] Добавляем is_cog и preview_filename в выборку
+            query = "SELECT id, filename, bounds, url, crs, upload_date, is_visible, is_cog, preview_filename FROM orthophotos ORDER BY id DESC"
             cursor.execute(query)
             rows = cursor.fetchall()
             
             orthos = []
             for row in rows:
-                # Обработка разных типов курсоров (DictCursor vs TupleCursor)
                 if isinstance(row, dict):
                     r_id = row["id"]
                     r_name = row["filename"]
@@ -96,7 +105,8 @@ class OrthoManager:
                     r_crs = row.get("crs")
                     r_date = row["upload_date"]
                     r_vis = row.get("is_visible", False)
-                    r_cog = row.get("is_cog", False) # [NEW]
+                    r_cog = row.get("is_cog", False)
+                    r_preview = row.get("preview_filename") # [NEW]
                 else:
                     r_id = row[0]
                     r_name = row[1]
@@ -105,7 +115,8 @@ class OrthoManager:
                     r_crs = row[4] if len(row) > 4 else None
                     r_date = row[5] if len(row) > 5 else None
                     r_vis = row[6] if len(row) > 6 else False
-                    r_cog = row[7] if len(row) > 7 else False # [NEW]
+                    r_cog = row[7] if len(row) > 7 else False
+                    r_preview = row[8] if len(row) > 8 else None # [NEW]
 
                 ortho = Ortho(
                     filename=r_name,
@@ -115,7 +126,8 @@ class OrthoManager:
                     upload_date=r_date,
                     crs=r_crs,
                     is_visible=r_vis,
-                    is_cog=r_cog # [NEW]
+                    is_cog=r_cog,
+                    preview_filename=r_preview # [NEW]
                 )
                 orthos.append(ortho)
                 
@@ -128,8 +140,8 @@ class OrthoManager:
     def get_ortho_by_id(self, ortho_id):
         try:
             cursor = self.db.get_cursor()
-            # [UPDATED] Добавляем is_cog
-            query = "SELECT id, filename, bounds, url, crs, upload_date, is_visible, is_cog FROM orthophotos WHERE id = %s"
+            # [UPDATED] Добавляем is_cog и preview_filename
+            query = "SELECT id, filename, bounds, url, crs, upload_date, is_visible, is_cog, preview_filename FROM orthophotos WHERE id = %s"
             cursor.execute(query, (ortho_id,))
             row = cursor.fetchone()
             
@@ -142,7 +154,8 @@ class OrthoManager:
                     r_crs = row.get("crs")
                     r_date = row["upload_date"]
                     r_vis = row.get("is_visible", False)
-                    r_cog = row.get("is_cog", False) # [NEW]
+                    r_cog = row.get("is_cog", False)
+                    r_preview = row.get("preview_filename") # [NEW]
                 else:
                     r_id = row[0]
                     r_name = row[1]
@@ -151,7 +164,8 @@ class OrthoManager:
                     r_crs = row[4] if len(row) > 4 else None
                     r_date = row[5] if len(row) > 5 else None
                     r_vis = row[6] if len(row) > 6 else False
-                    r_cog = row[7] if len(row) > 7 else False # [NEW]
+                    r_cog = row[7] if len(row) > 7 else False
+                    r_preview = row[8] if len(row) > 8 else None # [NEW]
 
                 ortho = Ortho(
                     filename=r_name,
@@ -161,7 +175,8 @@ class OrthoManager:
                     upload_date=r_date,
                     crs=r_crs,
                     is_visible=r_vis,
-                    is_cog=r_cog # [NEW]
+                    is_cog=r_cog,
+                    preview_filename=r_preview # [NEW]
                 )
                 return ortho
             return None
@@ -177,28 +192,25 @@ class OrthoManager:
             crs_val = getattr(ortho, 'crs', None)
             url_val = getattr(ortho, 'url', None)
             vis_val = getattr(ortho, 'is_visible', False)
-            
-            # [NEW] Извлекаем новые поля из объекта
             cog_val = getattr(ortho, 'is_cog', False)
-            geom_wkt = getattr(ortho, 'geometry_wkt', None) # Временное поле в модели
+            geom_wkt = getattr(ortho, 'geometry_wkt', None) 
+            preview_val = getattr(ortho, 'preview_filename', None) # [NEW]
 
-            # [UPDATED] Логика вставки
-            # Если передана геометрия (WKT), используем PostGIS функцию ST_Multi(ST_GeomFromText(..., 4326))
+            # [UPDATED] Добавляем preview_filename в логику вставки
             if geom_wkt:
                 query = """
-                    INSERT INTO orthophotos (filename, bounds, url, crs, is_visible, is_cog, geometry)
-                    VALUES (%s, %s, %s, %s, %s, %s, ST_Multi(ST_GeomFromText(%s, 4326)))
+                    INSERT INTO orthophotos (filename, bounds, url, crs, is_visible, is_cog, preview_filename, geometry)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, ST_Multi(ST_GeomFromText(%s, 4326)))
                     RETURNING id
                 """
-                cursor.execute(query, (ortho.filename, ortho.bounds, url_val, crs_val, vis_val, cog_val, geom_wkt))
+                cursor.execute(query, (ortho.filename, ortho.bounds, url_val, crs_val, vis_val, cog_val, preview_val, geom_wkt))
             else:
-                # Если геометрии нет, вставляем без неё (будет NULL)
                 query = """
-                    INSERT INTO orthophotos (filename, bounds, url, crs, is_visible, is_cog)
-                    VALUES (%s, %s, %s, %s, %s, %s)
+                    INSERT INTO orthophotos (filename, bounds, url, crs, is_visible, is_cog, preview_filename)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
                     RETURNING id
                 """
-                cursor.execute(query, (ortho.filename, ortho.bounds, url_val, crs_val, vis_val, cog_val))
+                cursor.execute(query, (ortho.filename, ortho.bounds, url_val, crs_val, vis_val, cog_val, preview_val))
             
             row = cursor.fetchone()
             if isinstance(row, dict):
@@ -223,8 +235,8 @@ class OrthoManager:
             set_clause = []
             values = []
             for field, value in updated_fields.items():
-                # [UPDATED] Добавляем 'is_cog' в список разрешенных полей
-                if field in ['filename', 'bounds', 'url', 'crs', 'is_visible', 'is_cog']:
+                # [UPDATED] Добавляем 'preview_filename' в список разрешенных полей
+                if field in ['filename', 'bounds', 'url', 'crs', 'is_visible', 'is_cog', 'preview_filename']:
                     set_clause.append(f"{field} = %s")
                     values.append(value)
 

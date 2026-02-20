@@ -1271,7 +1271,7 @@ h3 { margin: 0; color: var(--color-text); }
   flex-direction: column;
       flex-wrap: wrap;
           flex-direction: row;
-              justify-content: center;
+              justify-content: space-between;
     align-content: center;
   gap: 10px;
 }
@@ -1280,7 +1280,7 @@ h3 { margin: 0; color: var(--color-text); }
 
 .ortho-card {
   display: flex;
-    width: 140px;
+    width: 184px;
     flex-direction: column;
     align-content: center;
     align-items: center;
@@ -1293,6 +1293,14 @@ h3 { margin: 0; color: var(--color-text); }
   font-weight: 500;
   color: var(--color-text);
   word-break: break-all;
+}
+
+.ortho-preview-img {
+  width: 150px;
+  height: 150px;
+  object-fit: cover;
+  border-radius: 6px;
+  margin-top: 8px;
 }
 
 .ortho-actions {
