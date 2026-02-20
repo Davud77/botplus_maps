@@ -52,8 +52,9 @@ services:
       DB_USER: ${DB_USER}
       DB_PASSWORD: ${DB_PASSWORD}
       DB_HOST: db
-      DB_NAME: ${DB_NAME}
-      AUTH_TYPE: ${PGBOUNCER_AUTH_TYPE}
+      # Звездочка разрешает доступ ко всем базам, включая системную postgres
+      DB_NAME: "*"
+      AUTH_TYPE: scram-sha-256
       LISTEN_PORT: 6432
     ports:
       - "${PGBOUNCER_PORT}:6432"
