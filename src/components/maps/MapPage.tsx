@@ -77,7 +77,7 @@ const MapPage: React.FC = () => {
   };
 
   return (
-    <div style={{ height: '100vh', width: '100%', position: 'relative', overflow: 'hidden' }}>
+    <div className="map-page-wrapper">
       
       {/* 1. HEADER */}
       <MapHeader 
@@ -95,16 +95,12 @@ const MapPage: React.FC = () => {
 
       {/* 3. PANORAMA VIEWER */}
       {selectedMarker && isPanoVisible && (
-        <div className="selected-marker-info" style={{ height: isPanoExpanded ? '100%' : '50%' }}>
+        <div className={`selected-marker-info ${isPanoExpanded ? 'pano-viewer-expanded' : 'pano-viewer-collapsed'}`}>
           <PanoramaViewer markerId={selectedMarker} isExpanded={isPanoExpanded} />
           
           <button 
             onClick={() => setIsPanoVisible(false)}
-            style={{
-              position:'absolute', top:10, right:10, zIndex:2000, 
-              background:'white', border:'none', borderRadius:'50%', 
-              width:30, height:30, cursor:'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center'
-            }}
+            className="pano-action-btn pano-close-btn"
             title="Закрыть"
           >
             ✕
@@ -112,11 +108,7 @@ const MapPage: React.FC = () => {
           
           <button 
             onClick={() => setIsPanoExpanded(!isPanoExpanded)}
-            style={{
-              position:'absolute', top:10, right:50, zIndex:2000, 
-              background:'white', border:'none', borderRadius:'4px', 
-              padding:'5px 10px', cursor:'pointer', fontSize: '12px', fontWeight: 'bold'
-            }}
+            className="pano-action-btn pano-expand-btn"
           >
             {isPanoExpanded ? 'Свернуть' : 'Развернуть'}
           </button>
@@ -124,9 +116,15 @@ const MapPage: React.FC = () => {
       )}
 
       {/* 4. MAP CONTAINER */}
-      <MapContainer center={mapCenter} zoom={5} style={{ height: '100%', width: '100%' }} zoomControl={false} maxZoom={20}>
+      <MapContainer 
+        center={mapCenter} 
+        zoom={5} 
+        className="main-map-container" 
+        zoomControl={false} 
+        maxZoom={23}
+      >
         <SetMapRef />
-        <TileLayer url={baseLayerUrl} maxZoom={20} />
+        <TileLayer url={baseLayerUrl} maxZoom={23} />
         <CustomZoomControl />
 
         {/* --- Layers --- */}

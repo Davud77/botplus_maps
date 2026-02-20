@@ -77,7 +77,7 @@ class OrthoManager:
             if self.db.connection:
                 self.db.connection.rollback()
 
-        # 6. Preview Filename [NEW]
+        # 6. Preview Filename
         try:
             query_migrate_preview = "ALTER TABLE orthophotos ADD COLUMN IF NOT EXISTS preview_filename TEXT;"
             cursor.execute(query_migrate_preview)
@@ -90,8 +90,15 @@ class OrthoManager:
     def get_all_orthos(self):
         try:
             cursor = self.db.get_cursor()
-            # [UPDATED] Добавляем is_cog и preview_filename в выборку
-            query = "SELECT id, filename, bounds, url, crs, upload_date, is_visible, is_cog, preview_filename FROM orthophotos ORDER BY id DESC"
+            # [UPDATED] Вытаскиваем крайние точки из геометрии с помощью PostGIS функций
+            query = """
+                SELECT id, filename, bounds, url, crs, upload_date, is_visible, is_cog, preview_filename,
+                       ST_XMin(geometry) as wgs_west,
+                       ST_YMin(geometry) as wgs_south,
+                       ST_XMax(geometry) as wgs_east,
+                       ST_YMax(geometry) as wgs_north
+                FROM orthophotos ORDER BY id DESC
+            """
             cursor.execute(query)
             rows = cursor.fetchall()
             
@@ -106,7 +113,11 @@ class OrthoManager:
                     r_date = row["upload_date"]
                     r_vis = row.get("is_visible", False)
                     r_cog = row.get("is_cog", False)
-                    r_preview = row.get("preview_filename") # [NEW]
+                    r_preview = row.get("preview_filename")
+                    w_west = row.get("wgs_west")
+                    w_south = row.get("wgs_south")
+                    w_east = row.get("wgs_east")
+                    w_north = row.get("wgs_north")
                 else:
                     r_id = row[0]
                     r_name = row[1]
@@ -116,7 +127,16 @@ class OrthoManager:
                     r_date = row[5] if len(row) > 5 else None
                     r_vis = row[6] if len(row) > 6 else False
                     r_cog = row[7] if len(row) > 7 else False
-                    r_preview = row[8] if len(row) > 8 else None # [NEW]
+                    r_preview = row[8] if len(row) > 8 else None
+                    w_west = row[9] if len(row) > 9 else None
+                    w_south = row[10] if len(row) > 10 else None
+                    w_east = row[11] if len(row) > 11 else None
+                    w_north = row[12] if len(row) > 12 else None
+
+                # [NEW] Формируем объект WGS84 границ, если геометрия существует
+                wgs84_bounds = None
+                if w_west is not None and w_south is not None:
+                    wgs84_bounds = { "west": w_west, "south": w_south, "east": w_east, "north": w_north }
 
                 ortho = Ortho(
                     filename=r_name,
@@ -127,7 +147,8 @@ class OrthoManager:
                     crs=r_crs,
                     is_visible=r_vis,
                     is_cog=r_cog,
-                    preview_filename=r_preview # [NEW]
+                    preview_filename=r_preview,
+                    wgs84_bounds=wgs84_bounds # Передаем в модель
                 )
                 orthos.append(ortho)
                 
@@ -140,8 +161,15 @@ class OrthoManager:
     def get_ortho_by_id(self, ortho_id):
         try:
             cursor = self.db.get_cursor()
-            # [UPDATED] Добавляем is_cog и preview_filename
-            query = "SELECT id, filename, bounds, url, crs, upload_date, is_visible, is_cog, preview_filename FROM orthophotos WHERE id = %s"
+            # [UPDATED] Вытаскиваем крайние точки из геометрии для конкретного файла
+            query = """
+                SELECT id, filename, bounds, url, crs, upload_date, is_visible, is_cog, preview_filename,
+                       ST_XMin(geometry) as wgs_west,
+                       ST_YMin(geometry) as wgs_south,
+                       ST_XMax(geometry) as wgs_east,
+                       ST_YMax(geometry) as wgs_north
+                FROM orthophotos WHERE id = %s
+            """
             cursor.execute(query, (ortho_id,))
             row = cursor.fetchone()
             
@@ -155,7 +183,11 @@ class OrthoManager:
                     r_date = row["upload_date"]
                     r_vis = row.get("is_visible", False)
                     r_cog = row.get("is_cog", False)
-                    r_preview = row.get("preview_filename") # [NEW]
+                    r_preview = row.get("preview_filename")
+                    w_west = row.get("wgs_west")
+                    w_south = row.get("wgs_south")
+                    w_east = row.get("wgs_east")
+                    w_north = row.get("wgs_north")
                 else:
                     r_id = row[0]
                     r_name = row[1]
@@ -165,7 +197,16 @@ class OrthoManager:
                     r_date = row[5] if len(row) > 5 else None
                     r_vis = row[6] if len(row) > 6 else False
                     r_cog = row[7] if len(row) > 7 else False
-                    r_preview = row[8] if len(row) > 8 else None # [NEW]
+                    r_preview = row[8] if len(row) > 8 else None
+                    w_west = row[9] if len(row) > 9 else None
+                    w_south = row[10] if len(row) > 10 else None
+                    w_east = row[11] if len(row) > 11 else None
+                    w_north = row[12] if len(row) > 12 else None
+
+                # [NEW] Формируем объект WGS84 границ
+                wgs84_bounds = None
+                if w_west is not None and w_south is not None:
+                    wgs84_bounds = { "west": w_west, "south": w_south, "east": w_east, "north": w_north }
 
                 ortho = Ortho(
                     filename=r_name,
@@ -176,7 +217,8 @@ class OrthoManager:
                     crs=r_crs,
                     is_visible=r_vis,
                     is_cog=r_cog,
-                    preview_filename=r_preview # [NEW]
+                    preview_filename=r_preview,
+                    wgs84_bounds=wgs84_bounds # Передаем в модель
                 )
                 return ortho
             return None
@@ -194,9 +236,9 @@ class OrthoManager:
             vis_val = getattr(ortho, 'is_visible', False)
             cog_val = getattr(ortho, 'is_cog', False)
             geom_wkt = getattr(ortho, 'geometry_wkt', None) 
-            preview_val = getattr(ortho, 'preview_filename', None) # [NEW]
+            preview_val = getattr(ortho, 'preview_filename', None) 
 
-            # [UPDATED] Добавляем preview_filename в логику вставки
+            # Если передана геометрия (WKT), используем PostGIS функцию ST_Multi(ST_GeomFromText(..., 4326))
             if geom_wkt:
                 query = """
                     INSERT INTO orthophotos (filename, bounds, url, crs, is_visible, is_cog, preview_filename, geometry)
@@ -235,7 +277,6 @@ class OrthoManager:
             set_clause = []
             values = []
             for field, value in updated_fields.items():
-                # [UPDATED] Добавляем 'preview_filename' в список разрешенных полей
                 if field in ['filename', 'bounds', 'url', 'crs', 'is_visible', 'is_cog', 'preview_filename']:
                     set_clause.append(f"{field} = %s")
                     values.append(value)

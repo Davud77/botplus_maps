@@ -164,24 +164,12 @@ const PanoramaViewer: React.FC<PanoramaViewerProps> = ({ markerId, isExpanded })
   }, [markerId]);
 
   return (
-    <div className="panorama-container" style={{ width: '100%', height: '100%', position: 'relative', background: '#222', overflow: 'hidden' }}>
+    <div className="panorama-container">
       
       {/* Error Overlay */}
       {error && (
-        <div style={{
-            position: 'absolute',
-            top: '50%',
-            left: '50%',
-            transform: 'translate(-50%, -50%)',
-            color: '#ff6b6b',
-            background: 'rgba(0,0,0,0.8)',
-            padding: '20px',
-            borderRadius: '8px',
-            zIndex: 20,
-            textAlign: 'center',
-            maxWidth: '80%'
-        }}>
-            <div style={{fontSize: '24px', marginBottom: '10px'}}>⚠️</div>
+        <div className="pano-error-overlay">
+            <div className="pano-error-icon">⚠️</div>
             {error}
         </div>
       )}
@@ -190,24 +178,13 @@ const PanoramaViewer: React.FC<PanoramaViewerProps> = ({ markerId, isExpanded })
       <div 
         ref={viewerRef} 
         className="panorama-viewer" 
-        style={{ width: '100%', height: '100%', cursor: 'grab', outline: 'none' }}
       ></div>
 
       {/* Controls Overlay */}
-      <div style={{ position: 'absolute', bottom: '20px', left: '20px', zIndex: 10, display: 'flex', gap: '10px' }}>
+      <div className="pano-controls-overlay">
           <button 
             onClick={toggleFullscreen}
-            style={{
-              padding: '8px 16px',
-              background: 'rgba(30,30,30,0.8)',
-              color: 'white',
-              border: '1px solid rgba(255,255,255,0.2)',
-              borderRadius: '4px',
-              cursor: 'pointer',
-              fontSize: '12px',
-              fontWeight: '500',
-              backdropFilter: 'blur(4px)'
-            }}
+            className="pano-fullscreen-btn"
           >
             {isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
           </button>
@@ -215,24 +192,13 @@ const PanoramaViewer: React.FC<PanoramaViewerProps> = ({ markerId, isExpanded })
 
       {/* Info Overlay */}
       {pointData && (
-        <div style={{
-            position: 'absolute',
-            top: '10px',
-            left: '10px',
-            color: 'white',
-            textShadow: '0 1px 2px rgba(0,0,0,0.8)',
-            zIndex: 10,
-            pointerEvents: 'none',
-            background: 'linear-gradient(to right, rgba(0,0,0,0.6), transparent)',
-            padding: '8px 12px',
-            borderRadius: '4px'
-        }}>
-          <h3 style={{margin: 0, fontSize: '14px', fontWeight: '600'}}>{pointData.filename}</h3>
-          <div style={{fontSize: '11px', opacity: 0.8, marginTop: '2px'}}>
+        <div className="pano-info-overlay">
+          <h3 className="pano-info-title">{pointData.filename}</h3>
+          <div className="pano-info-subtitle">
              {pointData.timestamp || pointData.upload_date || 'No date'}
           </div>
           {pointData.altitude !== 0 && (
-              <div style={{fontSize: '11px', opacity: 0.8}}>
+              <div className="pano-info-alt">
                   Alt: {pointData.altitude?.toFixed(1)}m
               </div>
           )}

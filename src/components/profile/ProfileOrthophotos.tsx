@@ -403,52 +403,13 @@ const ProfileOrthophotos: FC = () => {
     });
   };
 
-  // Стили для логов (встроены для простоты, лучше вынести в CSS)
-  const logStyles = {
-    container: {
-      marginTop: '20px',
-      border: '1px solid #ccc',
-      borderRadius: '4px',
-      backgroundColor: '#1e1e1e',
-      color: '#d4d4d4',
-      fontFamily: 'monospace',
-      fontSize: '12px',
-      overflow: 'hidden'
-    },
-    header: {
-      padding: '8px 12px',
-      backgroundColor: '#333',
-      display: 'flex',
-      justifyContent: 'space-between',
-      cursor: 'pointer',
-      fontWeight: 'bold' as const
-    },
-    body: {
-      padding: '10px',
-      maxHeight: '150px',
-      overflowY: 'auto' as const
-    },
-    entry: {
-      marginBottom: '4px'
-    },
-    time: {
-      color: '#858585',
-      marginRight: '8px'
-    },
-    info: { color: '#d4d4d4' },
-    success: { color: '#4caf50' },
-    error: { color: '#f44336' }
-  };
-
   return (
-    <div className="table-container" style={{ overflowY: 'auto', maxHeight: 'calc(100vh - 160px)', display: 'flex', flexDirection: 'column' }}>
+    <div className="table-container ortho-container">
       
       {/* 1. ПАНЕЛЬ ДЕЙСТВИЙ (ВСЕГДА ВИДИМА) */}
-      <div className="table-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap' }}>
+      <div className="table-header ortho-header-actions">
         
-        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-
-
+        <div className="action-buttons-group">
             {/* Кнопки действий */}
             <button 
                 className="secondary-button" 
@@ -507,7 +468,7 @@ const ProfileOrthophotos: FC = () => {
         </div>
 
         {/* Группа кнопок справа (Обновить + Загрузить) */}
-        <div style={{ display: 'flex', gap: '8px' }}>
+        <div className="right-buttons-group">
             <button 
                 className="secondary-button" 
                 onClick={loadOrthos}
@@ -518,7 +479,7 @@ const ProfileOrthophotos: FC = () => {
             </button>
             
             <Link to="/uploadortho">
-            <button className="primary-button">+ Загрузить</button>
+                <button className="primary-button">+ Загрузить</button>
             </Link>
         </div>
       </div>
@@ -526,7 +487,7 @@ const ProfileOrthophotos: FC = () => {
       {loadingOrthos && <div className="loading-state">Загрузка...</div>}
       
       {errorOrthos && (
-        <div className="error-message" style={{ color: 'red', padding: '20px', background: '#ffe6e6', borderRadius: '4px' }}>
+        <div className="error-message ortho-error-message">
           <strong>Ошибка:</strong> {errorOrthos}
         </div>
       )}
@@ -537,11 +498,11 @@ const ProfileOrthophotos: FC = () => {
 
       {/* 2. ТАБЛИЦА */}
       {!loadingOrthos && !errorOrthos && orthos.length > 0 && (
-        <div style={{ flexGrow: 1, overflow: 'auto' }}>
+        <div className="ortho-table-wrapper">
             <table className="data-table">
             <thead>
                 <tr>
-                <th style={{ width: '40px', textAlign: 'center' }}>
+                <th className="col-checkbox">
                     <input 
                         type="checkbox" 
                         checked={selectedIds.length === orthos.length && orthos.length > 0}
@@ -551,10 +512,10 @@ const ProfileOrthophotos: FC = () => {
                 <th>Название</th>
                 <th>Превью</th>
                 <th>Проекция (CRS)</th>
-                <th style={{ textAlign: 'center' }}>COG</th>
+                <th className="col-center">COG</th>
                 <th>Статус / Прогресс</th>
                 <th>Границы (W, S, E, N)</th>
-                <th style={{ textAlign: 'center' }}>Видимость</th>
+                <th className="col-center">Видимость</th>
                 </tr>
             </thead>
             <tbody>
@@ -568,7 +529,7 @@ const ProfileOrthophotos: FC = () => {
                         key={ortho.id} 
                         className={selectedIds.includes(ortho.id) ? 'selected-row' : ''}
                     >
-                        <td style={{ textAlign: 'center' }}>
+                        <td className="cell-center">
                             <input 
                                 type="checkbox" 
                                 checked={selectedIds.includes(ortho.id)}
@@ -576,107 +537,74 @@ const ProfileOrthophotos: FC = () => {
                             />
                         </td>
 
-                        <td style={{maxWidth: '200px', wordBreak: 'break-word'}}>
+                        <td className="cell-filename">
                             {ortho.filename}
                         </td>
                         
                         <td>
-                        <div style={{ width: '100px', height: '60px', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#eee', borderRadius: '4px' }}>
+                        <div className="preview-wrapper">
                             {/* [UPDATED] Используем preview_url, если он есть */}
                             <img 
                             src={ortho.preview_url || NO_IMAGE_PLACEHOLDER} 
                             alt="preview" 
-                            style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+                            className="preview-image"
                             onError={(e) => { (e.target as HTMLImageElement).src = NO_IMAGE_PLACEHOLDER; }}
                             />
                         </div>
                         </td>
 
                         <td>
-                            <span style={{
-                            display: 'inline-block',
-                            background: isGoogleProjection(ortho.crs) ? '#e6fffa' : '#fffbe6',
-                            color: isGoogleProjection(ortho.crs) ? '#007a5e' : '#856404',
-                            padding: '4px 8px', 
-                            borderRadius: '12px', 
-                            border: `1px solid ${isGoogleProjection(ortho.crs) ? '#b7eb8f' : '#ffe58f'}`, 
-                            fontSize: '0.8em',
-                            fontWeight: 500
-                            }}>
-                            {ortho.crs || 'Не определено'}
+                            <span className={`badge-crs ${isGoogleProjection(ortho.crs) ? 'badge-crs-google' : 'badge-crs-other'}`}>
+                                {ortho.crs || 'Не определено'}
                             </span>
                         </td>
 
-                        <td style={{ textAlign: 'center' }}>
+                        <td className="cell-center">
                             {ortho.is_cog ? (
-                                <span style={{
-                                    display: 'inline-block',
-                                    background: '#e6fffa',
-                                    color: '#007a5e',
-                                    padding: '4px 8px',
-                                    borderRadius: '12px',
-                                    border: '1px solid #b7eb8f',
-                                    fontSize: '0.8em',
-                                    fontWeight: 500
-                                }}>
-                                    Да
-                                </span>
+                                <span className="badge-cog badge-cog-yes">Да</span>
                             ) : (
-                                <span style={{
-                                    display: 'inline-block',
-                                    background: '#fff0f6',
-                                    color: '#eb2f96',
-                                    padding: '4px 8px',
-                                    borderRadius: '12px',
-                                    border: '1px solid #ffadd2',
-                                    fontSize: '0.8em',
-                                    fontWeight: 500
-                                }}>
-                                    Нет
-                                </span>
+                                <span className="badge-cog badge-cog-no">Нет</span>
                             )}
                         </td>
 
                         <td style={{ width: '200px' }}>
                             {hasProgress ? (
-                                <div style={{ width: '100%' }}>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2px', fontSize: '11px' }}>
+                                <div className="progress-wrapper">
+                                    <div className="progress-text">
                                         <span>Обработка...</span>
                                         <span>{progress}%</span>
                                     </div>
-                                    <div style={{ width: '100%', height: '8px', background: '#e0e0e0', borderRadius: '4px', overflow: 'hidden' }}>
-                                        <div style={{ 
-                                            width: `${progress}%`, 
-                                            height: '100%', 
-                                            background: '#4caf50', 
-                                            transition: 'width 0.5s ease-in-out' 
-                                        }} />
+                                    <div className="progress-track">
+                                        <div 
+                                            className="progress-fill" 
+                                            style={{ width: `${progress}%` }} 
+                                        />
                                     </div>
                                 </div>
                             ) : (
-                                <span style={{fontSize:'0.8em', color:'#555'}}>Готов к работе</span>
+                                <span className="status-ready">Готов к работе</span>
                             )}
                         </td>
 
-                        <td style={{ fontSize: '0.85em', color: '#555' }}>
+                        <td className="cell-bounds">
                         {ortho.bounds ? (
                             <>
-                            <div style={{whiteSpace: 'nowrap'}}>W: {ortho.bounds.west.toFixed(5)}</div>
-                            <div style={{whiteSpace: 'nowrap'}}>S: {ortho.bounds.south.toFixed(5)}</div>
-                            <div style={{whiteSpace: 'nowrap'}}>E: {ortho.bounds.east.toFixed(5)}</div>
-                            <div style={{whiteSpace: 'nowrap'}}>N: {ortho.bounds.north.toFixed(5)}</div>
+                            <div className="bounds-line">W: {ortho.bounds.west.toFixed(5)}</div>
+                            <div className="bounds-line">S: {ortho.bounds.south.toFixed(5)}</div>
+                            <div className="bounds-line">E: {ortho.bounds.east.toFixed(5)}</div>
+                            <div className="bounds-line">N: {ortho.bounds.north.toFixed(5)}</div>
                             </>
                         ) : (
-                            <span style={{ fontStyle: 'italic', color: '#999' }}>Нет геоданных</span>
+                            <span className="no-bounds">Нет геоданных</span>
                         )}
                         </td>
 
-                        <td style={{ textAlign: 'center' }}>
+                        <td className="cell-center">
                             <input 
                                 type="checkbox"
                                 checked={visibleIds.includes(ortho.id)}
                                 disabled={true} 
-                                style={{ cursor: 'not-allowed', opacity: 0.7 }}
+                                className="checkbox-disabled"
                             />
                         </td>
                     </tr>
@@ -687,27 +615,27 @@ const ProfileOrthophotos: FC = () => {
         </div>
       )}
 
-                  {/* Счетчик выделенных */}
-            <span style={{ fontSize: '0.9em', fontWeight: 'bold', marginRight: '5px', minWidth: '80px' }}>
-                {selectedIds.length > 0 ? `Выбрано: ${selectedIds.length}` : 'Выберите элементы'}
-            </span>
+      {/* Счетчик выделенных */}
+      <span className="selected-count">
+          {selectedIds.length > 0 ? `Выбрано: ${selectedIds.length}` : 'Выберите элементы'}
+      </span>
 
       {/* 3. ПАНЕЛЬ ЛОГОВ */}
-      <div style={logStyles.container}>
-        <div style={logStyles.header} onClick={() => setShowLogs(!showLogs)}>
+      <div className="log-container">
+        <div className="log-header" onClick={() => setShowLogs(!showLogs)}>
             <span>Системные логи ({logs.length})</span>
             <span>{showLogs ? '▼' : '▲'}</span>
         </div>
         
         {showLogs && (
-            <div style={logStyles.body}>
+            <div className="log-body">
                 {logs.length === 0 ? (
-                    <div style={{ color: '#858585', fontStyle: 'italic' }}>Логи пусты. Начните работу с файлами.</div>
+                    <div className="log-empty">Логи пусты. Начните работу с файлами.</div>
                 ) : (
                     logs.map(log => (
-                        <div key={log.id} style={logStyles.entry}>
-                            <span style={logStyles.time}>[{log.time}]</span>
-                            <span style={logStyles[log.type]}>{log.message}</span>
+                        <div key={log.id} className="log-entry">
+                            <span className="log-time">[{log.time}]</span>
+                            <span className={`log-msg log-${log.type}`}>{log.message}</span>
                         </div>
                     ))
                 )}

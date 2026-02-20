@@ -45,8 +45,14 @@ export interface OrthoItem {
   id: number;
   filename: string;
   url: string;
-  preview_url?: string; // [NEW] Ссылка на миниатюру
-  bounds: {
+  preview_url?: string; // Ссылка на миниатюру
+  bounds: { // Сырые границы (могут быть в метрах)
+    north: number;
+    south: number;
+    east: number;
+    west: number;
+  } | null;
+  wgs84_bounds?: { // [NEW] Точные границы в градусах (WGS84) из базы данных
     north: number;
     south: number;
     east: number;
@@ -242,7 +248,7 @@ export async function fetchOrthophotos(): Promise<OrthoItem[]> {
   return items.map(item => ({
     ...item,
     url: (isLocalhost && item.url.startsWith('/')) ? `${API_BASE}${item.url}` : item.url,
-    // [NEW] Подстановка API_BASE для превью
+    // Подстановка API_BASE для превью
     preview_url: (isLocalhost && item.preview_url && item.preview_url.startsWith('/')) 
                  ? `${API_BASE}${item.preview_url}` 
                  : item.preview_url
@@ -275,7 +281,7 @@ export async function processOrthoCog(id: number): Promise<TaskStartResponse> {
   return apiPost<TaskStartResponse>(`/api/orthophotos/${id}/process`);
 }
 
-// [NEW] API запрос для генерации превью
+// API запрос для генерации превью
 export async function generateOrthoPreview(id: number): Promise<TaskStartResponse> {
   return apiPost<TaskStartResponse>(`/api/orthophotos/${id}/generate_preview`);
 }

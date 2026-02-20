@@ -44,8 +44,9 @@ class OrthoService:
                 "id": o.id,
                 "filename": o.filename,
                 "url": f"/api/orthophotos/{o.id}/download",
-                "preview_url": f"/api/orthophotos/{o.id}/preview" if getattr(o, 'preview_filename', None) else None, # [NEW]
+                "preview_url": f"/api/orthophotos/{o.id}/preview" if getattr(o, 'preview_filename', None) else None,
                 "bounds": b if b else {"north": 0, "south": 0, "east": 0, "west": 0},
+                "wgs84_bounds": getattr(o, 'wgs84_bounds', None), # [NEW] Передаем точные границы на клиент
                 "crs": crs_val,
                 "is_visible": getattr(o, 'is_visible', False),
                 "is_cog": getattr(o, 'is_cog', False),
@@ -84,7 +85,7 @@ class OrthoService:
                 
                 logs.append(f"Границы: {bounds}, CRS: {crs}, COG: {is_cog}")
 
-                # [NEW] Автогенерация превью
+                # Автогенерация превью
                 preview_filename = f"{os.path.splitext(filename)[0]}_preview.png"
                 preview_path = os.path.join(self.temp_dir, preview_filename)
                 has_preview = False
@@ -103,7 +104,18 @@ class OrthoService:
                 except Exception as e:
                     logs.append(f"Внимание: Не удалось создать превью: {e}")
 
-                # 2. Создание объекта модели
+                # --- 2. СНАЧАЛА ГРУЗИМ В MINIO ---
+                self.storage.upload_file(filename, input_path)
+                logs.append("Основной файл загружен в MinIO")
+                if os.path.exists(input_path): os.remove(input_path)
+
+                # Загрузка превью в хранилище
+                if has_preview:
+                    self.storage.upload_file(preview_filename, preview_path)
+                    logs.append("Миниатюра загружена в MinIO")
+                    if os.path.exists(preview_path): os.remove(preview_path)
+
+                # --- 3. ЕСЛИ ЗАГРУЗКА В MINIO ПРОШЛА УСПЕШНО, ПИШЕМ В БД ---
                 ortho_obj = Ortho(
                     filename=filename, 
                     bounds=json.dumps(bounds),
@@ -112,31 +124,24 @@ class OrthoService:
                     crs=crs,
                     is_cog=is_cog,             
                     geometry_wkt=footprint_wkt,
-                    preview_filename=preview_filename if has_preview else None # [NEW]
+                    preview_filename=preview_filename if has_preview else None
                 )
                 
-                # 3. Запись в БД
                 ortho_id = self.manager.insert_ortho(ortho_obj)
-                
-                # 4. Загрузка в S3/MinIO
-                if self.storage.upload_file(filename, input_path):
-                    logs.append("Файл загружен в MinIO")
-                    if os.path.exists(input_path): os.remove(input_path)
-                else:
-                    logs.append("Ошибка: MinIO недоступен")
-
-                # [NEW] Загрузка превью в хранилище
-                if has_preview:
-                    if self.storage.upload_file(preview_filename, preview_path):
-                        logs.append("Миниатюра загружена в MinIO")
-                    if os.path.exists(preview_path): os.remove(preview_path)
+                logs.append(f"Успех. Запись добавлена в БД (ID: {ortho_id})")
                 
                 successful.append(filename)
+
             except Exception as e:
-                logs.append(f"Ошибка: {e}")
+                logs.append(f"Ошибка обработки: {e}")
                 failed.append(filename)
+                
+                # Чистим временные файлы в случае любой ошибки (MinIO Full, БД упала и т.д.)
                 if os.path.exists(input_path):
                     try: os.remove(input_path)
+                    except: pass
+                if 'preview_path' in locals() and os.path.exists(preview_path):
+                    try: os.remove(preview_path)
                     except: pass
         
         return successful, failed, logs
@@ -190,7 +195,6 @@ class OrthoService:
                         is_visible=False,
                         is_cog=is_cog,          
                         geometry_wkt=geom_wkt,
-                        # Копируем превью, если оно было
                         preview_filename=getattr(ortho, 'preview_filename', None)
                     )
                     new_id = self.manager.insert_ortho(new_ortho)
@@ -258,7 +262,6 @@ class OrthoService:
                         is_visible=False,
                         is_cog=is_cog,         
                         geometry_wkt=geom_wkt,
-                        # Копируем превью, если оно было
                         preview_filename=getattr(ortho, 'preview_filename', None)
                     )
                     new_id = self.manager.insert_ortho(new_ortho)
@@ -272,7 +275,6 @@ class OrthoService:
         threading.Thread(target=worker).start()
         return task_id
 
-    # [NEW] Генерация превью по требованию
     def start_preview_process(self, ortho_id):
         """Ручная генерация превью для уже загруженного файла"""
         ortho = self.manager.get_ortho_by_id(ortho_id)

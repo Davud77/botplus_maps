@@ -589,7 +589,7 @@ input:focus, textarea:focus {
 .layer-image-container { position: relative; width: 100%; height: 80px; overflow: hidden; }
 .layer-image { width: 100%; height: 100%; object-fit: cover; }
 .layer-gradient { position: absolute; bottom: 0; left: 0; right: 0; height: 40%; background: linear-gradient(transparent, rgba(0,0,0,0.7)); }
-.layer-name { position: absolute; bottom: 4px; left: 8px; color: var(--color-text); font-size: 14px; }
+.layer-name {  bottom: 4px; left: 8px; color: var(--color-text); font-size: 14px; }
 
 /* Info panel blocks */
 
@@ -1280,7 +1280,9 @@ h3 { margin: 0; color: var(--color-text); }
 
 .ortho-card {
   display: flex;
-    width: 184px;
+      background-color: black;
+    border-radius: 10px;
+    width: 48%;
     flex-direction: column;
     align-content: center;
     align-items: center;
@@ -1289,18 +1291,25 @@ h3 { margin: 0; color: var(--color-text); }
 }
 
 .ortho-header  {
+      height: 30px;
   font-size: 14px;
   font-weight: 500;
   color: var(--color-text);
-  word-break: break-all;
+  margin: 10px;
+}
+
+.ortho-preview {
+  width: 150px;
+  height: 150px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .ortho-preview-img {
-  width: 150px;
-  height: 150px;
-  object-fit: cover;
-  border-radius: 6px;
-  margin-top: 8px;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
 }
 
 .ortho-actions {
@@ -1543,4 +1552,783 @@ h3 { margin: 0; color: var(--color-text); }
   background-color: var(--color-surface);
     margin: 10px;
     border-radius: var(--radius-base);
+}
+
+
+/* Контейнер и шапка */
+.profile-vector-container {
+  overflow-y: auto;
+  max-height: calc(100vh - 160px);
+}
+
+.profile-vector-header {
+  justify-content: space-between;
+}
+
+.header-buttons {
+  display: flex;
+  gap: 10px;
+}
+
+.blue-btn {
+  background-color: #2196F3 !important;
+}
+
+/* Статусы и ошибки */
+.status-message {
+  padding: 20px;
+}
+
+.error-message {
+  color: red;
+}
+
+/* Секция базы данных */
+.db-section {
+  margin-top: 20px;
+  margin-bottom: 20px;
+}
+
+.db-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid #eee;
+  padding-bottom: 10px;
+  margin-bottom: 10px;
+}
+
+.db-title {
+  margin: 0;
+}
+
+.db-subtitle {
+  color: #666;
+}
+
+.status-active {
+  color: green;
+}
+
+.db-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.small-btn {
+  font-size: 0.8em;
+  padding: 5px 10px;
+}
+
+/* Форма создания слоя */
+.create-layer-form {
+  background: #f5f5f5;
+  padding: 15px;
+  border-radius: 4px;
+  margin-bottom: 15px;
+  border: 1px solid #ddd;
+}
+
+.create-layer-form h5 {
+  margin: 0; /* Опционально, чтобы заголовок смотрелся аккуратнее */
+}
+
+.form-controls {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-top: 10px;
+}
+
+.form-input {
+  padding: 8px;
+  flex: 1;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}
+
+.form-select {
+  padding: 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}
+
+/* Пустая база */
+.empty-db-message {
+  padding: 10px;
+  color: #888;
+  font-style: italic;
+  font-size: 0.9em;
+}
+
+/* Схема и таблицы */
+.schema-section {
+  margin-bottom: 15px;
+}
+
+.schema-header {
+  padding: 5px 10px;
+  background-color: #eef2f5;
+  border-left: 4px solid #2196F3;
+  margin-bottom: 5px;
+  font-weight: bold;
+  font-size: 0.9em;
+  color: #444;
+}
+
+.schema-table {
+  margin-top: 0;
+  margin-left: 10px;
+  width: calc(100% - 10px);
+}
+
+/* Бейджи типа геометрии */
+.geometry-badge {
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.85em;
+}
+
+.bg-polygon {
+  background-color: #e3f2fd;
+}
+
+.bg-line {
+  background-color: #fff3e0;
+}
+
+.bg-point {
+  background-color: #e8f5e9;
+}
+
+
+/* Контейнер */
+.profile-panos-container {
+  overflow-y: auto;
+  max-height: calc(100vh - 160px);
+}
+
+/* Ошибки */
+.panos-error {
+  color: red;
+  padding: 10px;
+}
+
+/* Настройки столбцов таблицы */
+.col-id {
+  width: 50px;
+}
+
+.col-actions {
+  width: 120px;
+}
+
+/* Ячейки таблицы */
+.cell-filename {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Теги и ссылки */
+.no-tags {
+  color: #ccc;
+  font-style: italic;
+}
+
+.coord-link {
+  color: #2196f3;
+  text-decoration: none;
+}
+
+.coord-link:hover {
+  text-decoration: underline;
+}
+
+
+
+/* Основной контейнер */
+.ortho-container {
+  overflow-y: auto;
+  max-height: calc(100vh - 160px);
+  display: flex;
+  flex-direction: column;
+}
+
+/* Панель действий */
+.ortho-header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.action-buttons-group {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.right-buttons-group {
+  display: flex;
+  gap: 8px;
+}
+
+/* Ошибки */
+.ortho-error-message {
+  color: red;
+  padding: 20px;
+  background: #ffe6e6;
+  border-radius: 4px;
+}
+
+/* Обертка таблицы и ячейки */
+.ortho-table-wrapper {
+  flex-grow: 1;
+  overflow: auto;
+}
+
+.col-checkbox {
+  width: 40px;
+  text-align: center;
+}
+
+.col-center, .cell-center {
+  text-align: center;
+}
+
+.cell-filename {
+  max-width: 200px;
+  word-break: break-word;
+}
+
+/* Превью */
+.preview-wrapper {
+  width: 100px;
+  height: 60px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #eee;
+  border-radius: 4px;
+}
+
+.preview-image {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+/* Бейджи статусов (CRS и COG) */
+.badge-crs, .badge-cog {
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 12px;
+  font-size: 0.8em;
+  font-weight: 500;
+}
+
+.badge-crs-google, .badge-cog-yes {
+  background: #e6fffa;
+  color: #007a5e;
+  border: 1px solid #b7eb8f;
+}
+
+.badge-crs-other {
+  background: #fffbe6;
+  color: #856404;
+  border: 1px solid #ffe58f;
+}
+
+.badge-cog-no {
+  background: #fff0f6;
+  color: #eb2f96;
+  border: 1px solid #ffadd2;
+}
+
+/* Прогресс-бар */
+.progress-wrapper {
+  width: 100%;
+}
+
+.progress-text {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 2px;
+  font-size: 11px;
+}
+
+.progress-track {
+  width: 100%;
+  height: 8px;
+  background: #e0e0e0;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: #4caf50;
+  transition: width 0.5s ease-in-out;
+}
+
+.status-ready {
+  font-size: 0.8em;
+  color: #555;
+}
+
+/* Границы (Bounds) */
+.cell-bounds {
+  font-size: 0.85em;
+  color: #555;
+}
+
+.bounds-line {
+  white-space: nowrap;
+}
+
+.no-bounds {
+  font-style: italic;
+  color: #999;
+}
+
+/* Чекбоксы и счетчики */
+.checkbox-disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.selected-count {
+  font-size: 0.9em;
+  font-weight: bold;
+  margin-right: 5px;
+  min-width: 80px;
+}
+
+/* Панель логов */
+.log-container {
+  margin-top: 20px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background-color: #1e1e1e;
+  color: #d4d4d4;
+  font-family: monospace;
+  font-size: 12px;
+  overflow: hidden;
+}
+
+.log-header {
+  padding: 8px 12px;
+  background-color: #333;
+  display: flex;
+  justify-content: space-between;
+  cursor: pointer;
+  font-weight: bold;
+}
+
+.log-body {
+  padding: 10px;
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+.log-empty {
+  color: #858585;
+  font-style: italic;
+}
+
+.log-entry {
+  margin-bottom: 4px;
+}
+
+.log-time {
+  color: #858585;
+  margin-right: 8px;
+}
+
+/* Цвета сообщений логов */
+.log-info {
+  color: #d4d4d4;
+}
+
+.log-success {
+  color: #4caf50;
+}
+
+.log-error {
+  color: #f44336;
+}
+
+
+/* Контейнер попапа */
+.vector-popup-container {
+  font-size: 12px;
+  max-width: 280px;
+  max-height: 300px;
+  overflow-y: auto;
+  font-family: sans-serif;
+}
+
+/* Заголовок попапа */
+.vector-popup-header {
+  background: #f4f4f4;
+  padding: 5px;
+  border-bottom: 1px solid #ddd;
+  margin-bottom: 5px;
+}
+
+/* Таблица свойств */
+.vector-popup-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+/* Строка таблицы */
+.vector-popup-tr {
+  border-bottom: 1px solid #eee;
+}
+
+/* Ключ (название свойства) */
+.vector-popup-key {
+  font-weight: 600;
+  padding: 3px 5px;
+  color: #555;
+  vertical-align: top;
+}
+
+/* Значение свойства */
+.vector-popup-value {
+  padding: 3px 5px;
+  word-break: break-word;
+}
+
+
+/* Кнопки действий */
+.action-buttons-row {
+  display: flex;
+  gap: 4px;
+}
+
+.action-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  transition: background 0.2s;
+  min-width: 40px;
+}
+
+.action-btn:hover:not(:disabled) {
+  background: #e3f2fd;
+}
+
+.action-btn:disabled {
+  cursor: default;
+  opacity: 0.3;
+}
+
+.action-btn-icon {
+  color: #1976D2;
+}
+
+.action-btn:disabled .action-btn-icon {
+  color: #999;
+}
+
+/* Контент панели (скролл-область) */
+.vector-panel-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px;
+}
+
+.vector-panel-message {
+  text-align: center;
+  color: #888;
+  padding: 20px;
+}
+
+/* Группы и схемы */
+.vector-group-container {
+  margin-bottom: 12px;
+}
+
+.vector-schema-container {
+  margin-left: 8px;
+  border-left: 2px solid #eee;
+  padding-left: 8px;
+  margin-top: 6px;
+}
+
+/* Элемент списка (слой) */
+.layer-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 8px;
+  font-size: 13px;
+  cursor: pointer;
+  border-radius: 4px;
+  background-color: transparent;
+  transition: background-color 0.2s;
+}
+
+.layer-item:hover {
+  background-color: #f5f5f5;
+}
+
+.layer-item.selected {
+  background-color: #e3f2fd;
+}
+
+/* Название слоя */
+.layer-name {
+  color: #555;
+  font-weight: 400;
+}
+
+.layer-name.active {
+  color: #ffffff;
+}
+
+.layer-name.selected {
+  color: #1565C0;
+  font-weight: 500;
+}
+
+/* Кнопка видимости слоя (глазик/спиннер) */
+.layer-toggle-btn {
+  border: none;
+  background: none;
+  cursor: pointer;
+  padding: 2px;
+  display: flex;
+  align-items: center;
+}
+
+.layer-toggle-btn:disabled {
+  cursor: wait;
+}
+
+/* Мини-спиннер загрузки */
+.spinner-mini {
+  width: 14px;
+  height: 14px;
+  border: 2px solid #ccc;
+  border-top-color: #2196F3;
+  border-radius: 50%;
+  animation: spin-mini 1s linear infinite;
+}
+
+@keyframes spin-mini {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+
+/* Основной контейнер */
+.panorama-container {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  background: #222;
+  overflow: hidden;
+}
+
+/* Контейнер самого просмотрщика */
+.panorama-viewer {
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+  outline: none;
+}
+
+.panorama-viewer:active {
+  cursor: grabbing;
+}
+
+/* Оверлей ошибки */
+.pano-error-overlay {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: #ff6b6b;
+  background: rgba(0, 0, 0, 0.8);
+  padding: 20px;
+  border-radius: 8px;
+  z-index: 20;
+  text-align: center;
+  max-width: 80%;
+}
+
+.pano-error-icon {
+  font-size: 24px;
+  margin-bottom: 10px;
+}
+
+/* Оверлей контролов (кнопки) */
+.pano-controls-overlay {
+  position: absolute;
+  bottom: 20px;
+  left: 20px;
+  z-index: 10;
+  display: flex;
+  gap: 10px;
+}
+
+.pano-fullscreen-btn {
+  padding: 8px 16px;
+  background: rgba(30, 30, 30, 0.8);
+  color: white;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  backdrop-filter: blur(4px);
+  transition: background 0.2s ease;
+}
+
+.pano-fullscreen-btn:hover {
+  background: rgba(60, 60, 60, 0.9);
+}
+
+/* Оверлей информации */
+.pano-info-overlay {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  color: white;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+  z-index: 10;
+  pointer-events: none; /* Чтобы клики проходили сквозь плашку к панораме */
+  background: linear-gradient(to right, rgba(0, 0, 0, 0.6), transparent);
+  padding: 8px 12px;
+  border-radius: 4px;
+}
+
+.pano-info-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.pano-info-subtitle {
+  font-size: 11px;
+  opacity: 0.8;
+  margin-top: 2px;
+}
+
+.pano-info-alt {
+  font-size: 11px;
+  opacity: 0.8;
+}
+
+
+/* Главная обертка страницы карты */
+.map-page-wrapper {
+  height: 100vh;
+  width: 100%;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Контейнер самой карты Leaflet */
+.main-map-container {
+  height: 100%;
+  width: 100%;
+}
+
+/* --- Стили для виджета просмотра панорам поверх карты --- */
+
+/* Динамическая высота контейнера панорамы */
+.pano-viewer-expanded {
+  height: 100%;
+}
+
+.pano-viewer-collapsed {
+  height: 50%;
+}
+
+/* Общие стили для кнопок поверх панорамы */
+.pano-action-btn {
+  position: absolute;
+  top: 10px;
+  z-index: 2000;
+  background: white;
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+  transition: background-color 0.2s;
+}
+
+.pano-action-btn:hover {
+  background: #f0f0f0;
+}
+
+/* Кнопка закрытия (крестик) */
+.pano-close-btn {
+  right: 10px;
+  border-radius: 50%;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Кнопка Развернуть/Свернуть */
+.pano-expand-btn {
+  right: 50px;
+  border-radius: 4px;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: bold;
+}
+
+
+/* =========================================
+   ГЛОБАЛЬНАЯ СТИЛИЗАЦИЯ СКРОЛЛБАРОВ
+   ========================================= */
+
+/* 1. Стандартный синтаксис (Firefox) */
+* {
+  /* Первое значение — цвет самого ползунка (thumb), второе — цвет фона (track) */
+  scrollbar-color: #000000 transparent; 
+  scrollbar-width: thin; /* Делаем скроллбар чуть тоньше (опционально) */
+}
+
+/* 2. Синтаксис WebKit (Chrome, Edge, Safari) */
+
+/* Ширина вертикального и высота горизонтального скроллбара */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+/* Фон скроллбара (дорожка) */
+::-webkit-scrollbar-track {
+  background: transparent; /* Можно задать цвет, если нужен не прозрачный фон */
+  border-radius: 4px;
+}
+
+/* Сама полоска прокрутки (ползунок) */
+::-webkit-scrollbar-thumb {
+  background-color: #000000; /* Черный цвет */
+  border-radius: 4px; /* Скругляем края */
+}
+
+/* Ползунок при наведении мыши (опционально, сделал темно-серым для отклика) */
+::-webkit-scrollbar-thumb:hover {
+  background-color: #333333; 
 }

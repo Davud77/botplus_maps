@@ -4,6 +4,7 @@ import { BasePanel } from './BasePanel';
 import { useVectorStore } from '../../hooks/useVectorStore';
 import { fetchVectorDbs, fetchVectorLayers, VectorLayerItem } from '../../../../utils/api';
 
+
 interface VectorGroup {
   dbName: string;
   layers: VectorLayerItem[];
@@ -62,27 +63,12 @@ export const VectorPanel: React.FC<{ onClose: () => void }> = ({ onClose }) => {
     icon, label, onClick, disabled 
   }: { icon: React.ReactNode, label: string, onClick?: () => void, disabled: boolean }) => (
     <button 
+      className="action-btn"
       onClick={onClick}
       disabled={disabled}
       title={label}
-      style={{
-        background: 'none',
-        border: 'none',
-        cursor: disabled ? 'default' : 'pointer',
-        opacity: disabled ? 0.3 : 1,
-        padding: '6px',
-        borderRadius: '4px',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        gap: '2px',
-        transition: 'background 0.2s',
-        minWidth: '40px'
-      }}
-      onMouseEnter={(e) => !disabled && (e.currentTarget.style.background = '#e3f2fd')}
-      onMouseLeave={(e) => !disabled && (e.currentTarget.style.background = 'none')}
     >
-      <div style={{ color: disabled ? '#999' : '#1976D2' }}>{icon}</div>
+      <div className="action-btn-icon">{icon}</div>
     </button>
   );
 
@@ -91,7 +77,7 @@ export const VectorPanel: React.FC<{ onClose: () => void }> = ({ onClose }) => {
       
       {/* 1. ПАНЕЛЬ ДЕЙСТВИЙ (Panel Actions) */}
       <div className="vector-panel-actions">
-        <div style={{ display: 'flex', gap: '4px' }}>
+        <div className="action-buttons-row">
             {/* Таблица */}
             <ActionButton 
               disabled={!selectedLayer} 
@@ -150,11 +136,11 @@ export const VectorPanel: React.FC<{ onClose: () => void }> = ({ onClose }) => {
       </div>
 
       {/* 2. СПИСОК СЛОЕВ (Scrollable) */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '10px' }}>
-        {loading && <div style={{textAlign:'center', color:'#888', padding: '20px'}}>Загрузка...</div>}
+      <div className="vector-panel-content">
+        {loading && <div className="vector-panel-message">Загрузка...</div>}
         
         {!loading && groups.length === 0 && (
-          <div style={{textAlign:'center', color:'#999', padding: '20px'}}>Нет доступных слоев</div>
+          <div className="vector-panel-message">Нет доступных слоев</div>
         )}
         
         {groups.map(group => {
@@ -167,11 +153,11 @@ export const VectorPanel: React.FC<{ onClose: () => void }> = ({ onClose }) => {
           const schemas = Object.keys(bySchema).sort();
 
           return (
-            <div className="vector-panel-group" key={group.dbName} style={{ marginBottom: 12 }}>
+            <div className="vector-group-container" key={group.dbName}>
               <div className="vector-panel-group-header"> {group.dbName}</div>
               
               {schemas.map(schema => (
-                <div key={schema} style={{ marginLeft: 8, borderLeft: '2px solid #eee', paddingLeft: 8, marginTop: 6 }}>
+                <div key={schema} className="vector-schema-container">
                   <div className="vector-panel-schema-header">
                     {schema}
                   </div>
@@ -186,24 +172,12 @@ export const VectorPanel: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                        <div 
                         key={layer.id} 
                         onClick={() => handleSelectLayer(group.dbName, layer)}
-                        style={{ 
-                           display: 'flex', 
-                           justifyContent: 'space-between', 
-                           alignItems: 'center', 
-                           padding: '6px 8px',
-                           fontSize: 13,
-                           cursor: 'pointer',
-                           borderRadius: '4px',
-                           backgroundColor: isSelected ? '#e3f2fd' : 'transparent',
-                           transition: 'background-color 0.2s'
-                       }}>
+                        className={`layer-item ${isSelected ? 'selected' : ''}`}
+                       >
                          <span 
-                           // Показываем полное имя при наведении
                            title={layer.tableName}
-                           style={{ 
-                             color: isSelected ? '#1565C0' : (isActive ? '#000' : '#555'),
-                             fontWeight: isSelected ? 500 : 400
-                         }}>
+                           className={`layer-name ${isSelected ? 'selected' : (isActive ? 'active' : '')}`}
+                         >
                            {/* Ограничиваем длину названия до 30 символов + троеточие */}
                            {layer.tableName.length > 10 
                              ? `${layer.tableName.slice(0, 30)}...` 
@@ -216,14 +190,7 @@ export const VectorPanel: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                                toggleLayer(group.dbName, layer);
                            }}
                            disabled={isLoad}
-                           style={{ 
-                               border: 'none', 
-                               background: 'none', 
-                               cursor: isLoad ? 'wait' : 'pointer',
-                               padding: '2px',
-                               display: 'flex',
-                               alignItems: 'center'
-                           }}
+                           className="layer-toggle-btn"
                            title={isActive ? "Скрыть слой" : "Показать слой"}
                          >
                            {isLoad ? (
@@ -247,17 +214,6 @@ export const VectorPanel: React.FC<{ onClose: () => void }> = ({ onClose }) => {
           )
         })}
       </div>
-      
-      <style>{`
-        .spinner-mini {
-          width: 14px; height: 14px;
-          border: 2px solid #ccc;
-          border-top-color: #2196F3;
-          border-radius: 50%;
-          animation: spin 1s linear infinite;
-        }
-        @keyframes spin { from {transform: rotate(0deg);} to {transform: rotate(360deg);} }
-      `}</style>
     </BasePanel>
   );
 };

@@ -84,7 +84,7 @@ const ProfilePanoramas: FC = () => {
   };
 
   return (
-    <div className="table-container" style={{ overflowY: 'auto', maxHeight: 'calc(100vh - 160px)' }}>
+    <div className="table-container profile-panos-container">
       <div className="table-header">
         <h3>Мои панорамы (360°)</h3>
         <Link to="/upload">
@@ -94,7 +94,7 @@ const ProfilePanoramas: FC = () => {
 
       {loadingPanos && <div className="loading-state">Загрузка списка панорам...</div>}
       
-      {errorPanos && <div className="error-message" style={{ color: 'red', padding: '10px' }}>{errorPanos}</div>}
+      {errorPanos && <div className="error-message panos-error">{errorPanos}</div>}
       
       {!loadingPanos && !errorPanos && panos.length === 0 && (
         <div className="empty-state">Нет загруженных панорам</div>
@@ -104,19 +104,19 @@ const ProfilePanoramas: FC = () => {
         <table className="data-table">
           <thead>
             <tr>
-              <th style={{ width: '50px' }}>ID</th>
+              <th className="col-id">ID</th>
               <th>Файл</th>
               <th>Теги</th>
               <th>Координаты</th>
               <th>Дата загрузки</th>
-              <th style={{ width: '120px' }}>Действия</th>
+              <th className="col-actions">Действия</th>
             </tr>
           </thead>
           <tbody>
             {panos.map((pano) => (
               <tr key={pano.id}>
                 <td>{pano.id}</td>
-                <td title={pano.filename} style={{ maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <td title={pano.filename} className="cell-filename">
                     {pano.filename}
                 </td>
                 <td>
@@ -133,7 +133,7 @@ const ProfilePanoramas: FC = () => {
                         }}
                     />
                   ) : (
-                    pano.tags ? <span className="tag-badge">{pano.tags}</span> : <span style={{color: '#ccc', fontStyle: 'italic'}}>Нет тегов</span>
+                    pano.tags ? <span className="tag-badge">{pano.tags}</span> : <span className="no-tags">Нет тегов</span>
                   )}
                 </td>
                 <td>
@@ -143,7 +143,6 @@ const ProfilePanoramas: FC = () => {
                            target="_blank" 
                            rel="noreferrer"
                            className="coord-link"
-                           style={{ color: '#2196f3', textDecoration: 'none' }}
                         >
                             {pano.latitude.toFixed(5)}, {pano.longitude.toFixed(5)}
                         </a>

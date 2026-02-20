@@ -1,7 +1,7 @@
 # ./backend/models/ortho.py
 
 class Ortho:
-    def __init__(self, filename, bounds=None, url=None, ortho_id=None, upload_date=None, crs=None, is_visible=False, is_cog=False, geometry_wkt=None, preview_filename=None):
+    def __init__(self, filename, bounds=None, url=None, ortho_id=None, upload_date=None, crs=None, is_visible=False, is_cog=False, geometry_wkt=None, preview_filename=None, wgs84_bounds=None):
         self.id = ortho_id
         self.filename = filename
         self.bounds = bounds
@@ -14,6 +14,7 @@ class Ortho:
         self.is_cog = is_cog
         self.geometry_wkt = geometry_wkt  # Используется для передачи WKT в менеджер при вставке
         self.preview_filename = preview_filename # Ссылка на файл превью
+        self.wgs84_bounds = wgs84_bounds # [NEW] Точные границы (Bounding Box) в градусах WGS84 из PostGIS
 
     def to_dict(self):
         """
@@ -24,6 +25,7 @@ class Ortho:
             "filename": self.filename,
             "url": self.url,
             "bounds": self.bounds,
+            "wgs84_bounds": self.wgs84_bounds, # [NEW] Передаем точные границы на фронтенд
             "crs": self.crs,
             "is_visible": self.is_visible,
             "is_cog": self.is_cog,  # Добавляем флаг COG в ответ API

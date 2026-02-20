@@ -13,30 +13,6 @@ interface OrthoPanelProps {
   map: L.Map | null;
 }
 
-// Конвертер координат: из метров EPSG:3857 в градусы WGS84 (Leaflet LatLngBounds)
-const normalizeBounds = (bounds: any, crs?: string): L.LatLngBounds | null => {
-  if (!bounds) return null;
-
-  // Если координаты уже похожи на градусы WGS84 (широта <= 90, долгота <= 180)
-  if (Math.abs(bounds.south) <= 90 && Math.abs(bounds.west) <= 180) {
-    return L.latLngBounds([bounds.south, bounds.west], [bounds.north, bounds.east]);
-  }
-
-  // Если координаты в метрах Web Mercator (EPSG:3857)
-  if (crs && (crs.includes('3857') || crs.includes('Pseudo-Mercator') || crs.includes('Google'))) {
-    const toLat = (y: number) => (180 / Math.PI) * (2 * Math.atan(Math.exp((y / 20037508.34) * Math.PI)) - Math.PI / 2);
-    const toLng = (x: number) => (x / 20037508.34) * 180;
-    
-    return L.latLngBounds(
-      [toLat(bounds.south), toLng(bounds.west)],
-      [toLat(bounds.north), toLng(bounds.east)]
-    );
-  }
-
-  // Если это локальная МСК в метрах, которую мы не можем перевести без proj4
-  return null;
-};
-
 export const OrthoPanel: React.FC<OrthoPanelProps> = ({ onClose, map }) => {
   const { orthoImages, selectedOrthoIds, isLoadingOrtho, fetchOrthos, toggleOrtho } = useMapStore();
   
@@ -68,22 +44,16 @@ export const OrthoPanel: React.FC<OrthoPanelProps> = ({ onClose, map }) => {
     };
   }, [map]);
 
-  // Фильтрация списка ортофотопланов
+  // Фильтрация с использованием новых точных wgs84_bounds из БД
   const filteredOrthos = orthoImages.filter(ortho => {
     // 1. Базовая проверка: слой должен быть включен в БД
     if (!ortho.is_visible) return false;
     
-    // 2. Проверяем пересечение с экраном карты
-    if (ortho.bounds && mapBounds) {
-      const orthoLatLngBounds = normalizeBounds(ortho.bounds, ortho.crs);
-      
-      // Если смогли перевести координаты в градусы — фильтруем
-      if (orthoLatLngBounds) {
-        return mapBounds.intersects(orthoLatLngBounds);
-      }
-      
-      // Если координаты в МСК (не перевелись), просто показываем файл, чтобы он не пропал
-      return true;
+    // 2. Используем готовые координаты из БД (которые сгенерированы из PostGIS geometry)
+    if (ortho.wgs84_bounds && mapBounds) {
+      const b = ortho.wgs84_bounds;
+      const orthoLatLngBounds = L.latLngBounds([b.south, b.west], [b.north, b.east]);
+      return mapBounds.intersects(orthoLatLngBounds);
     }
     
     return false;
@@ -122,18 +92,18 @@ export const OrthoPanel: React.FC<OrthoPanelProps> = ({ onClose, map }) => {
 
               {/* 3. Панель действий */}
               <div className="ortho-actions">
-                {/* Кнопка: Показать на карте (Зум) */}
+                {/* Кнопка Зума с использованием WGS84 координат */}
                 <button 
                   className="action-btn zoom-btn"
                   onClick={(e) => { 
                     e.stopPropagation(); 
-                    if (map && ortho.bounds) {
-                       const boundsToZoom = normalizeBounds(ortho.bounds, ortho.crs);
-                       if (boundsToZoom) map.fitBounds(boundsToZoom);
+                    if (map && ortho.wgs84_bounds) {
+                       const b = ortho.wgs84_bounds;
+                       map.fitBounds(L.latLngBounds([b.south, b.west], [b.north, b.east]));
                     }
                   }}
                   title="Приблизить к слою"
-                  disabled={!map || !ortho.bounds}
+                  disabled={!map || !ortho.wgs84_bounds}
                 >
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <circle cx="11" cy="11" r="8"></circle>

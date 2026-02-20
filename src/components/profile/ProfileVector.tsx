@@ -87,20 +87,28 @@ const ProfileVector: FC = () => {
     }
   };
 
+  const getGeometryBadgeClass = (geometryType: string) => {
+    if (geometryType.includes('POLYGON')) return 'bg-polygon';
+    if (geometryType.includes('LINE')) return 'bg-line';
+    return 'bg-point';
+  };
+
   return (
-    <div className="table-container" style={{ overflowY: 'auto', maxHeight: 'calc(100vh - 160px)' }}>
-      <div className="table-header" style={{ justifyContent: 'space-between' }}>
+    <div className="table-container profile-vector-container">
+      <div className="table-header profile-vector-header">
         <h3>Управление PostGIS (Local Docker)</h3>
-        <div style={{ display: 'flex', gap: '10px' }}>
-          <button className="primary-button" onClick={handleCreateVectorDB}>+ Создать БД</button>
-          <button className="primary-button" style={{ backgroundColor: '#2196F3' }} onClick={handleConnectVectorDB}>
+        <div className="header-buttons">
+          <button className="primary-button" onClick={handleCreateVectorDB}>
+            + Создать БД
+          </button>
+          <button className="primary-button blue-btn" onClick={handleConnectVectorDB}>
             &#128279; Подключить БД
           </button>
         </div>
       </div>
 
-      {loadingVector && <div style={{ padding: '20px' }}>Загрузка данных PostGIS...</div>}
-      {errorVector && <div style={{ color: 'red', padding: '20px' }}>{errorVector}</div>}
+      {loadingVector && <div className="status-message">Загрузка данных PostGIS...</div>}
+      {errorVector && <div className="status-message error-message">{errorVector}</div>}
 
       {!loadingVector && !errorVector && vectorDbs.length === 0 && (
         <div className="empty-state">Нет доступных баз данных</div>
@@ -118,19 +126,21 @@ const ProfileVector: FC = () => {
         const sortedSchemas = Object.keys(layersBySchema).sort();
 
         return (
-          <div key={db.id} className="section" style={{ marginTop: '20px', marginBottom: '20px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #eee', paddingBottom: '10px', marginBottom: '10px' }}>
+          <div key={db.id} className="section db-section">
+            <div className="db-header">
               <div>
-                <h4 style={{ margin: 0 }}>🗄️ {db.name}</h4>
-                <small style={{ color: '#666' }}>Internal PostGIS • Status: <span style={{ color: 'green' }}>Active</span></small>
+                <h4 className="db-title">🗄️ {db.name}</h4>
+                <small className="db-subtitle">
+                  Internal PostGIS • Status: <span className="status-active">Active</span>
+                </small>
               </div>
               
               {creatingLayerInDb !== db.name && (
-                <div style={{ display: 'flex', gap: '10px' }}>
-                  <button className="primary-button" style={{ fontSize: '0.8em', padding: '5px 10px' }} onClick={() => setCreatingLayerInDb(db.name)}>
+                <div className="db-actions">
+                  <button className="primary-button small-btn" onClick={() => setCreatingLayerInDb(db.name)}>
                     + Новый слой
                   </button>
-                  <button className="danger-button" style={{ fontSize: '0.8em' }} onClick={() => alert('Отключение БД не реализовано')}>
+                  <button className="danger-button small-btn" onClick={() => alert('Отключение БД не реализовано')}>
                     Отключить
                   </button>
                 </div>
@@ -138,11 +148,21 @@ const ProfileVector: FC = () => {
             </div>
 
             {creatingLayerInDb === db.name && (
-              <div style={{ background: '#f5f5f5', padding: '15px', borderRadius: '4px', marginBottom: '15px', border: '1px solid #ddd' }}>
+              <div className="create-layer-form">
                 <h5>Создание новой таблицы (Слоя) в public</h5>
-                <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginTop: '10px' }}>
-                  <input type="text" placeholder="Имя таблицы (англ)" value={newLayerName} onChange={(e) => setNewLayerName(e.target.value)} style={{ padding: '8px', flex: 1, border: '1px solid #ccc', borderRadius: '4px' }} />
-                  <select value={newLayerType} onChange={(e) => setNewLayerType(e.target.value)} style={{ padding: '8px', border: '1px solid #ccc', borderRadius: '4px' }}>
+                <div className="form-controls">
+                  <input 
+                    type="text" 
+                    placeholder="Имя таблицы (англ)" 
+                    value={newLayerName} 
+                    onChange={(e) => setNewLayerName(e.target.value)} 
+                    className="form-input" 
+                  />
+                  <select 
+                    value={newLayerType} 
+                    onChange={(e) => setNewLayerType(e.target.value)} 
+                    className="form-select"
+                  >
                     <option value="POINT">Точки (POINT)</option>
                     <option value="LINESTRING">Линии (LINESTRING)</option>
                     <option value="POLYGON">Полигоны (POLYGON)</option>
@@ -154,26 +174,32 @@ const ProfileVector: FC = () => {
             )}
 
             {sortedSchemas.length === 0 && (
-              <div style={{ padding: '10px', color: '#888', fontStyle: 'italic', fontSize: '0.9em' }}>База пуста</div>
+              <div className="empty-db-message">База пуста</div>
             )}
 
             {sortedSchemas.map(schemaName => {
               const sortedLayers = layersBySchema[schemaName].sort((a, b) => a.tableName.localeCompare(b.tableName));
               return (
-                <div key={schemaName} style={{ marginBottom: '15px' }}>
-                  <div style={{ padding: '5px 10px', backgroundColor: '#eef2f5', borderLeft: '4px solid #2196F3', marginBottom: '5px', fontWeight: 'bold', fontSize: '0.9em', color: '#444' }}>
+                <div key={schemaName} className="schema-section">
+                  <div className="schema-header">
                     Схема: {schemaName}
                   </div>
-                  <table className="data-table" style={{ marginTop: '0', marginLeft: '10px', width: 'calc(100% - 10px)' }}>
+                  <table className="data-table schema-table">
                     <thead>
-                      <tr><th>Таблица</th><th>Тип геометрии</th><th>SRID</th><th>Объектов</th><th>Действия</th></tr>
+                      <tr>
+                        <th>Таблица</th>
+                        <th>Тип геометрии</th>
+                        <th>SRID</th>
+                        <th>Объектов</th>
+                        <th>Действия</th>
+                      </tr>
                     </thead>
                     <tbody>
                       {sortedLayers.map((layer) => (
                         <tr key={layer.id}>
                           <td><b>{layer.tableName}</b></td>
                           <td>
-                            <span style={{ padding: '2px 6px', borderRadius: '4px', backgroundColor: layer.geometryType.includes('POLYGON') ? '#e3f2fd' : layer.geometryType.includes('LINE') ? '#fff3e0' : '#e8f5e9', fontSize: '0.85em' }}>
+                            <span className={`geometry-badge ${getGeometryBadgeClass(layer.geometryType)}`}>
                               {layer.geometryType}
                             </span>
                           </td>

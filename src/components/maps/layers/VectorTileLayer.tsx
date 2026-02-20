@@ -100,15 +100,15 @@ const VectorTileLayer: React.FC<VectorTileLayerProps> = ({ url, styleConfigs, ac
         L.popup()
           .setLatLng(e.latlng)
           .setContent(`
-            <div style="font-size:12px; max-width:280px; max-height:300px; overflow-y:auto; font-family: sans-serif;">
-              <div style="background: #f4f4f4; padding: 5px; border-bottom: 1px solid #ddd; margin-bottom: 5px;">
+            <div class="vector-popup-container">
+              <div class="vector-popup-header">
                 <strong>Слой:</strong> ${layerName}
               </div>
-              <table style="width:100%; border-collapse: collapse;">
+              <table class="vector-popup-table">
                 ${Object.entries(props).map(([k, v]) => `
-                  <tr style="border-bottom: 1px solid #eee;">
-                    <td style="font-weight:600; padding:3px 5px; color: #555; vertical-align:top;">${k}:</td>
-                    <td style="padding:3px 5px; word-break:break-word;">${v !== null && v !== undefined ? String(v) : ''}</td>
+                  <tr class="vector-popup-tr">
+                    <td class="vector-popup-key">${k}:</td>
+                    <td class="vector-popup-value">${v !== null && v !== undefined ? String(v) : ''}</td>
                   </tr>
                 `).join('')}
               </table>
