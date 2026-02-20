@@ -55,8 +55,7 @@ services:
       DB_NAME: ${DB_NAME}
       AUTH_TYPE: ${PGBOUNCER_AUTH_TYPE}
     volumes:
-       - ./pgbouncer/pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini
-       - ./pgbouncer/userlist.txt:/etc/pgbouncer/userlist.txt
+       - ./pgbouncer:/etc/pgbouncer:ro
     ports:
       - "${PGBOUNCER_PORT}:6432"
 
