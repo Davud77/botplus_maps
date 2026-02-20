@@ -54,6 +54,7 @@ services:
       DB_HOST: db
       DB_NAME: ${DB_NAME}
       AUTH_TYPE: ${PGBOUNCER_AUTH_TYPE}
+      LISTEN_PORT: 6432
     ports:
       - "${PGBOUNCER_PORT}:6432"
 
