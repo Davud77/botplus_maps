@@ -54,8 +54,6 @@ services:
       DB_HOST: db
       DB_NAME: ${DB_NAME}
       AUTH_TYPE: ${PGBOUNCER_AUTH_TYPE}
-    volumes:
-       - ./pgbouncer:/etc/pgbouncer
     ports:
       - "${PGBOUNCER_PORT}:6432"
 
