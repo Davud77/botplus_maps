@@ -1,9 +1,16 @@
+// src/components/maps/layers/OrthoLayer.tsx
 import React from 'react';
 import { TileLayer } from 'react-leaflet';
 // [FIX] Исправлен путь импорта: поднимаемся на одну папку вверх (..) в maps, затем в hooks
 import { useMapStore } from '../hooks/useMapStore';
 
-const TITILER_URL = 'http://localhost:8000';
+// Определяем базовый URL API так же, как в api.ts
+// Если мы разрабатываем локально, стучимся на порт бэкенда.
+// Если на проде (botplus.ru), используем относительный путь, и Nginx сам проксирует запрос.
+const isLocalhost = 
+  typeof window !== 'undefined' && 
+  (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+const API_BASE = isLocalhost ? 'http://localhost:5580' : '';
 
 export const OrthoTileLayer = () => {
   // Теперь TypeScript видит типы из стора
@@ -17,11 +24,10 @@ export const OrthoTileLayer = () => {
         
         if (!ortho) return null;
 
-        const s3Url = `s3://orthophotos/${ortho.filename}`;
-        
-        // Формируем URL. Обратите внимание, что transparent не нужен в URL, 
-        // так как PNG по умолчанию поддерживают альфа-канал.
-        const tileUrl = `${TITILER_URL}/cog/tiles/WebMercatorQuad/{z}/{x}/{y}@1x?url=${encodeURIComponent(s3Url)}`;
+        // ИСПОЛЬЗУЕМ НАШ БЭКЕНД ДЛЯ ПРОКСИРОВАНИЯ ТАЙЛОВ
+        // Flask-бэкенд сам обратится к Titiler внутри Docker сети (по адресу из .env) 
+        // и безопасно вернет готовую PNG картинку тайла на клиент.
+        const tileUrl = `${API_BASE}/api/orthophotos/${id}/tiles/{z}/{x}/{y}.png`;
 
         return (
           <TileLayer
