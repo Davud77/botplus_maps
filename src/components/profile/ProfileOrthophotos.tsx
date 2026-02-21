@@ -8,7 +8,7 @@ import {
   processOrthoCog, 
   updateOrtho, 
   getTaskStatus,
-  generateOrthoPreview, // [NEW] Импорт функции генерации превью
+  generateOrthoPreview,
   OrthoItem,
   TaskStartResponse
 } from '../../utils/api';
@@ -31,16 +31,19 @@ const ProfileOrthophotos: FC = () => {
   const [visibleIds, setVisibleIds] = useState<number[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
 
-  // Состояние для хранения прогресса отдельных файлов по их ID
-  // key: ortho_id, value: percentage (0-100)
+  // Состояние для хранения прогресса отдельных файлов
   const [rowProgress, setRowProgress] = useState<Record<number, number>>({});
 
-  // Состояние для логов и UI логов
+  // Состояние активных задач с инициализацией из LocalStorage
+  const [activeTasks, setActiveTasks] = useState<Record<number, string>>(() => {
+    const saved = localStorage.getItem('active_ortho_tasks');
+    return saved ? JSON.parse(saved) : {};
+  });
+
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [showLogs, setShowLogs] = useState(true);
   const logsEndRef = useRef<HTMLDivElement>(null);
 
-  // Функция добавления лога
   const addLog = (message: string, type: 'info' | 'success' | 'error' = 'info') => {
     setLogs(prev => [...prev, {
       id: Date.now() + Math.random(),
@@ -50,12 +53,30 @@ const ProfileOrthophotos: FC = () => {
     }]);
   };
 
-  // Автоскролл логов
   useEffect(() => {
     if (showLogs && logsEndRef.current) {
       logsEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
   }, [logs, showLogs]);
+
+  // Сохраняем активные задачи в LocalStorage при любом изменении
+  useEffect(() => {
+    localStorage.setItem('active_ortho_tasks', JSON.stringify(activeTasks));
+  }, [activeTasks]);
+
+  // Возобновление поллинга при загрузке (если были незаконченные задачи)
+  useEffect(() => {
+    Object.entries(activeTasks).forEach(([orthoIdStr, taskId]) => {
+      const orthoId = Number(orthoIdStr);
+      setRowProgress(prev => ({ ...prev, [orthoId]: 0 })); // Показываем полоску
+      pollTask(taskId, orthoId).then(() => {
+          loadOrthos(); // Обновляем список, когда задача доделается
+      }).catch((e) => {
+          addLog(`Ошибка в фоновой задаче ${orthoId}: ${e.message}`, 'error');
+      });
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const loadOrthos = async () => {
     setLoadingOrthos(true);
@@ -66,13 +87,10 @@ const ProfileOrthophotos: FC = () => {
       const data = await fetchOrthophotos();
       if (Array.isArray(data)) {
         setOrthos(data);
-        
-        // Инициализируем visibleIds на основе данных из БД
         const initialVisibleIds = data
             .filter(item => item.is_visible === true)
             .map(item => item.id);
         setVisibleIds(initialVisibleIds);
-
         addLog(`Список успешно обновлен. Загружено файлов: ${data.length}`, 'success');
       } else {
         throw new Error('Получены некорректные данные. Ожидался массив JSON.');
@@ -106,57 +124,104 @@ const ProfileOrthophotos: FC = () => {
     });
   };
 
-  // Логика кнопки "Видимость" с сохранением в БД
   const handleBulkToggleVisibility = async () => {
     if (selectedIds.length === 0) return;
     
     const allSelectedAreVisible = selectedIds.every(id => visibleIds.includes(id));
-    const newVisibilityState = !allSelectedAreVisible; // true = показать, false = скрыть
+    const newVisibilityState = !allSelectedAreVisible;
     
-    const actionText = newVisibilityState ? 'ВКЛЮЧЕНИЕ' : 'ВЫКЛЮЧЕНИЕ';
-    addLog(`Запуск массового изменения видимости (${actionText}) для ${selectedIds.length} файлов...`, 'info');
+    addLog(`Запуск массового изменения видимости...`, 'info');
     setIsProcessing(true);
 
     try {
-        await Promise.all(selectedIds.map(id => 
-            updateOrtho(id, { is_visible: newVisibilityState })
-        ));
-
+        await Promise.all(selectedIds.map(id => updateOrtho(id, { is_visible: newVisibilityState })));
         if (newVisibilityState) {
-            const newSet = new Set([...visibleIds, ...selectedIds]);
-            setVisibleIds(Array.from(newSet));
+            setVisibleIds(Array.from(new Set([...visibleIds, ...selectedIds])));
         } else {
             setVisibleIds(prev => prev.filter(id => !selectedIds.includes(id)));
         }
-
-        setOrthos(prev => prev.map(o => 
-            selectedIds.includes(o.id) ? { ...o, is_visible: newVisibilityState } : o
-        ));
-
-        addLog(`Видимость успешно обновлена в БД. Новое состояние: ${newVisibilityState ? 'Видимы' : 'Скрыты'}`, 'success');
-
+        setOrthos(prev => prev.map(o => selectedIds.includes(o.id) ? { ...o, is_visible: newVisibilityState } : o));
+        addLog(`Видимость успешно обновлена в БД.`, 'success');
     } catch (error) {
-        console.error("Ошибка при обновлении видимости:", error);
         addLog('Ошибка при сохранении видимости в базу данных', 'error');
-        alert('Не удалось сохранить состояние видимости. Проверьте консоль.');
     } finally {
         setIsProcessing(false);
     }
   };
 
-  // [UPDATED] Генерация превью через новый эндпоинт
+  // [UPDATED] Улучшенная функция поллинга с защитой от бесконечного цикла (отлов 404)
+  const pollTask = async (taskId: string, orthoId: number) => {
+    return new Promise<void>((resolve, reject) => {
+      let errorCount = 0; // Счетчик ошибок подряд
+      
+      const interval = setInterval(async () => {
+        try {
+          const statusData = await getTaskStatus(taskId);
+          errorCount = 0; // Если запрос успешен, сбрасываем счетчик
+          
+          if (statusData.status === 'processing' || statusData.status === 'pending') {
+            setRowProgress(prev => ({ ...prev, [orthoId]: statusData.progress }));
+          } else if (statusData.status === 'success') {
+            clearInterval(interval);
+            setRowProgress(prev => ({ ...prev, [orthoId]: 100 }));
+            
+            // Удаляем задачу из памяти
+            setActiveTasks(prev => {
+                const next = { ...prev };
+                delete next[orthoId];
+                return next;
+            });
+            resolve();
+          } else if (statusData.status === 'error') {
+            clearInterval(interval);
+            setRowProgress(prev => {
+                const newState = { ...prev };
+                delete newState[orthoId];
+                return newState;
+            });
+            
+            // Удаляем задачу из памяти при ошибке
+            setActiveTasks(prev => {
+                const next = { ...prev };
+                delete next[orthoId];
+                return next;
+            });
+            reject(new Error(statusData.error || 'Unknown error'));
+          }
+        } catch (e: any) {
+          console.error("Polling error", e);
+          errorCount++;
+          
+          // Если сервер вернул 404 (задачи больше нет) или слишком много ошибок
+          if ((e.message && e.message.includes('404')) || errorCount > 10) {
+              clearInterval(interval);
+              
+              setRowProgress(prev => {
+                  const newState = { ...prev };
+                  delete newState[orthoId];
+                  return newState;
+              });
+              
+              setActiveTasks(prev => {
+                  const next = { ...prev };
+                  delete next[orthoId];
+                  return next;
+              });
+              
+              reject(new Error("Задача потеряна сервером (возможно, был перезапуск)"));
+          }
+        }
+      }, 1000); 
+    });
+  };
+
   const handleBulkCreatePreview = async () => {
     if (selectedIds.length === 0) return;
-    
-    // Отфильтровываем файлы, у которых УЖЕ ЕСТЬ превью
     const itemsToProcess = orthos.filter(o => selectedIds.includes(o.id) && !o.preview_url);
-    
     if (itemsToProcess.length === 0) {
-        alert('Для всех выбранных файлов уже сгенерированы превью.');
-        return;
+        alert('Для всех выбранных файлов уже сгенерированы превью.'); return;
     }
-
-    if (!window.confirm(`Сгенерировать превью для выбранных файлов (${itemsToProcess.length} шт.)?`)) return;
+    if (!window.confirm(`Сгенерировать превью для (${itemsToProcess.length} шт.)?`)) return;
 
     setIsProcessing(true);
     addLog(`Запуск генерации превью для ${itemsToProcess.length} файлов...`, 'info');
@@ -171,12 +236,18 @@ const ProfileOrthophotos: FC = () => {
             const response = await generateOrthoPreview(item.id);
             return { orthoId: item.id, taskId: response.task_id, filename: item.filename };
         } catch (e) {
-            addLog(`Ошибка запуска для ${item.filename}: ${e}`, 'error');
             return null;
         }
       }));
 
       const validTasks = tasks.filter(t => t !== null) as { orthoId: number, taskId: string, filename: string }[];
+      
+      // Регистрируем в LocalStorage перед поллингом
+      setActiveTasks(prev => {
+          const next = { ...prev };
+          validTasks.forEach(t => next[t.orthoId] = t.taskId);
+          return next;
+      });
 
       await Promise.all(validTasks.map(async (task) => {
           try {
@@ -187,12 +258,117 @@ const ProfileOrthophotos: FC = () => {
           }
       }));
 
-      addLog('Процесс генерации превью завершен.', 'success');
       setRowProgress({});
       await loadOrthos();
-
     } catch (error) {
       addLog('Ошибка при массовой генерации превью', 'error');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleBulkReproject = async () => {
+    if (selectedIds.length === 0) return;
+    const isGoogleProjection = (crs?: string) => crs ? (crs.includes('3857') || crs.includes('Pseudo-Mercator') || crs.includes('Google')) : false;
+    const itemsToProcess = orthos.filter(o => selectedIds.includes(o.id) && !isGoogleProjection(o.crs));
+    
+    if (itemsToProcess.length === 0) {
+        alert('Все выбранные файлы уже находятся в проекции EPSG:3857.'); return;
+    }
+    if (!window.confirm(`Конвертировать (${itemsToProcess.length} шт.) в EPSG:3857?`)) return;
+
+    setIsProcessing(true);
+    addLog(`Запуск перепроецирования в EPSG:3857...`, 'info');
+    
+    const initialProgress = { ...rowProgress };
+    itemsToProcess.forEach(i => initialProgress[i.id] = 0);
+    setRowProgress(initialProgress);
+
+    try {
+      const tasks = await Promise.all(itemsToProcess.map(async (item) => {
+        try {
+            const response = await reprojectOrtho(item.id);
+            return { orthoId: item.id, taskId: response.task_id, filename: item.filename };
+        } catch (e) {
+            return null;
+        }
+      }));
+
+      const validTasks = tasks.filter(t => t !== null) as { orthoId: number, taskId: string, filename: string }[];
+
+      // Сохраняем активные таски в память
+      setActiveTasks(prev => {
+          const next = { ...prev };
+          validTasks.forEach(t => next[t.orthoId] = t.taskId);
+          return next;
+      });
+
+      await Promise.all(validTasks.map(async (task) => {
+          try {
+              await pollTask(task.taskId, task.orthoId);
+              addLog(`Завершено: ${task.filename}`, 'success');
+          } catch (e: any) {
+              addLog(`Сбой обработки ${task.filename}: ${e.message}`, 'error');
+          }
+      }));
+
+      setRowProgress({}); 
+      await loadOrthos();
+    } catch (error) {
+      addLog('Произошла ошибка при массовой обработке 3857', 'error');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleBulkProcessCOG = async () => {
+    if (selectedIds.length === 0) return;
+    const itemsToProcess = orthos.filter(o => selectedIds.includes(o.id) && !o.is_cog);
+    
+    if (itemsToProcess.length === 0) {
+        alert('Все выбранные файлы уже оптимизированы (COG).'); return;
+    }
+    if (!window.confirm(`Оптимизировать (${itemsToProcess.length} шт.) в формат COG?`)) return;
+
+    setIsProcessing(true);
+    addLog(`Запуск оптимизации в COG...`, 'info');
+
+    const initialProgress = { ...rowProgress };
+    itemsToProcess.forEach(i => initialProgress[i.id] = 0);
+    setRowProgress(initialProgress);
+
+    try {
+      const tasks = await Promise.all(itemsToProcess.map(async (item) => {
+        try {
+            const response = await processOrthoCog(item.id);
+            return { orthoId: item.id, taskId: response.task_id, filename: item.filename };
+        } catch (e) {
+            return null;
+        }
+      }));
+
+      const validTasks = tasks.filter(t => t !== null) as { orthoId: number, taskId: string, filename: string }[];
+
+      // Запоминаем задачи в LocalStorage
+      setActiveTasks(prev => {
+          const next = { ...prev };
+          validTasks.forEach(t => next[t.orthoId] = t.taskId);
+          return next;
+      });
+
+      await Promise.all(validTasks.map(async (task) => {
+          try {
+              await pollTask(task.taskId, task.orthoId);
+              addLog(`Оптимизирован: ${task.filename}`, 'success');
+          } catch (e: any) {
+              addLog(`Ошибка COG ${task.filename}: ${e.message}`, 'error');
+          }
+      }));
+      
+      setRowProgress({});
+      await loadOrthos();
+    } catch (error) {
+      addLog('Произошла ошибка при массовой оптимизации COG', 'error');
     } finally {
       setIsProcessing(false);
     }
@@ -213,7 +389,6 @@ const ProfileOrthophotos: FC = () => {
       setOrthos(prev => prev.filter(o => !selectedIds.includes(o.id)));
       setSelectedIds([]);
       setVisibleIds(prev => prev.filter(id => !selectedIds.includes(id)));
-      // Очищаем прогресс бары удаленных файлов, если были
       setRowProgress(prev => {
          const next = { ...prev };
          selectedIds.forEach(id => delete next[id]);
@@ -221,170 +396,7 @@ const ProfileOrthophotos: FC = () => {
       });
       addLog('Массовое удаление завершено', 'success');
     } catch (error) {
-      const msg = error instanceof Error ? error.message : 'Ошибка при удалении';
-      addLog(`Ошибка при удалении: ${msg}`, 'error');
-      alert(msg);
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  // Вспомогательная функция для поллинга задачи
-  const pollTask = async (taskId: string, orthoId: number) => {
-    return new Promise<void>((resolve, reject) => {
-      const interval = setInterval(async () => {
-        try {
-          const statusData = await getTaskStatus(taskId);
-          
-          if (statusData.status === 'processing' || statusData.status === 'pending') {
-            // Обновляем прогресс в стейте
-            setRowProgress(prev => ({ ...prev, [orthoId]: statusData.progress }));
-          } else if (statusData.status === 'success') {
-            clearInterval(interval);
-            setRowProgress(prev => ({ ...prev, [orthoId]: 100 }));
-            resolve();
-          } else if (statusData.status === 'error') {
-            clearInterval(interval);
-            setRowProgress(prev => {
-                const newState = { ...prev };
-                delete newState[orthoId]; // Удаляем прогресс бар при ошибке
-                return newState;
-            });
-            reject(new Error(statusData.error || 'Unknown error'));
-          }
-        } catch (e) {
-          console.error("Polling error", e);
-          // Не прерываем сразу, вдруг сеть моргнула.
-        }
-      }, 1000); // Опрос раз в секунду
-    });
-  };
-
-  const isGoogleProjection = (crs?: string) => {
-    if (!crs) return false;
-    return crs.includes('3857') || crs.includes('Pseudo-Mercator') || crs.includes('Google');
-  };
-
-  const handleBulkReproject = async () => {
-    if (selectedIds.length === 0) return;
-    
-    // 1. Фильтруем: оставляем ТОЛЬКО те файлы, которые ЕЩЕ НЕ в 3857
-    const itemsToProcess = orthos.filter(o => selectedIds.includes(o.id) && !isGoogleProjection(o.crs));
-    
-    // 2. Если все выбранные файлы уже в нужной проекции — прерываем
-    if (itemsToProcess.length === 0) {
-        alert('Все выбранные файлы уже находятся в проекции EPSG:3857.');
-        return;
-    }
-    
-    if (!window.confirm(`Конвертировать выбранные (${itemsToProcess.length} шт.) в EPSG:3857? (Уже готовые файлы будут пропущены)`)) return;
-
-    setIsProcessing(true);
-    addLog(`Запуск перепроецирования в EPSG:3857 для ${itemsToProcess.length} файлов...`, 'info');
-    
-    // Сбрасываем прогресс для выбранных
-    const initialProgress = { ...rowProgress };
-    itemsToProcess.forEach(i => initialProgress[i.id] = 0);
-    setRowProgress(initialProgress);
-
-    try {
-      // 1. Запускаем все задачи
-      const tasks = await Promise.all(itemsToProcess.map(async (item) => {
-        try {
-            addLog(`Инициализация задачи для: ${item.filename}`, 'info');
-            const response = await reprojectOrtho(item.id);
-            return { orthoId: item.id, taskId: response.task_id, filename: item.filename };
-        } catch (e) {
-            addLog(`Ошибка запуска задачи для ${item.filename}: ${e}`, 'error');
-            console.error(`Ошибка конвертации ID ${item.id}`, e);
-            return null;
-        }
-      }));
-
-      const validTasks = tasks.filter(t => t !== null) as { orthoId: number, taskId: string, filename: string }[];
-
-      // 2. Ожидаем завершения всех задач через поллинг
-      await Promise.all(validTasks.map(async (task) => {
-          try {
-              await pollTask(task.taskId, task.orthoId);
-              addLog(`Завершено: ${task.filename}`, 'success');
-          } catch (e: any) {
-              addLog(`Сбой обработки ${task.filename}: ${e.message}`, 'error');
-          }
-      }));
-
-      addLog('Процесс перепроецирования завершен. Обновление списка...', 'success');
-      alert('Обработка завершена. Список обновляется...');
-      
-      // Очищаем прогресс бары
-      setRowProgress({}); 
-      await loadOrthos();
-
-    } catch (error) {
-      addLog('Произошла критическая ошибка при массовой обработке 3857', 'error');
-      alert('Произошла ошибка при массовой обработке');
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  const handleBulkProcessCOG = async () => {
-    if (selectedIds.length === 0) return;
-    
-    // 1. Фильтруем: оставляем ТОЛЬКО те файлы, которые НЕ COG
-    const itemsToProcess = orthos.filter(o => selectedIds.includes(o.id) && !o.is_cog);
-    
-    // 2. Защита от пустой работы
-    if (itemsToProcess.length === 0) {
-        alert('Все выбранные файлы уже оптимизированы (COG).');
-        return;
-    }
-    
-    if (!window.confirm(`Оптимизировать выбранные (${itemsToProcess.length} шт.) в формат COG? (Уже готовые файлы будут пропущены)`)) return;
-
-    setIsProcessing(true);
-    addLog(`Запуск оптимизации в COG для ${itemsToProcess.length} файлов...`, 'info');
-
-    // Инициализация прогресс-баров
-    const initialProgress = { ...rowProgress };
-    itemsToProcess.forEach(i => initialProgress[i.id] = 0);
-    setRowProgress(initialProgress);
-
-    try {
-      // 1. Запуск задач на сервере
-      const tasks = await Promise.all(itemsToProcess.map(async (item) => {
-        try {
-            addLog(`Старт оптимизации: ${item.filename}`, 'info');
-            const response = await processOrthoCog(item.id);
-            return { orthoId: item.id, taskId: response.task_id, filename: item.filename };
-        } catch (e) {
-            addLog(`Ошибка запуска для ${item.filename}: ${e}`, 'error');
-            console.error(`Ошибка COG ID ${item.id}`, e);
-            return null;
-        }
-      }));
-
-      const validTasks = tasks.filter(t => t !== null) as { orthoId: number, taskId: string, filename: string }[];
-
-      // 2. Мониторинг прогресса
-      await Promise.all(validTasks.map(async (task) => {
-          try {
-              await pollTask(task.taskId, task.orthoId);
-              addLog(`Успешно оптимизирован: ${task.filename}`, 'success');
-          } catch (e: any) {
-              addLog(`Ошибка оптимизации ${task.filename}: ${e.message}`, 'error');
-          }
-      }));
-
-      addLog('Процесс оптимизации завершен. Обновление списка...', 'success');
-      alert('Оптимизация завершена. Список обновляется...');
-      
-      setRowProgress({});
-      await loadOrthos();
-
-    } catch (error) {
-      addLog('Произошла критическая ошибка при массовой оптимизации COG', 'error');
-      alert('Произошла ошибка при массовой обработке');
+      addLog(`Ошибка при удалении`, 'error');
     } finally {
       setIsProcessing(false);
     }
@@ -392,92 +404,40 @@ const ProfileOrthophotos: FC = () => {
 
   const handleBulkDownload = () => {
     if (selectedIds.length === 0) return;
-    if (selectedIds.length > 5) {
-        if (!window.confirm(`Скачать ${selectedIds.length} файлов сразу?`)) return;
-    }
+    if (selectedIds.length > 5 && !window.confirm(`Скачать ${selectedIds.length} файлов сразу?`)) return;
 
     const items = orthos.filter(o => selectedIds.includes(o.id));
-    addLog(`Инициировано скачивание ${items.length} файлов`, 'info');
-    items.forEach(item => {
-        window.open(item.url, '_blank');
-    });
+    items.forEach(item => window.open(item.url, '_blank'));
   };
 
   return (
     <div className="table-container ortho-container">
-      
-      {/* 1. ПАНЕЛЬ ДЕЙСТВИЙ (ВСЕГДА ВИДИМА) */}
       <div className="table-header ortho-header-actions">
-        
         <div className="action-buttons-group">
-            {/* Кнопки действий */}
-            <button 
-                className="secondary-button" 
-                onClick={handleBulkToggleVisibility}
-                disabled={selectedIds.length === 0 || isProcessing}
-                title="Переключить видимость для выбранных"
-            >
+            <button className="secondary-button" onClick={handleBulkToggleVisibility} disabled={selectedIds.length === 0 || isProcessing}>
                 Видимость
             </button>
-
-            <button 
-                className="secondary-button" 
-                onClick={handleBulkCreatePreview}
-                disabled={selectedIds.length === 0 || isProcessing}
-                title="Сгенерировать миниатюру"
-            >
+            <button className="secondary-button" onClick={handleBulkCreatePreview} disabled={selectedIds.length === 0 || isProcessing}>
                 Создать превью
             </button>
-
-            {/* Кнопка конвертации в COG */}
-            <button 
-                className="secondary-button" 
-                onClick={handleBulkProcessCOG}
-                disabled={selectedIds.length === 0 || isProcessing}
-                title="Оптимизировать в Cloud Optimized GeoTIFF"
-            >
+            <button className="secondary-button" onClick={handleBulkProcessCOG} disabled={selectedIds.length === 0 || isProcessing}>
                 {isProcessing ? 'Wait...' : 'В формат COG'}
             </button>
-            
-            <button 
-                className="secondary-button" 
-                onClick={handleBulkReproject}
-                disabled={selectedIds.length === 0 || isProcessing}
-                title="Конвертировать в EPSG:3857"
-            >
+            <button className="secondary-button" onClick={handleBulkReproject} disabled={selectedIds.length === 0 || isProcessing}>
                 {isProcessing ? 'Wait...' : 'В EPSG:3857'}
             </button>
-            
-            <button 
-                className="secondary-button" 
-                onClick={handleBulkDownload}
-                disabled={selectedIds.length === 0 || isProcessing}
-                title="Скачать"
-            >
+            <button className="secondary-button" onClick={handleBulkDownload} disabled={selectedIds.length === 0 || isProcessing}>
                 Скачать
             </button>
-            
-            <button 
-                className="secondary-button"
-                onClick={handleBulkDelete}
-                disabled={selectedIds.length === 0 || isProcessing}
-                title="Удалить"
-            >
+            <button className="secondary-button" onClick={handleBulkDelete} disabled={selectedIds.length === 0 || isProcessing}>
                 Удалить
             </button>
         </div>
 
-        {/* Группа кнопок справа (Обновить + Загрузить) */}
         <div className="right-buttons-group">
-            <button 
-                className="secondary-button" 
-                onClick={loadOrthos}
-                disabled={loadingOrthos || isProcessing}
-                title="Обновить список из БД"
-            >
+            <button className="secondary-button" onClick={loadOrthos} disabled={loadingOrthos || isProcessing}>
                 {loadingOrthos ? '⏳' : 'Обновить'}
             </button>
-            
             <Link to="/uploadortho">
                 <button className="primary-button">+ Загрузить</button>
             </Link>
@@ -485,29 +445,16 @@ const ProfileOrthophotos: FC = () => {
       </div>
 
       {loadingOrthos && <div className="loading-state">Загрузка...</div>}
-      
-      {errorOrthos && (
-        <div className="error-message ortho-error-message">
-          <strong>Ошибка:</strong> {errorOrthos}
-        </div>
-      )}
+      {errorOrthos && <div className="error-message ortho-error-message"><strong>Ошибка:</strong> {errorOrthos}</div>}
+      {!loadingOrthos && !errorOrthos && orthos.length === 0 && <div className="empty-state">Нет загруженных ортофотопланов</div>}
 
-      {!loadingOrthos && !errorOrthos && orthos.length === 0 && (
-        <div className="empty-state">Нет загруженных ортофотопланов</div>
-      )}
-
-      {/* 2. ТАБЛИЦА */}
       {!loadingOrthos && !errorOrthos && orthos.length > 0 && (
         <div className="ortho-table-wrapper">
             <table className="data-table">
             <thead>
                 <tr>
                 <th className="col-checkbox">
-                    <input 
-                        type="checkbox" 
-                        checked={selectedIds.length === orthos.length && orthos.length > 0}
-                        onChange={handleSelectAll}
-                    />
+                    <input type="checkbox" checked={selectedIds.length === orthos.length && orthos.length > 0} onChange={handleSelectAll} />
                 </th>
                 <th>Название</th>
                 <th>Превью</th>
@@ -520,53 +467,28 @@ const ProfileOrthophotos: FC = () => {
             </thead>
             <tbody>
                 {orthos.map((ortho) => {
-                    // Проверяем, есть ли активный прогресс для этой строки
                     const progress = rowProgress[ortho.id];
                     const hasProgress = progress !== undefined;
 
                     return (
-                    <tr 
-                        key={ortho.id} 
-                        className={selectedIds.includes(ortho.id) ? 'selected-row' : ''}
-                    >
+                    <tr key={ortho.id} className={selectedIds.includes(ortho.id) ? 'selected-row' : ''}>
                         <td className="cell-center">
-                            <input 
-                                type="checkbox" 
-                                checked={selectedIds.includes(ortho.id)}
-                                onChange={() => handleSelectRow(ortho.id)}
-                            />
+                            <input type="checkbox" checked={selectedIds.includes(ortho.id)} onChange={() => handleSelectRow(ortho.id)} />
                         </td>
-
-                        <td className="cell-filename">
-                            {ortho.filename}
-                        </td>
-                        
+                        <td className="cell-filename">{ortho.filename}</td>
                         <td>
                         <div className="preview-wrapper">
-                            {/* [UPDATED] Используем preview_url, если он есть */}
-                            <img 
-                            src={ortho.preview_url || NO_IMAGE_PLACEHOLDER} 
-                            alt="preview" 
-                            className="preview-image"
-                            onError={(e) => { (e.target as HTMLImageElement).src = NO_IMAGE_PLACEHOLDER; }}
-                            />
+                            <img src={ortho.preview_url || NO_IMAGE_PLACEHOLDER} alt="preview" className="preview-image" onError={(e) => { (e.target as HTMLImageElement).src = NO_IMAGE_PLACEHOLDER; }} />
                         </div>
                         </td>
-
                         <td>
-                            <span className={`badge-crs ${isGoogleProjection(ortho.crs) ? 'badge-crs-google' : 'badge-crs-other'}`}>
+                            <span className={`badge-crs ${ortho.crs && (ortho.crs.includes('3857') || ortho.crs.includes('Google')) ? 'badge-crs-google' : 'badge-crs-other'}`}>
                                 {ortho.crs || 'Не определено'}
                             </span>
                         </td>
-
                         <td className="cell-center">
-                            {ortho.is_cog ? (
-                                <span className="badge-cog badge-cog-yes">Да</span>
-                            ) : (
-                                <span className="badge-cog badge-cog-no">Нет</span>
-                            )}
+                            <span className={`badge-cog ${ortho.is_cog ? 'badge-cog-yes' : 'badge-cog-no'}`}>{ortho.is_cog ? 'Да' : 'Нет'}</span>
                         </td>
-
                         <td style={{ width: '200px' }}>
                             {hasProgress ? (
                                 <div className="progress-wrapper">
@@ -575,17 +497,13 @@ const ProfileOrthophotos: FC = () => {
                                         <span>{progress}%</span>
                                     </div>
                                     <div className="progress-track">
-                                        <div 
-                                            className="progress-fill" 
-                                            style={{ width: `${progress}%` }} 
-                                        />
+                                        <div className="progress-fill" style={{ width: `${progress}%` }} />
                                     </div>
                                 </div>
                             ) : (
                                 <span className="status-ready">Готов к работе</span>
                             )}
                         </td>
-
                         <td className="cell-bounds">
                         {ortho.bounds ? (
                             <>
@@ -594,18 +512,10 @@ const ProfileOrthophotos: FC = () => {
                             <div className="bounds-line">E: {ortho.bounds.east.toFixed(5)}</div>
                             <div className="bounds-line">N: {ortho.bounds.north.toFixed(5)}</div>
                             </>
-                        ) : (
-                            <span className="no-bounds">Нет геоданных</span>
-                        )}
+                        ) : <span className="no-bounds">Нет геоданных</span>}
                         </td>
-
                         <td className="cell-center">
-                            <input 
-                                type="checkbox"
-                                checked={visibleIds.includes(ortho.id)}
-                                disabled={true} 
-                                className="checkbox-disabled"
-                            />
+                            <input type="checkbox" checked={visibleIds.includes(ortho.id)} disabled={true} className="checkbox-disabled" />
                         </td>
                     </tr>
                     );
@@ -615,35 +525,27 @@ const ProfileOrthophotos: FC = () => {
         </div>
       )}
 
-      {/* Счетчик выделенных */}
-      <span className="selected-count">
-          {selectedIds.length > 0 ? `Выбрано: ${selectedIds.length}` : 'Выберите элементы'}
-      </span>
+      <span className="selected-count">{selectedIds.length > 0 ? `Выбрано: ${selectedIds.length}` : 'Выберите элементы'}</span>
 
-      {/* 3. ПАНЕЛЬ ЛОГОВ */}
       <div className="log-container">
         <div className="log-header" onClick={() => setShowLogs(!showLogs)}>
             <span>Системные логи ({logs.length})</span>
             <span>{showLogs ? '▼' : '▲'}</span>
         </div>
-        
         {showLogs && (
             <div className="log-body">
-                {logs.length === 0 ? (
-                    <div className="log-empty">Логи пусты. Начните работу с файлами.</div>
-                ) : (
+                {logs.length === 0 ? <div className="log-empty">Логи пусты. Начните работу с файлами.</div> : 
                     logs.map(log => (
                         <div key={log.id} className="log-entry">
                             <span className="log-time">[{log.time}]</span>
                             <span className={`log-msg log-${log.type}`}>{log.message}</span>
                         </div>
                     ))
-                )}
+                }
                 <div ref={logsEndRef} />
             </div>
         )}
       </div>
-
     </div>
   );
 };

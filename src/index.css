@@ -1911,14 +1911,12 @@ h3 { margin: 0; color: var(--color-text); }
 
 /* Панель логов */
 .log-container {
-  margin-top: 20px;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  background-color: #1e1e1e;
+  margin-top: 10px;
+  border: 1px solid #4d4c4c;
   color: #d4d4d4;
   font-family: monospace;
   font-size: 12px;
-  overflow: hidden;
+  height: 150px;
 }
 
 .log-header {
@@ -1932,7 +1930,6 @@ h3 { margin: 0; color: var(--color-text); }
 
 .log-body {
   padding: 10px;
-  max-height: 150px;
   overflow-y: auto;
 }
 

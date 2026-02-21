@@ -1,10 +1,14 @@
+# server/services/task_service.py
 import os
 import json
 import time
+import config  # [NEW] Импортируем конфигурацию для доступа к .env
 
 class TaskService:
-    def __init__(self, tasks_dir="data/tasks"):
-        self.tasks_dir = tasks_dir
+    def __init__(self, tasks_dir=None):
+        # [UPDATED] Если tasks_dir не передан явно, берем путь из конфигурации (.env)
+        self.tasks_dir = tasks_dir or getattr(config, "TASKS_FOLDER", "data/tasks")
+        
         if not os.path.exists(self.tasks_dir):
             try:
                 os.makedirs(self.tasks_dir, exist_ok=True)

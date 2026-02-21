@@ -1,3 +1,4 @@
+# server/controllers/vector.py
 from flask import Blueprint, request, jsonify, make_response
 import psycopg2
 from psycopg2 import sql
@@ -5,6 +6,7 @@ from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
 import os
 import math
 import xml.etree.ElementTree as ET
+import config  # [NEW] Импортируем конфигурацию для доступа к .env
 
 vector_bp = Blueprint('vector', __name__)
 
@@ -58,7 +60,12 @@ def list_databases():
         cur = conn.cursor()
         cur.execute("SELECT datname FROM pg_database WHERE datistemplate = false AND datname != 'postgres';")
         dbs = cur.fetchall()
-        results = [{'id': n, 'name': n, 'host': 'pgbouncer', 'port': 6432, 'status': 'connected', 'type': 'internal'} for (n,) in dbs]
+        
+        # [UPDATED] Берем хост и порт из конфигурации (.env) вместо жестко заданных значений
+        host = getattr(config, "DB_HOST", "pgbouncer")
+        port = int(getattr(config, "DB_PORT", "6432"))
+        
+        results = [{'id': n, 'name': n, 'host': host, 'port': port, 'status': 'connected', 'type': 'internal'} for (n,) in dbs]
         cur.close()
         return jsonify(results)
     except Exception as e:

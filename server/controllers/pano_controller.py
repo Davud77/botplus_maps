@@ -27,14 +27,18 @@ class PanoController:
         self.db = Database()
         self.storage = MinioStorage()
         
+        # [NEW] Подтягиваем имя бакета из конфигурации (.env)
+        self.pano_bucket = getattr(config, 'MINIO_BUCKET_NAME', 'panoramas')
+        
         # Гарантируем, что таблица photos_4326 существует!
         self._ensure_table()
         
         # Ensure bucket exists
         if self.storage.client:
             try:
-                if not self.storage.client.bucket_exists("panoramas"):
-                    self.storage.client.make_bucket("panoramas")
+                # [UPDATED] Используем динамическое имя бакета
+                if not self.storage.client.bucket_exists(self.pano_bucket):
+                    self.storage.client.make_bucket(self.pano_bucket)
             except Exception as e:
                 logger.warning(f"MinIO bucket warning: {e}")
 
@@ -226,7 +230,7 @@ class PanoController:
             
             # Switch bucket context
             orig_bucket = self.storage.bucket_name
-            self.storage.bucket_name = "panoramas"
+            self.storage.bucket_name = self.pano_bucket  # [UPDATED]
             
             # Try MinIO
             response = None
@@ -247,7 +251,7 @@ class PanoController:
     def get_pano_image_direct(self, filename):
         try:
             orig_bucket = self.storage.bucket_name
-            self.storage.bucket_name = "panoramas"
+            self.storage.bucket_name = self.pano_bucket  # [UPDATED]
             response = self.storage.send_local_file(filename, mimetype="image/jpeg")
             self.storage.bucket_name = orig_bucket
             return response
@@ -264,7 +268,7 @@ class PanoController:
         failed = []
 
         orig_bucket = self.storage.bucket_name
-        self.storage.bucket_name = "panoramas"
+        self.storage.bucket_name = self.pano_bucket  # [UPDATED]
 
         try:
             for file in uploaded_files:
@@ -282,7 +286,9 @@ class PanoController:
                     # 2. Filename
                     timestamp_str = dt.strftime("%Y%m%d_%H%M%S") if dt else "nodate"
                     new_filename = f"pano_{timestamp_str}_{original_name}"
-                    file_path = f"panoramas/{new_filename}"
+                    
+                    # [UPDATED] Путь папки для БД
+                    file_path = f"{self.pano_bucket}/{new_filename}" 
 
                     # 3. MinIO Upload
                     save_stream = io.BytesIO(file_content)
@@ -323,7 +329,7 @@ class PanoController:
                 self.db.commit()
                 
                 orig = self.storage.bucket_name
-                self.storage.bucket_name = "panoramas"
+                self.storage.bucket_name = self.pano_bucket  # [UPDATED]
                 self.storage.delete_file(filename)
                 self.storage.bucket_name = orig
                 
@@ -349,14 +355,14 @@ class PanoController:
                 longitude, latitude, "timestamp", "order"
             ) VALUES (
                 ST_SetSRID(ST_MakePoint(%s, %s, %s), 4326),
-                %s, %s, 'panoramas', 
+                %s, %s, %s, 
                 %s, %s, 0, 
                 %s, %s, %s, 0
             )
         """
         values = (
             float(lon), float(lat), float(alt or 0),
-            path, filename,
+            path, filename, self.pano_bucket,  # [UPDATED]
             float(alt or 0), float(direction or 0),
             str(lon), str(lat), timestamp or datetime.now()
         )

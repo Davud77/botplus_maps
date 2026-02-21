@@ -7,6 +7,7 @@ from services.storage_service import StorageService
 from services.gdal_service import GdalService
 from services.ortho_service import OrthoService
 import json
+import os
 
 ortho_blueprint = Blueprint("ortho", __name__)
 
@@ -57,15 +58,37 @@ class OrthoController:
     def upload_ortho(self):
         files = request.files.getlist("files")
         if not files:
-            return jsonify({"message": "Нет файлов"}), 400
+            return jsonify({"error": "Нет файлов"}), 400
         
-        success, failed, logs = self.ortho_service.handle_upload(files)
+        # Берем первый файл (фронтенд отправляет их по одному через uploadSingleFile)
+        file = files[0]
+        filename = file.filename
+        
+        # Убедимся, что временная директория существует
+        os.makedirs(self.ortho_service.temp_dir, exist_ok=True)
+        
+        # Сохраняем файл во временную папку СРАЗУ (пока живо HTTP-соединение)
+        # Это предотвращает потерю стрима данных, если клиент закроет вкладку раньше времени
+        input_path = os.path.join(self.ortho_service.temp_dir, filename)
+        
+        # Безопасное потоковое сохранение на диск
+        CHUNK_SIZE = 8192 * 1024  # Читаем чанками по 8MB
+        with open(input_path, 'wb') as f:
+            while True:
+                chunk = file.stream.read(CHUNK_SIZE)
+                if not chunk:
+                    break
+                f.write(chunk)
+                
+        # Файл на диске сервера. Теперь клиент может закрывать вкладку.
+        # Запускаем фоновый процесс (в независимом потоке)
+        task_id = self.ortho_service.start_upload_process(input_path, filename)
+        
         return jsonify({
-            "message": "Загрузка завершена",
-            "successful_uploads": success,
-            "failed_uploads": failed,
-            "logs": logs
-        }), 200
+            "message": "Файл успешно загружен на сервер и поставлен в очередь обработки",
+            "task_id": task_id,
+            "status": "started"
+        }), 202
 
     def process_ortho_cog(self, ortho_id):
         # 1. Проверяем состояние файла перед запуском

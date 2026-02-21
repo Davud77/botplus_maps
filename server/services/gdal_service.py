@@ -1,71 +1,82 @@
 # server/services/gdal_service.py
-import subprocess
-import json
 import os
-import time
 import traceback
-from osgeo import gdal, osr, ogr  # Библиотеки для работы с геометрией и метаданными
+from osgeo import gdal, osr, ogr
+
+# Включаем использование исключений для GDAL, чтобы ошибки нормально ловились в try/except
+gdal.UseExceptions()
 
 class GdalService:
     
     @staticmethod
     def get_crs(path):
-        """Определяет проекцию (МСК-05, Google, WGS84)"""
+        """Определяет проекцию (МСК-05, Google, WGS84) с помощью нативного GDAL"""
         try:
-            process = subprocess.Popen(
-                ["gdalinfo", "-json", "-proj4", path], 
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, errors='replace'
-            )
-            out, _ = process.communicate()
-            data = json.loads(out)
-            
-            if "coordinateSystem" in data:
-                cs = data["coordinateSystem"]
-                wkt = cs.get("wkt", "")
-                proj4 = cs.get("proj4", "")
+            ds = gdal.Open(path)
+            if not ds:
+                return "Unknown"
                 
-                if "46.8916666667" in wkt or "46.891667" in wkt or "46.8916666667" in proj4:
-                    return "MSK-05 (Dagestan)"
-                if 'ID["EPSG",3857]' in wkt or "Pseudo-Mercator" in wkt:
-                    return "EPSG:3857 (Google)"
-                if 'ID["EPSG",4326]' in wkt:
-                    return "EPSG:4326 (WGS84)"
-                if wkt and 'PROJCRS' in wkt:
-                    return "Custom / Unknown Projection"
+            wkt = ds.GetProjection()
+            if not wkt:
+                return "Unknown"
 
-            return "Unknown"
+            srs = osr.SpatialReference()
+            srs.ImportFromWkt(wkt)
+            
+            wkt_str = srs.ExportToWkt()
+            proj4_str = srs.ExportToProj4()
+            
+            if "46.8916666667" in wkt_str or "46.891667" in wkt_str or "46.8916666667" in proj4_str:
+                return "MSK-05 (Dagestan)"
+            if 'ID["EPSG",3857]' in wkt_str or "Pseudo-Mercator" in wkt_str:
+                return "EPSG:3857 (Google)"
+            if 'ID["EPSG",4326]' in wkt_str:
+                return "EPSG:4326 (WGS84)"
+                
+            # Если проекция неизвестна нашей логике, пытаемся вытащить её название
+            if srs.IsProjected():
+                name = srs.GetAttrValue('PROJCS')
+                return name if name else "Custom / Unknown Projection"
+            elif srs.IsGeographic():
+                name = srs.GetAttrValue('GEOGCS')
+                return name if name else "Custom / Unknown Projection"
+
+            return "Custom / Unknown Projection"
         except Exception as e:
             print(f"Error detecting CRS: {e}")
             return "Unknown"
+        finally:
+            ds = None # Освобождаем память
 
     @staticmethod
     def get_bounds(path):
-        """Получает границы (bounds)"""
+        """Получает границы (bounds) напрямую из GeoTransform"""
         try:
-            process = subprocess.Popen(
-                ["gdalinfo", "-json", path], 
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, errors='replace'
-            )
-            out, _ = process.communicate()
-            data = json.loads(out)
-            coords = data.get("cornerCoordinates", {})
-            
-            def get_coord(key, idx):
-                val = coords.get(key)
-                if val and len(val) > idx: return val[idx]
-                return 0.0
+            ds = gdal.Open(path)
+            if not ds:
+                return {"north": 0, "south": 0, "east": 0, "west": 0}
 
-            all_x = [get_coord("upperLeft", 0), get_coord("lowerRight", 0), 
-                     get_coord("upperRight", 0), get_coord("lowerLeft", 0)]
-            all_y = [get_coord("upperLeft", 1), get_coord("lowerRight", 1), 
-                     get_coord("upperRight", 1), get_coord("lowerLeft", 1)]
-            
+            gt = ds.GetGeoTransform()
+            width = ds.RasterXSize
+            height = ds.RasterYSize
+
+            # Вычисляем крайние точки
+            min_x = gt[0]
+            max_y = gt[3]
+            max_x = gt[0] + width * gt[1] + height * gt[2]
+            min_y = gt[3] + width * gt[4] + height * gt[5]
+
             return {
-                "north": max(all_y), "south": min(all_y), 
-                "east": max(all_x), "west": min(all_x)
+                "north": max_y if max_y > min_y else min_y,
+                "south": min_y if min_y < max_y else max_y,
+                "east": max_x if max_x > min_x else min_x,
+                "west": min_x if min_x < max_x else max_x
             }
-        except:
+        except Exception as e:
+            print(f"Error getting bounds: {e}")
             return {"north": 0, "south": 0, "east": 0, "west": 0}
+        finally:
+            ds = None
 
     def check_is_cog(self, file_path):
         """
@@ -89,6 +100,8 @@ class GdalService:
         except Exception as e:
             print(f"Error checking COG: {e}")
             return False
+        finally:
+            ds = None
 
     def get_footprint_wkt(self, file_path):
         """
@@ -141,7 +154,7 @@ class GdalService:
             transform = osr.CoordinateTransformation(src_srs, tgt_srs)
             poly.Transform(transform)
 
-            # [FIX] Принудительно убираем Z-координату (делаем 2D), 
+            # Принудительно убираем Z-координату (делаем 2D), 
             # чтобы PostGIS не ругался "Geometry has Z dimension"
             poly.FlattenTo2D()
 
@@ -151,88 +164,5 @@ class GdalService:
         except Exception as e:
             print(f"Error creating footprint WKT: {e}")
             return None
-
-    def run_background_process(self, cmd, input_path, output_path, task_id, task_service, success_callback, start_percent=10):
-        """
-        Запускает процесс и обновляет статус через task_service.
-        Блокирует текущий поток (должна запускаться внутри Thread).
-        """
-        try:
-            current_state = {
-                "status": "processing",
-                "progress": start_percent,
-                "message": "Processing started..."
-            }
-            task_service.save_state(task_id, current_state)
-
-            input_size = os.path.getsize(input_path) if os.path.exists(input_path) else 1
-            print(f"Task {task_id}: Executing GDAL command...")
-            
-            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            
-            start_time = time.time()
-            last_update_time = 0
-
-            while process.poll() is None:
-                if time.time() - last_update_time > 0.5:
-                    # 1. Прогресс по файлу
-                    file_progress = start_percent
-                    if os.path.exists(output_path):
-                        current_size = os.path.getsize(output_path)
-                        if input_size > 0:
-                            ratio = current_size / input_size
-                            if ratio > 1.2: ratio = 1.0 
-                            remaining_range = 95 - start_percent
-                            file_progress = start_percent + int(ratio * remaining_range)
-                    
-                    # 2. Эмуляция прогресса
-                    elapsed = time.time() - start_time
-                    time_factor = elapsed / 10.0
-                    asymptotic_part = (1 - (1 / (1 + time_factor * 0.5))) 
-                    time_progress = start_percent + int((99 - start_percent) * asymptotic_part)
-
-                    final_progress = max(file_progress, time_progress)
-                    if final_progress >= 100: final_progress = 99
-
-                    current_state["progress"] = final_progress
-                    task_service.save_state(task_id, current_state)
-                    last_update_time = time.time()
-                
-                time.sleep(0.5)
-
-            stdout, stderr = process.communicate()
-            if process.returncode != 0:
-                err_msg = stderr.decode('utf-8', errors='replace')
-                raise Exception(f"GDAL Error: {err_msg}")
-
-            print(f"Task {task_id}: GDAL finished.")
-            
-            # Финализация (вызов колбэка для БД/S3)
-            # Колбэк должен вернуть dict с результатами, который мы сохраним
-            result = success_callback()
-            
-            current_state.update({
-                "progress": 100,
-                "status": "success",
-                "result": result,
-                "message": "Completed"
-            })
-            task_service.save_state(task_id, current_state)
-
-        except Exception as e:
-            traceback.print_exc()
-            current_state.update({
-                "status": "error",
-                "progress": 0,
-                "error": str(e),
-                "message": "Failed"
-            })
-            task_service.save_state(task_id, current_state)
         finally:
-            # Очистка
-            if os.path.exists(input_path): 
-                try: os.remove(input_path)
-                except: pass
-            if os.path.exists(output_path): 
-                try: os.remove(output_path)
-                except: pass
+            ds = None
