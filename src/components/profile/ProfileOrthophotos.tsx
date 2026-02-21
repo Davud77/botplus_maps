@@ -86,12 +86,21 @@ const ProfileOrthophotos: FC = () => {
     try {
       const data = await fetchOrthophotos();
       if (Array.isArray(data)) {
-        setOrthos(data);
-        const initialVisibleIds = data
+        
+        // ДОБАВЛЕНО: сброс кэша браузера для картинок превью
+        const timestamp = Date.now();
+        const processedData = data.map(item => ({
+            ...item,
+            preview_url: item.preview_url ? `${item.preview_url}?t=${timestamp}` : item.preview_url
+        }));
+
+        setOrthos(processedData);
+        
+        const initialVisibleIds = processedData
             .filter(item => item.is_visible === true)
             .map(item => item.id);
         setVisibleIds(initialVisibleIds);
-        addLog(`Список успешно обновлен. Загружено файлов: ${data.length}`, 'success');
+        addLog(`Список успешно обновлен. Загружено файлов: ${processedData.length}`, 'success');
       } else {
         throw new Error('Получены некорректные данные. Ожидался массив JSON.');
       }
@@ -149,7 +158,7 @@ const ProfileOrthophotos: FC = () => {
     }
   };
 
-  // [UPDATED] Улучшенная функция поллинга с защитой от бесконечного цикла (отлов 404)
+  // Улучшенная функция поллинга с защитой от бесконечного цикла (отлов 404)
   const pollTask = async (taskId: string, orthoId: number) => {
     return new Promise<void>((resolve, reject) => {
       let errorCount = 0; // Счетчик ошибок подряд
@@ -217,11 +226,14 @@ const ProfileOrthophotos: FC = () => {
 
   const handleBulkCreatePreview = async () => {
     if (selectedIds.length === 0) return;
-    const itemsToProcess = orthos.filter(o => selectedIds.includes(o.id) && !o.preview_url);
+    
+    // ИЗМЕНЕНО: убрали проверку && !o.preview_url, чтобы разрешить пересоздание
+    const itemsToProcess = orthos.filter(o => selectedIds.includes(o.id));
+    
     if (itemsToProcess.length === 0) {
-        alert('Для всех выбранных файлов уже сгенерированы превью.'); return;
+        alert('Выберите файлы для генерации превью.'); return;
     }
-    if (!window.confirm(`Сгенерировать превью для (${itemsToProcess.length} шт.)?`)) return;
+    if (!window.confirm(`Сгенерировать/обновить превью для (${itemsToProcess.length} шт.)?`)) return;
 
     setIsProcessing(true);
     addLog(`Запуск генерации превью для ${itemsToProcess.length} файлов...`, 'info');
