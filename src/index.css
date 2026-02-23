@@ -2352,16 +2352,11 @@ h3 { margin: 0; color: var(--color-text); }
 
 
 
-/* Основной контейнер, который теперь будет иметь фоновое изображение */
 .home-container {
   position: relative;
   width: 100vw;
   height: 100vh;
-  /* Путь к картинке в папке public */
-  background-image: url('/images/background.png');
-  /* Масштабируем картинку, чтобы покрыть весь экран */
   background-size: cover;
-  /* Центрируем картинку */
   background-position: center;
   background-repeat: no-repeat;
   overflow: hidden;

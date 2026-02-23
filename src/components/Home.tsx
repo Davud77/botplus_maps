@@ -3,10 +3,13 @@ import Header from './Header';
 
 const Home: React.FC = () => {
   return (
-    <div className="home-container">
+    <div 
+      className="home-container" 
+      style={{ backgroundImage: "url('/images/background.png')" }}
+    >
       <Header />
       <div className="version">
-        0.0.1
+        0.2.1
       </div>
     </div>
   );

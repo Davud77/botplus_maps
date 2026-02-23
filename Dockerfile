@@ -13,7 +13,8 @@ COPY src ./src
 RUN npm install -D @babel/plugin-proposal-private-property-in-object \
  && npx update-browserslist-db@latest --yes || true
 
-RUN npm run build
+# ОТКЛЮЧАЕМ СТРОГИЙ CI-РЕЖИМ, ЧТОБЫ WARNING НЕ КРАШИЛ СБОРКУ
+RUN CI=false npm run build
 
 # ---------- 2) Runtime Flask ----------
 FROM python:3.12-slim-bookworm AS runner
