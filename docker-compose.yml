@@ -113,8 +113,8 @@ services:
       TASKS_FOLDER: ${TASKS_FOLDER}
       
     volumes:
-      - ./data:/app/data
-      - ./server/uploads:${UPLOAD_FOLDER}
+      - ${HOST_DATA_DIR:-./data}:/app/data
+      - ${HOST_UPLOADS_DIR:-./server/uploads}:${UPLOAD_FOLDER}
     ports:
       - "${APP_PORT}:5000"
     restart: unless-stopped
