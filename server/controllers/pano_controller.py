@@ -28,7 +28,7 @@ class PanoController:
         self.db = Database()
         self.storage = MinioStorage()
         
-        # [NEW] Подтягиваем имя бакета из конфигурации (.env)
+        # Подтягиваем имя бакета из конфигурации (.env)
         self.pano_bucket = getattr(config, 'MINIO_BUCKET_NAME', 'panoramas')
         
         # Гарантируем, что таблица photos_4326 существует!
@@ -37,7 +37,7 @@ class PanoController:
         # Ensure bucket exists
         if self.storage.client:
             try:
-                # [UPDATED] Используем динамическое имя бакета
+                # Используем динамическое имя бакета
                 if not self.storage.client.bucket_exists(self.pano_bucket):
                     self.storage.client.make_bucket(self.pano_bucket)
             except Exception as e:
@@ -277,6 +277,7 @@ class PanoController:
         uploaded_files = request.files.getlist("files")
         successful = []
         failed = []
+        failed_reasons = [] # Сюда складываем причины сбоя
 
         orig_bucket = self.storage.bucket_name
         self.storage.bucket_name = self.pano_bucket
@@ -297,7 +298,7 @@ class PanoController:
                     lat, lon, alt, direction, dt = self._parse_exif_data(img_stream)
                     
                     if lat is None or lon is None:
-                        raise ValueError("No GPS data found")
+                        raise ValueError("В файле нет GPS-координат (EXIF)")
 
                     # 2. Filename
                     timestamp_str = dt.strftime("%Y%m%d_%H%M%S") if dt else "nodate"
@@ -318,11 +319,13 @@ class PanoController:
                 except Exception as e:
                     logger.error(f"Error uploading {file.filename}: {e}")
                     failed.append(file.filename)
+                    failed_reasons.append(str(e))
 
             return jsonify({
                 "message": "Upload complete",
                 "successful_uploads": successful,
-                "failed_uploads": failed
+                "failed_uploads": failed,
+                "skipped_files": failed_reasons # Отправляем точные причины!
             })
 
         except Exception as e:
@@ -387,63 +390,71 @@ class PanoController:
     def _parse_exif_data(self, stream):
         try:
             img = Image.open(stream)
-            raw_exif = img.info.get("exif")
+            exif = img.getexif()
             
-            if not raw_exif:
+            # Фоллбэк: если getexif пуст, пробуем вытащить старым добрым piexif
+            if not exif and "exif" in img.info:
+                try:
+                    exif_dict = piexif.load(img.info["exif"])
+                    gps = exif_dict.get("GPS", {})
+                    lat = lon = alt = None
+                    if piexif.GPSIFD.GPSLatitude in gps:
+                        lat = self._convert_to_degrees(gps[piexif.GPSIFD.GPSLatitude])
+                        if gps.get(piexif.GPSIFD.GPSLatitudeRef) == b'S': lat = -lat
+                    if piexif.GPSIFD.GPSLongitude in gps:
+                        lon = self._convert_to_degrees(gps[piexif.GPSIFD.GPSLongitude])
+                        if gps.get(piexif.GPSIFD.GPSLongitudeRef) == b'W': lon = -lon
+                    direction = 0.0
+                    return lat, lon, alt, direction, None
+                except: pass
+
+            if not exif:
                 return None, None, 0, 0, None
                 
-            exif_dict = piexif.load(raw_exif)
+            # Читаем данные встроенным парсером Pillow (34853 - ID для GPS)
+            gps_ifd = exif.get_ifd(34853) if hasattr(exif, 'get_ifd') else {}
             
-            lat, lon, alt = self._get_gps_coordinates(exif_dict)
-            direction = self._get_direction(exif_dict)
+            lat = lon = alt = None
+            
+            def safe_float(v):
+                try: return float(v)
+                except: return 0.0
+
+            def convert_to_degrees(value):
+                if not value or len(value) < 3: return 0.0
+                return safe_float(value[0]) + (safe_float(value[1]) / 60.0) + (safe_float(value[2]) / 3600.0)
+
+            if 2 in gps_ifd and 1 in gps_ifd:
+                lat = convert_to_degrees(gps_ifd[2])
+                if gps_ifd[1] == 'S': lat = -lat
+                
+            if 4 in gps_ifd and 3 in gps_ifd:
+                lon = convert_to_degrees(gps_ifd[4])
+                if gps_ifd[3] == 'W': lon = -lon
+                
+            if 6 in gps_ifd:
+                alt = safe_float(gps_ifd[6])
+
+            direction = safe_float(gps_ifd.get(17, 0.0))
             
             dt = None
-            date_str = exif_dict.get("Exif", {}).get(piexif.ExifIFD.DateTimeOriginal)
+            # 34665 - ID для общих Exif данных
+            exif_ifd = exif.get_ifd(34665) if hasattr(exif, 'get_ifd') else {}
+            date_str = exif_ifd.get(36867) or exif.get(306)
             if date_str:
                 try:
                     if isinstance(date_str, bytes): date_str = date_str.decode()
                     dt = datetime.strptime(date_str, "%Y:%m:%d %H:%M:%S")
                 except: pass
-            
+                
             return lat, lon, alt, direction, dt
         except Exception as e:
             logger.warning(f"Exif parsing error: {e}")
             return None, None, 0, 0, None
 
-    def _get_gps_coordinates(self, exif_dict):
-        gps = exif_dict.get("GPS", {})
-        lat = lon = alt = None
-
-        if piexif.GPSIFD.GPSLatitude in gps:
-            lat = self._convert_to_degrees(gps[piexif.GPSIFD.GPSLatitude])
-            if gps.get(piexif.GPSIFD.GPSLatitudeRef) == b'S': lat = -lat
-        
-        if piexif.GPSIFD.GPSLongitude in gps:
-            lon = self._convert_to_degrees(gps[piexif.GPSIFD.GPSLongitude])
-            if gps.get(piexif.GPSIFD.GPSLongitudeRef) == b'W': lon = -lon
-            
-        if piexif.GPSIFD.GPSAltitude in gps:
-            alt = self._safe_rational(gps[piexif.GPSIFD.GPSAltitude])
-
-        return lat, lon, alt
-
-    def _get_direction(self, exif_dict):
-        gps = exif_dict.get("GPS", {})
-        val = gps.get(piexif.GPSIFD.GPSImgDirection)
-        return self._safe_rational(val)
-
     def _convert_to_degrees(self, value):
-        d = self._safe_rational(value[0])
-        m = self._safe_rational(value[1])
-        s = self._safe_rational(value[2])
-        return d + (m / 60.0) + (s / 3600.0)
-
-    def _safe_rational(self, value):
-        if not value: return 0.0
         try:
-            if isinstance(value, tuple) and len(value) == 2:
-                return value[0] / value[1] if value[1] != 0 else 0.0
-            return float(value)
+            return float(value[0][0])/float(value[0][1]) + (float(value[1][0])/float(value[1][1]) / 60.0) + (float(value[2][0])/float(value[2][1]) / 3600.0)
         except: return 0.0
 
 PanoController.register_routes(pano_blueprint)
