@@ -32,10 +32,15 @@ const UploadPano: React.FC = () => {
   const BATCH_SIZE = 50;
 
   const onFileChange = (event: ChangeEvent<HTMLInputElement>) => {
-    const newFiles = Array.from(event.target.files ?? []).filter((file): file is File => file.type === "image/jpeg");
+    // [ИЗМЕНЕНО] Разрешаем и JPEG, и WebP
+    const newFiles = Array.from(event.target.files ?? []).filter((file): file is File => 
+        file.type === "image/jpeg" || file.type === "image/webp"
+    );
+    
     if (newFiles.length !== (event.target.files?.length ?? 0)) {
-      alert('Можно загружать только файлы с расширением .jpg');
+      alert('Можно загружать только файлы с расширением .jpg или .webp');
     }
+    
     setFiles(prevFiles => [...prevFiles, ...newFiles]);
     setFileStatuses(prevStatuses => {
       const newStatuses: FileStatuses = {};
@@ -76,7 +81,6 @@ const UploadPano: React.FC = () => {
     formData.append("tags", tags.join(', '));
 
     try {
-      // [FIX] Используем исправленный API_URL
       const response = await fetch(`${API_URL}/api/upload`, {
         method: 'POST',
         body: formData,
@@ -93,10 +97,14 @@ const UploadPano: React.FC = () => {
           [filename]: { status: 'success', log: 'Успешно загружен' }
         }));
       });
+      
       result.failed_uploads.forEach((filename: string, index: number) => {
         setFileStatuses(prevStatuses => ({
           ...prevStatuses,
-          [filename]: { status: 'failed', log: result.skipped_files[index] }
+          [filename]: { 
+            status: 'failed', 
+            log: result.skipped_files ? result.skipped_files[index] : 'Ошибка при загрузке' 
+          }
         }));
       });
     } catch (error: any) {
@@ -152,10 +160,16 @@ const UploadPano: React.FC = () => {
   const handleDrop = (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
     setIsDragging(false);
-    const newFiles = Array.from(event.dataTransfer.files).filter((file): file is File => file.type === "image/jpeg");
+    
+    // [ИЗМЕНЕНО] Разрешаем JPEG и WebP при Drag & Drop
+    const newFiles = Array.from(event.dataTransfer.files).filter((file): file is File => 
+        file.type === "image/jpeg" || file.type === "image/webp"
+    );
+    
     if (newFiles.length !== event.dataTransfer.files.length) {
-      alert('Можно загружать только файлы с расширением .jpg');
+      alert('Можно загружать только файлы с расширением .jpg или .webp');
     }
+    
     setFiles(prevFiles => [...prevFiles, ...newFiles]);
     setFileStatuses(prevStatuses => {
       const newStatuses: FileStatuses = {};
@@ -213,10 +227,11 @@ const UploadPano: React.FC = () => {
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
         >
+          {/* [ИЗМЕНЕНО] Разрешаем выбор .webp в системном окне */}
           <input
             type="file"
             multiple
-            accept=".jpg"
+            accept=".jpg,.jpeg,.webp"
             onChange={onFileChange}
             ref={fileInputRef}
             style={{ display: 'none' }}

@@ -5,6 +5,7 @@ from flask_cors import cross_origin
 import io
 import os
 import piexif
+import mimetypes
 from PIL import Image
 from datetime import datetime
 import traceback
@@ -228,15 +229,20 @@ class PanoController:
 
             filename = res['filename'] if isinstance(res, dict) else res[0]
             
+            # Динамический MIME-тип на основе расширения файла
+            mime_type, _ = mimetypes.guess_type(filename)
+            if not mime_type:
+                mime_type = "application/octet-stream"
+            
             # Switch bucket context
             orig_bucket = self.storage.bucket_name
-            self.storage.bucket_name = self.pano_bucket  # [UPDATED]
+            self.storage.bucket_name = self.pano_bucket
             
             # Try MinIO
             response = None
             if self.storage.client:
                 try:
-                    response = self.storage.send_local_file(filename, mimetype="image/jpeg")
+                    response = self.storage.send_local_file(filename, mimetype=mime_type)
                 except: pass
             
             self.storage.bucket_name = orig_bucket
@@ -250,9 +256,14 @@ class PanoController:
     @cross_origin()
     def get_pano_image_direct(self, filename):
         try:
+            # Динамический MIME-тип
+            mime_type, _ = mimetypes.guess_type(filename)
+            if not mime_type:
+                mime_type = "application/octet-stream"
+
             orig_bucket = self.storage.bucket_name
-            self.storage.bucket_name = self.pano_bucket  # [UPDATED]
-            response = self.storage.send_local_file(filename, mimetype="image/jpeg")
+            self.storage.bucket_name = self.pano_bucket
+            response = self.storage.send_local_file(filename, mimetype=mime_type)
             self.storage.bucket_name = orig_bucket
             return response
         except Exception as e:
@@ -268,13 +279,18 @@ class PanoController:
         failed = []
 
         orig_bucket = self.storage.bucket_name
-        self.storage.bucket_name = self.pano_bucket  # [UPDATED]
+        self.storage.bucket_name = self.pano_bucket
 
         try:
             for file in uploaded_files:
                 try:
                     original_name = file.filename
                     file_content = file.read()
+                    
+                    # Динамический тип для загрузки
+                    mime_type, _ = mimetypes.guess_type(original_name)
+                    if not mime_type:
+                        mime_type = "image/jpeg"
                     
                     # 1. Parse EXIF
                     img_stream = io.BytesIO(file_content)
@@ -287,12 +303,11 @@ class PanoController:
                     timestamp_str = dt.strftime("%Y%m%d_%H%M%S") if dt else "nodate"
                     new_filename = f"pano_{timestamp_str}_{original_name}"
                     
-                    # [UPDATED] Путь папки для БД
                     file_path = f"{self.pano_bucket}/{new_filename}" 
 
-                    # 3. MinIO Upload
+                    # 3. MinIO Upload (сохраняем с правильным типом WebP/JPEG)
                     save_stream = io.BytesIO(file_content)
-                    self.storage.save_file(save_stream, new_filename, content_type="image/jpeg")
+                    self.storage.save_file(save_stream, new_filename, content_type=mime_type)
 
                     # 4. DB Insert
                     self._insert_pano_db(new_filename, file_path, lat, lon, alt, direction, dt)
@@ -329,7 +344,7 @@ class PanoController:
                 self.db.commit()
                 
                 orig = self.storage.bucket_name
-                self.storage.bucket_name = self.pano_bucket  # [UPDATED]
+                self.storage.bucket_name = self.pano_bucket
                 self.storage.delete_file(filename)
                 self.storage.bucket_name = orig
                 
@@ -362,7 +377,7 @@ class PanoController:
         """
         values = (
             float(lon), float(lat), float(alt or 0),
-            path, filename, self.pano_bucket,  # [UPDATED]
+            path, filename, self.pano_bucket,
             float(alt or 0), float(direction or 0),
             str(lon), str(lat), timestamp or datetime.now()
         )
@@ -372,8 +387,12 @@ class PanoController:
     def _parse_exif_data(self, stream):
         try:
             img = Image.open(stream)
-            if "exif" not in img.info: return None, None, 0, 0, None
-            exif_dict = piexif.load(img.info["exif"])
+            raw_exif = img.info.get("exif")
+            
+            if not raw_exif:
+                return None, None, 0, 0, None
+                
+            exif_dict = piexif.load(raw_exif)
             
             lat, lon, alt = self._get_gps_coordinates(exif_dict)
             direction = self._get_direction(exif_dict)
@@ -387,7 +406,8 @@ class PanoController:
                 except: pass
             
             return lat, lon, alt, direction, dt
-        except:
+        except Exception as e:
+            logger.warning(f"Exif parsing error: {e}")
             return None, None, 0, 0, None
 
     def _get_gps_coordinates(self, exif_dict):
