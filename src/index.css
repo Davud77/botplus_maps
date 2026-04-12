@@ -2372,3 +2372,72 @@ h3 { margin: 0; color: var(--color-text); }
   font-size: 12px;
   z-index: 10; /* Убедимся, что он поверх фона */
 }
+
+
+
+
+/* Базовые стили для обертки страницы */
+.map-page-wrapper {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* Стандартное состояние карты (на весь экран) */
+.main-map-container {
+  position: absolute !important;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 100;
+  transition: all 0.3s ease-in-out; /* Плавное уменьшение */
+}
+
+/* Состояние карты, когда открыта панорама (миникарта внизу слева) */
+.main-map-container.minimap-mode {
+  top: auto;
+  bottom: 0px;
+  left: 0px;
+  width: 400px;
+  height: 300px;
+  z-index: 1000; /* Должна быть поверх панорамы */
+  box-shadow: 2px -2px 10px rgba(0, 0, 0, 0.3);
+  outline-style: none;
+}
+
+/* Фуллскрин контейнер панорамы */
+.panorama-viewer-container {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 500; /* Панорама находится ПОД миникартой (z-index 1000), но НАД базовым фоном */
+  background-color: #000;
+}
+
+/* Оверлей с кнопками управления панорамой */
+.pano-controls-overlay {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  z-index: 1001; /* Поверх всего */
+  display: flex;
+  gap: 10px;
+}
+
+.pano-action-btn {
+  background: rgba(0, 0, 0, 0.6);
+  color: white;
+  border: none;
+  padding: 8px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.pano-action-btn:hover {
+  background: rgba(0, 0, 0, 0.8);
+}

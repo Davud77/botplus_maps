@@ -56,9 +56,22 @@ const MapPage: React.FC = () => {
     }
   }, [activePanel]);
 
-  // --- Handlers ---
+  // --- ВАЖНО: Фикс размера карты при переходе в режим миникарты ---
+  useEffect(() => {
+    if (mapRef.current) {
+      // Ждем завершения CSS-анимации/рендера (300ms обычно достаточно)
+      setTimeout(() => {
+        mapRef.current?.invalidateSize(true);
+      }, 300);
+    }
+  }, [isPanoVisible]);
 
+  // --- Handlers ---
   const handleMarkerClick = useCallback(async (marker: MarkerType) => {
+    // Центрируем карту на маркере, чтобы при уменьшении карты точка оставалась в центре
+    if (mapRef.current) {
+      mapRef.current.panTo([marker.lat, marker.lng]);
+    }
     setSelectedMarker(marker.id);
     setIsPanoVisible(true);
   }, []);
@@ -77,41 +90,46 @@ const MapPage: React.FC = () => {
   };
 
   return (
-    <div className="map-page-wrapper">
+    <div className="map-page-wrapper" style={{ position: 'relative', width: '100%', height: '100vh', overflow: 'hidden' }}>
       
       {/* 1. HEADER */}
-      <MapHeader 
-        onSearch={handleSearch}
-        onTogglePano={() => setShowPanoLayer(!showPanoLayer)}
-        isPanoLoading={isLoadingPano}
-      />
+      <div style={{ position: 'relative', zIndex: 1100 }}>
+        <MapHeader 
+          onSearch={handleSearch}
+          onTogglePano={() => setShowPanoLayer(!showPanoLayer)}
+          isPanoLoading={isLoadingPano}
+        />
+      </div>
 
       {/* 2. SIDE PANELS */}
-      {activePanel === 'vector' && <VectorPanel onClose={closeAll} />}
-      {activePanel === 'baseLayers' && <BaseLayersPanel onClose={closeAll} />}
-      {/* Передаем mapRef.current в OrthoPanel для управления зумом */}
-      {activePanel === 'ortho' && <OrthoPanel onClose={closeAll} map={mapRef.current} />}
-      {activePanel === 'pano' && <PanoPanel onClose={closeAll} />}
+      <div style={{ position: 'relative', zIndex: 1100 }}>
+        {activePanel === 'vector' && <VectorPanel onClose={closeAll} />}
+        {activePanel === 'baseLayers' && <BaseLayersPanel onClose={closeAll} />}
+        {/* Передаем mapRef.current в OrthoPanel для управления зумом */}
+        {activePanel === 'ortho' && <OrthoPanel onClose={closeAll} map={mapRef.current} />}
+        {activePanel === 'pano' && <PanoPanel onClose={closeAll} />}
+      </div>
 
       {/* 3. PANORAMA VIEWER */}
       {selectedMarker && isPanoVisible && (
-        <div className={`selected-marker-info ${isPanoExpanded ? 'pano-viewer-expanded' : 'pano-viewer-collapsed'}`}>
-          <PanoramaViewer markerId={selectedMarker} isExpanded={isPanoExpanded} />
+        <div className="panorama-viewer-container">
+          <PanoramaViewer markerId={selectedMarker} isExpanded={true} />
           
-          <button 
-            onClick={() => setIsPanoVisible(false)}
-            className="pano-action-btn pano-close-btn"
-            title="Закрыть"
-          >
-            ✕
-          </button>
-          
-          <button 
-            onClick={() => setIsPanoExpanded(!isPanoExpanded)}
-            className="pano-action-btn pano-expand-btn"
-          >
-            {isPanoExpanded ? 'Свернуть' : 'Развернуть'}
-          </button>
+          <div className="pano-controls-overlay">
+            <button 
+              onClick={() => setIsPanoVisible(false)}
+              className="pano-action-btn pano-close-btn"
+              title="Закрыть"
+            >
+              ✕
+            </button>
+            <button 
+              onClick={() => setIsPanoExpanded(!isPanoExpanded)}
+              className="pano-action-btn pano-expand-btn"
+            >
+              {isPanoExpanded ? 'Свернуть' : 'Развернуть'}
+            </button>
+          </div>
         </div>
       )}
 
@@ -119,7 +137,7 @@ const MapPage: React.FC = () => {
       <MapContainer 
         center={mapCenter} 
         zoom={5} 
-        className="main-map-container" 
+        className={`main-map-container ${isPanoVisible ? 'minimap-mode' : ''}`} 
         zoomControl={false} 
         maxZoom={23}
       >

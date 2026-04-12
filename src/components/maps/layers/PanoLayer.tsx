@@ -21,7 +21,7 @@ interface PanoLayerProps {
 
 // --- Настройки ---
 const MIN_ZOOM_LEVEL = 3; 
-const MAX_MARKERS_PER_REQUEST = 1000;
+const MAX_MARKERS_PER_REQUEST = 1000000;
 
 // === ВАЖНОЕ ИЗМЕНЕНИЕ ===
 // Устанавливаем адрес, который точно работает у вас локально
