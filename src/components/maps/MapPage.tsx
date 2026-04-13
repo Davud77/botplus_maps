@@ -43,6 +43,9 @@ const MapPage: React.FC = () => {
   const [selectedMarker, setSelectedMarker] = useState<string | null>(null);
   const [isPanoExpanded, setIsPanoExpanded] = useState(false);
   const [isPanoVisible, setIsPanoVisible] = useState(false);
+  
+  // НОВОЕ: Состояние для хранения метаданных панорамы
+  const [panoDetails, setPanoDetails] = useState<{ title: string; date: string; alt: string } | null>(null);
 
   // Context Menu State
   const [contextMenu, setContextMenu] = useState({ visible: false, x: 0, y: 0, lat: 0, lng: 0 });
@@ -107,17 +110,32 @@ const MapPage: React.FC = () => {
         {activePanel === 'baseLayers' && <BaseLayersPanel onClose={closeAll} />}
         {/* Передаем mapRef.current в OrthoPanel для управления зумом */}
         {activePanel === 'ortho' && <OrthoPanel onClose={closeAll} map={mapRef.current} />}
-        {activePanel === 'pano' && <PanoPanel onClose={closeAll} />}
+        
+        {/* НОВОЕ: Передаем panoDetails в PanoPanel */}
+        {activePanel === 'pano' && (
+          <PanoPanel 
+            onClose={closeAll} 
+            panoDetails={isPanoVisible ? panoDetails : null} 
+          />
+        )}
       </div>
 
       {/* 3. PANORAMA VIEWER */}
       {selectedMarker && isPanoVisible && (
         <div className="panorama-viewer-container">
-          <PanoramaViewer markerId={selectedMarker} isExpanded={true} />
+          {/* НОВОЕ: Передаем функцию onDataLoad, чтобы получать данные изнутри вьювера */}
+          <PanoramaViewer 
+            markerId={selectedMarker} 
+            isExpanded={true} 
+            onDataLoad={(data) => setPanoDetails(data)}
+          />
           
           <div className="pano-controls-overlay">
             <button 
-              onClick={() => setIsPanoVisible(false)}
+              onClick={() => {
+                setIsPanoVisible(false);
+                setPanoDetails(null); // Очищаем данные при закрытии панорамы
+              }}
               className="pano-action-btn pano-close-btn"
               title="Закрыть"
             >

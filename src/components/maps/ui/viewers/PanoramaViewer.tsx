@@ -4,12 +4,14 @@ import React, { useRef, useEffect, useState } from 'react';
 // @ts-ignore
 import Marzipano from 'marzipano';
 
+// НОВОЕ: Добавляем onDataLoad в интерфейс
 interface PanoramaViewerProps {
   markerId: string;
   isExpanded: boolean;
+  onDataLoad?: (data: { title: string; date: string; alt: string }) => void;
 }
 
-const PanoramaViewer: React.FC<PanoramaViewerProps> = ({ markerId, isExpanded }) => {
+const PanoramaViewer: React.FC<PanoramaViewerProps> = ({ markerId, isExpanded, onDataLoad }) => {
   const viewerRef = useRef<HTMLDivElement | null>(null);
   const viewerInstanceRef = useRef<any>(null);
   const [pointData, setPointData] = useState<any>(null);
@@ -87,7 +89,18 @@ const PanoramaViewer: React.FC<PanoramaViewerProps> = ({ markerId, isExpanded })
         }
         
         const data = await infoResponse.json();
-        if (isMounted) setPointData(data);
+        if (isMounted) {
+          setPointData(data);
+          
+          // НОВОЕ: Если передана функция onDataLoad, отправляем данные наверх
+          if (onDataLoad) {
+            onDataLoad({
+              title: data.filename || `Panorama ${markerId}`,
+              date: data.timestamp || data.upload_date || 'No date',
+              alt: data.altitude ? data.altitude.toFixed(1) : '0'
+            });
+          }
+        }
 
         // [FIX] Correct API path for download
         const imageUrl = `/api/pano_info/${markerId}/download`;
@@ -190,20 +203,10 @@ const PanoramaViewer: React.FC<PanoramaViewerProps> = ({ markerId, isExpanded })
           </button>
       </div>
 
-      {/* Info Overlay */}
-      {pointData && (
-        <div className="pano-info-overlay">
-          <h3 className="pano-info-title">{pointData.filename}</h3>
-          <div className="pano-info-subtitle">
-             {pointData.timestamp || pointData.upload_date || 'No date'}
-          </div>
-          {pointData.altitude !== 0 && (
-              <div className="pano-info-alt">
-                  Alt: {pointData.altitude?.toFixed(1)}m
-              </div>
-          )}
-        </div>
-      )}
+      {/* УДАЛЕНО: Блок с классом pano-info-overlay.
+        Теперь эта информация рендерится в боковой панели (PanoPanel.tsx).
+      */}
+      
     </div>
   );
 };
