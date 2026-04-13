@@ -162,7 +162,7 @@ const MapPage: React.FC = () => {
             {/* Кнопка Fullscreen в виде иконки */}
             <button 
               onClick={toggleFullscreen}
-              className="pano-action-btn pano-fullscreen-btn"
+              className="layers-button pano-fullscreen-btn"
               title="На весь экран"
             >
               ⛶
@@ -174,7 +174,7 @@ const MapPage: React.FC = () => {
                 setIsPanoVisible(false);
                 setPanoDetails(null);
               }}
-              className="pano-action-btn pano-close-btn"
+              className="layers-button pano-close-btn"
               title="Закрыть"
             >
               ✕

@@ -9,7 +9,7 @@ const Home: React.FC = () => {
     >
       <Header />
       <div className="version">
-        0.2.3
+        0.2.4
       </div>
     </div>
   );

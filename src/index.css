@@ -2176,22 +2176,7 @@ h3 { margin: 0; color: var(--color-text); }
 /* Оверлей контролов (кнопки) */
 
 
-.pano-fullscreen-btn {
-  padding: 8px 16px;
-  background: rgba(30, 30, 30, 0.8);
-  color: white;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 500;
-  backdrop-filter: blur(4px);
-  transition: background 0.2s ease;
-}
 
-.pano-fullscreen-btn:hover {
-  background: rgba(60, 60, 60, 0.9);
-}
 
 /* Оверлей информации */
 .pano-info-overlay {
@@ -2266,16 +2251,6 @@ h3 { margin: 0; color: var(--color-text); }
   background: #f0f0f0;
 }
 
-/* Кнопка закрытия (крестик) */
-.pano-close-btn {
-  right: 10px;
-  border-radius: 50%;
-  width: 30px;
-  height: 30px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
 
 /* Кнопка Развернуть/Свернуть */
 .pano-expand-btn {
