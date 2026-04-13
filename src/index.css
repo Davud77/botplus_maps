@@ -2441,3 +2441,13 @@ h3 { margin: 0; color: var(--color-text); }
 .pano-action-btn:hover {
   background: rgba(0, 0, 0, 0.8);
 }
+
+
+.main-map-container-pano {
+  position: absolute !important;
+  bottom: 0;
+  width: 400px;
+  height: 300px;
+  z-index: 1000; /* Должна быть поверх базовой карты, но под панорамой */
+  transition: all 0.3s ease-in-out; /* Плавное изменение размера */
+}

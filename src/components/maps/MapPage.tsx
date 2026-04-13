@@ -168,7 +168,8 @@ const MapPage: React.FC = () => {
       <MapContainer 
         center={mapCenter} 
         zoom={5} 
-        className={`main-map-container ${isPanoVisible ? 'minimap-mode' : ''}`} 
+        // ДОБАВЛЕН ДОПОЛНИТЕЛЬНЫЙ КЛАСС main-map-container-pano
+        className={`main-map-container ${isPanoVisible ? 'minimap-mode main-map-container-pano' : ''}`} 
         zoomControl={false} 
         maxZoom={23}
       >
