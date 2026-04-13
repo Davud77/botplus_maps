@@ -60,22 +60,31 @@ const MapPage: React.FC = () => {
     }
   }, [activePanel]);
 
-  // --- ВАЖНО: Фикс размера карты и принудительное добавление классов ---
+  // --- ВАЖНО: Фикс размера карты, управление классами и скрытие .end-box ---
   useEffect(() => {
+    // 1. Управление классами контейнера карты
     if (mapRef.current) {
       const mapContainerHtmlElement = mapRef.current.getContainer();
       
-      // Добавляем или удаляем классы напрямую через DOM
       if (isPanoVisible) {
         mapContainerHtmlElement.classList.add('minimap-mode', 'main-map-container-pano');
       } else {
         mapContainerHtmlElement.classList.remove('minimap-mode', 'main-map-container-pano');
       }
 
-      // Ждем завершения CSS-анимации/рендера (300ms обычно достаточно) перед пересчетом
       setTimeout(() => {
         mapRef.current?.invalidateSize(true);
       }, 300);
+    }
+
+    // 2. Скрытие элемента .end-box в шапке
+    const endBox = document.querySelector('.end-box') as HTMLElement | null;
+    if (endBox) {
+      if (isPanoVisible) {
+        endBox.style.display = 'none'; // Скрываем
+      } else {
+        endBox.style.display = '';     // Возвращаем исходное состояние
+      }
     }
   }, [isPanoVisible]);
 

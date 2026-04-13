@@ -2174,14 +2174,7 @@ h3 { margin: 0; color: var(--color-text); }
 }
 
 /* Оверлей контролов (кнопки) */
-.pano-controls-overlay {
-  position: absolute;
-  bottom: 20px;
-  left: 20px;
-  z-index: 10;
-  display: flex;
-  gap: 10px;
-}
+
 
 .pano-fullscreen-btn {
   padding: 8px 16px;
@@ -2419,13 +2412,19 @@ h3 { margin: 0; color: var(--color-text); }
 }
 
 /* Оверлей с кнопками управления панорамой */
+
 .pano-controls-overlay {
   position: absolute;
-  top: 20px;
-  right: 20px;
+  top: 18px;
+  right: 10px;
   z-index: 1001; /* Поверх всего */
   display: flex;
   gap: 10px;
+      align-items: center;
+    background-color: #1e1e1e;
+    background-color: var(--color-surface);
+    border-radius: 6px;
+    border-radius: var(--radius-base);
 }
 
 .pano-action-btn {
