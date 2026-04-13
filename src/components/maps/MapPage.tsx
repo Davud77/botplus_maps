@@ -41,16 +41,17 @@ const MapPage: React.FC = () => {
   const [showPanoLayer, setShowPanoLayer] = useState(false);
   const [isLoadingPano, setIsLoadingPano] = useState(false);
   const [selectedMarker, setSelectedMarker] = useState<string | null>(null);
-  const [isPanoExpanded, setIsPanoExpanded] = useState(false);
   const [isPanoVisible, setIsPanoVisible] = useState(false);
   
-  // НОВОЕ: Состояние для хранения метаданных панорамы
+  // Состояние для метаданных панорамы
   const [panoDetails, setPanoDetails] = useState<{ title: string; date: string; alt: string } | null>(null);
 
   // Context Menu State
   const [contextMenu, setContextMenu] = useState({ visible: false, x: 0, y: 0, lat: 0, lng: 0 });
 
   const mapRef = useRef<L.Map | null>(null);
+  // Ref для контейнера панорамы, чтобы управлять Fullscreen
+  const panoContainerRef = useRef<HTMLDivElement | null>(null);
 
   // Синхронизация: если открыта панель панорам, включаем слой на карте автоматически
   useEffect(() => {
@@ -59,10 +60,9 @@ const MapPage: React.FC = () => {
     }
   }, [activePanel]);
 
-  // --- ВАЖНО: Фикс размера карты при переходе в режим миникарты ---
+  // Фикс размера карты при переходе в режим миникарты
   useEffect(() => {
     if (mapRef.current) {
-      // Ждем завершения CSS-анимации/рендера (300ms обычно достаточно)
       setTimeout(() => {
         mapRef.current?.invalidateSize(true);
       }, 300);
@@ -70,8 +70,20 @@ const MapPage: React.FC = () => {
   }, [isPanoVisible]);
 
   // --- Handlers ---
+
+  const toggleFullscreen = () => {
+    if (panoContainerRef.current) {
+      if (!document.fullscreenElement) {
+        panoContainerRef.current.requestFullscreen().catch((err) => {
+          console.error(`Error attempting to enable full-screen mode: ${err.message}`);
+        });
+      } else {
+        document.exitFullscreen();
+      }
+    }
+  };
+
   const handleMarkerClick = useCallback(async (marker: MarkerType) => {
-    // Центрируем карту на маркере, чтобы при уменьшении карты точка оставалась в центре
     if (mapRef.current) {
       mapRef.current.panTo([marker.lat, marker.lng]);
     }
@@ -108,10 +120,8 @@ const MapPage: React.FC = () => {
       <div style={{ position: 'relative', zIndex: 1100 }}>
         {activePanel === 'vector' && <VectorPanel onClose={closeAll} />}
         {activePanel === 'baseLayers' && <BaseLayersPanel onClose={closeAll} />}
-        {/* Передаем mapRef.current в OrthoPanel для управления зумом */}
         {activePanel === 'ortho' && <OrthoPanel onClose={closeAll} map={mapRef.current} />}
         
-        {/* НОВОЕ: Передаем panoDetails в PanoPanel */}
         {activePanel === 'pano' && (
           <PanoPanel 
             onClose={closeAll} 
@@ -122,8 +132,7 @@ const MapPage: React.FC = () => {
 
       {/* 3. PANORAMA VIEWER */}
       {selectedMarker && isPanoVisible && (
-        <div className="panorama-viewer-container">
-          {/* НОВОЕ: Передаем функцию onDataLoad, чтобы получать данные изнутри вьювера */}
+        <div ref={panoContainerRef} className="panorama-viewer-container">
           <PanoramaViewer 
             markerId={selectedMarker} 
             isExpanded={true} 
@@ -131,21 +140,25 @@ const MapPage: React.FC = () => {
           />
           
           <div className="pano-controls-overlay">
+            {/* Кнопка Fullscreen в виде иконки */}
+            <button 
+              onClick={toggleFullscreen}
+              className="pano-action-btn pano-fullscreen-btn"
+              title="На весь экран"
+            >
+              ⛶
+            </button>
+            
+            {/* Кнопка Закрыть */}
             <button 
               onClick={() => {
                 setIsPanoVisible(false);
-                setPanoDetails(null); // Очищаем данные при закрытии панорамы
+                setPanoDetails(null);
               }}
               className="pano-action-btn pano-close-btn"
               title="Закрыть"
             >
               ✕
-            </button>
-            <button 
-              onClick={() => setIsPanoExpanded(!isPanoExpanded)}
-              className="pano-action-btn pano-expand-btn"
-            >
-              {isPanoExpanded ? 'Свернуть' : 'Развернуть'}
             </button>
           </div>
         </div>
