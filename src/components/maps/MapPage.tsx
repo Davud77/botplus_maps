@@ -60,9 +60,19 @@ const MapPage: React.FC = () => {
     }
   }, [activePanel]);
 
-  // Фикс размера карты при переходе в режим миникарты
+  // --- ВАЖНО: Фикс размера карты и принудительное добавление классов ---
   useEffect(() => {
     if (mapRef.current) {
+      const mapContainerHtmlElement = mapRef.current.getContainer();
+      
+      // Добавляем или удаляем классы напрямую через DOM
+      if (isPanoVisible) {
+        mapContainerHtmlElement.classList.add('minimap-mode', 'main-map-container-pano');
+      } else {
+        mapContainerHtmlElement.classList.remove('minimap-mode', 'main-map-container-pano');
+      }
+
+      // Ждем завершения CSS-анимации/рендера (300ms обычно достаточно) перед пересчетом
       setTimeout(() => {
         mapRef.current?.invalidateSize(true);
       }, 300);
@@ -168,8 +178,7 @@ const MapPage: React.FC = () => {
       <MapContainer 
         center={mapCenter} 
         zoom={5} 
-        // ДОБАВЛЕН ДОПОЛНИТЕЛЬНЫЙ КЛАСС main-map-container-pano
-        className={`main-map-container ${isPanoVisible ? 'minimap-mode main-map-container-pano' : ''}`} 
+        className="main-map-container" 
         zoomControl={false} 
         maxZoom={23}
       >

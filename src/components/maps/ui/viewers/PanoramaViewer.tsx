@@ -4,7 +4,6 @@ import React, { useRef, useEffect, useState } from 'react';
 // @ts-ignore
 import Marzipano from 'marzipano';
 
-// НОВОЕ: Добавляем onDataLoad в интерфейс
 interface PanoramaViewerProps {
   markerId: string;
   isExpanded: boolean;
@@ -14,49 +13,7 @@ interface PanoramaViewerProps {
 const PanoramaViewer: React.FC<PanoramaViewerProps> = ({ markerId, isExpanded, onDataLoad }) => {
   const viewerRef = useRef<HTMLDivElement | null>(null);
   const viewerInstanceRef = useRef<any>(null);
-  const [pointData, setPointData] = useState<any>(null);
-  const [isFullscreen, setIsFullscreen] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  // --- Fullscreen Handlers ---
-  const toggleFullscreen = () => {
-    if (viewerRef.current) {
-      if (!isFullscreen) {
-        if (viewerRef.current.requestFullscreen) {
-          viewerRef.current.requestFullscreen();
-        }
-        // @ts-ignore
-        else if (viewerRef.current.webkitRequestFullscreen) {
-          // @ts-ignore
-          viewerRef.current.webkitRequestFullscreen();
-        }
-        setIsFullscreen(true);
-      } else {
-        if (document.exitFullscreen) {
-          document.exitFullscreen();
-        }
-        // @ts-ignore
-        else if (document.webkitExitFullscreen) {
-          // @ts-ignore
-          document.webkitExitFullscreen();
-        }
-        setIsFullscreen(false);
-      }
-    }
-  };
-
-  useEffect(() => {
-    const handleFullscreenChange = () => {
-      // @ts-ignore
-      setIsFullscreen(!!document.fullscreenElement || !!document.webkitFullscreenElement);
-    };
-    document.addEventListener('fullscreenchange', handleFullscreenChange);
-    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
-    return () => {
-      document.removeEventListener('fullscreenchange', handleFullscreenChange);
-      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
-    };
-  }, []);
 
   // --- Viewer Initialization ---
   useEffect(() => {
@@ -66,7 +23,6 @@ const PanoramaViewer: React.FC<PanoramaViewerProps> = ({ markerId, isExpanded, o
     const initializeViewer = async () => {
       if (!markerId) return;
       setError(null);
-      setPointData(null);
 
       // Cleanup previous viewer instance immediately
       if (viewerInstanceRef.current) {
@@ -89,10 +45,9 @@ const PanoramaViewer: React.FC<PanoramaViewerProps> = ({ markerId, isExpanded, o
         }
         
         const data = await infoResponse.json();
+        
         if (isMounted) {
-          setPointData(data);
-          
-          // НОВОЕ: Если передана функция onDataLoad, отправляем данные наверх
+          // Отправляем данные наверх в MapPage
           if (onDataLoad) {
             onDataLoad({
               title: data.filename || `Panorama ${markerId}`,
@@ -192,20 +147,6 @@ const PanoramaViewer: React.FC<PanoramaViewerProps> = ({ markerId, isExpanded, o
         ref={viewerRef} 
         className="panorama-viewer" 
       ></div>
-
-      {/* Controls Overlay */}
-      <div className="pano-controls-overlay">
-          <button 
-            onClick={toggleFullscreen}
-            className="pano-fullscreen-btn"
-          >
-            {isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
-          </button>
-      </div>
-
-      {/* УДАЛЕНО: Блок с классом pano-info-overlay.
-        Теперь эта информация рендерится в боковой панели (PanoPanel.tsx).
-      */}
       
     </div>
   );
