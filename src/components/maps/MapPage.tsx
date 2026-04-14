@@ -128,13 +128,12 @@ const MapPage: React.FC = () => {
       
       {/* 1. HEADER */}
       <div style={{ position: 'relative', zIndex: 1100 }}>
-        
-      </div>
-      <MapHeader 
+        <MapHeader 
           onSearch={handleSearch}
           onTogglePano={() => setShowPanoLayer(!showPanoLayer)}
           isPanoLoading={isLoadingPano}
-      />
+        />
+      </div>
 
       {/* 2. SIDE PANELS */}
       <div style={{ position: 'relative', zIndex: 1100 }}>
@@ -160,16 +159,16 @@ const MapPage: React.FC = () => {
           />
           
           <div className="pano-controls-overlay">
-            {/* Кнопка Fullscreen в виде иконки */}
+            {/* Кнопка Fullscreen с картинкой */}
             <button 
               onClick={toggleFullscreen}
               className="layers-button pano-fullscreen-btn"
               title="На весь экран"
             >
-              ⛶
+              <img src="/images/svg/fullscreen-icon.svg" alt="На весь экран" width="24" height="24" />
             </button>
             
-            {/* Кнопка Закрыть */}
+            {/* Кнопка Закрыть с картинкой */}
             <button 
               onClick={() => {
                 setIsPanoVisible(false);
@@ -178,7 +177,7 @@ const MapPage: React.FC = () => {
               className="layers-button pano-close-btn"
               title="Закрыть"
             >
-              ✕
+              <img src="/images/svg/close-icon.svg" alt="Закрыть" width="24" height="24" />
             </button>
           </div>
         </div>

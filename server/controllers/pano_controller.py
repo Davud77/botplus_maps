@@ -31,7 +31,7 @@ class PanoController:
         # Подтягиваем имя бакета из конфигурации (.env)
         self.pano_bucket = getattr(config, 'MINIO_BUCKET_NAME', 'panoramas')
         
-        # Гарантируем, что таблица photos_4326 существует!
+        # Гарантируем, что таблица photos_4326 и индексы существуют!
         self._ensure_table()
         
         # Ensure bucket exists
@@ -44,10 +44,12 @@ class PanoController:
                 logger.warning(f"MinIO bucket warning: {e}")
 
     def _ensure_table(self):
-        """Создает таблицу photos_4326 точно как на скриншоте, если ее нет"""
+        """Создает таблицу photos_4326 и необходимые индексы, если их нет"""
         try:
             cursor = self.db.get_cursor()
-            query = """
+            
+            # 1. Создаем таблицу (если нет)
+            query_table = """
                 CREATE TABLE IF NOT EXISTS public.photos_4326 (
                     id SERIAL PRIMARY KEY,
                     geom geometry(PointZ, 4326),
@@ -63,11 +65,26 @@ class PanoController:
                     "order" INTEGER
                 );
             """
-            cursor.execute(query)
+            cursor.execute(query_table)
+
+            # 2. Идемпотентное создание пространственного индекса
+            query_gist_index = """
+                CREATE INDEX IF NOT EXISTS idx_photos_4326_geom_gist 
+                ON public.photos_4326 USING GIST (geom);
+            """
+            cursor.execute(query_gist_index)
+
+            # 3. Опциональное создание обычного индекса по ID для быстрой сортировки
+            query_id_index = """
+                CREATE INDEX IF NOT EXISTS idx_photos_4326_id 
+                ON public.photos_4326 (id DESC);
+            """
+            cursor.execute(query_id_index)
+
             self.db.commit()
-            logger.info("Table photos_4326 is ready.")
+            logger.info("Table photos_4326 and indexes are ready.")
         except Exception as e:
-            logger.warning(f"Could not initialize photos_4326: {e}")
+            logger.warning(f"Could not initialize photos_4326 or indexes: {e}")
             if self.db.connection:
                 self.db.connection.rollback()
 
@@ -95,7 +112,7 @@ class PanoController:
     @cross_origin()
     def get_panoramas(self):
         """
-        Returns list of panoramas. Supports BBOX filtering.
+        Returns list of panoramas. Supports BBOX filtering and Server-Side Clustering.
         """
         try:
             # 1. Filter params
@@ -103,29 +120,60 @@ class PanoController:
             south = request.args.get('south', type=float)
             east = request.args.get('east', type=float)
             west = request.args.get('west', type=float)
+            zoom = request.args.get('zoom', type=int)
             limit = request.args.get('limit', type=int, default=5000)
 
             cursor = self.db.get_cursor()
 
-            # 2. Build Query
+            # 2. Определяем размер сетки для кластеризации в зависимости от зума
+            grid_size = None
+            if zoom is not None and zoom < 14:
+                # Чем меньше зум, тем крупнее ячейка сетки (в градусах)
+                grids = {
+                    1: 10.0, 2: 5.0, 3: 2.0, 4: 1.0, 5: 0.5,
+                    6: 0.25, 7: 0.1, 8: 0.05, 9: 0.02, 10: 0.01,
+                    11: 0.005, 12: 0.002, 13: 0.001
+                }
+                grid_size = grids.get(zoom, 0.001)
+
+            # 3. Build Query
             if north is not None and south is not None:
-                # PostGIS BBOX search
-                query = """
-                    SELECT 
-                        id, 
-                        NULLIF(latitude, '')::float AS latitude, 
-                        NULLIF(longitude, '')::float AS longitude, 
-                        filename, 
-                        directory,
-                        "timestamp"
-                    FROM public.photos_4326
-                    WHERE geom && ST_MakeEnvelope(%s, %s, %s, %s, 4326)
-                    ORDER BY id DESC
-                    LIMIT %s
-                """
-                params = (west, south, east, north, limit)
+                if grid_size:
+                    # СЕРВЕРНАЯ КЛАСТЕРИЗАЦИЯ
+                    query = """
+                        SELECT 
+                            MIN(id) as id, 
+                            AVG(ST_Y(geom)) AS latitude, 
+                            AVG(ST_X(geom)) AS longitude, 
+                            MIN(filename) as filename, 
+                            NULL as directory,
+                            NULL as "timestamp",
+                            COUNT(*) as count
+                        FROM public.photos_4326
+                        WHERE geom && ST_MakeEnvelope(%s, %s, %s, %s, 4326)
+                        GROUP BY ST_SnapToGrid(geom, %s)
+                        LIMIT %s
+                    """
+                    params = (west, south, east, north, grid_size, limit)
+                else:
+                    # ОТДАЧА СЫРЫХ ТОЧЕК (при сильном приближении, zoom >= 14)
+                    query = """
+                        SELECT 
+                            id, 
+                            NULLIF(latitude, '')::float AS latitude, 
+                            NULLIF(longitude, '')::float AS longitude, 
+                            filename, 
+                            directory,
+                            "timestamp",
+                            1 as count
+                        FROM public.photos_4326
+                        WHERE geom && ST_MakeEnvelope(%s, %s, %s, %s, 4326)
+                        ORDER BY id DESC
+                        LIMIT %s
+                    """
+                    params = (west, south, east, north, limit)
             else:
-                # Default: latest N
+                # Default: latest N (без BBOX)
                 query = """
                     SELECT 
                         id, 
@@ -133,7 +181,8 @@ class PanoController:
                         NULLIF(longitude, '')::float AS longitude, 
                         filename, 
                         directory,
-                        "timestamp"
+                        "timestamp",
+                        1 as count
                     FROM public.photos_4326
                     ORDER BY id DESC
                     LIMIT %s
@@ -146,7 +195,6 @@ class PanoController:
             # 3. Format JSON
             results = []
             for row in rows:
-                # Handle RealDictCursor or Tuple
                 if isinstance(row, dict):
                     res = row
                 else:
@@ -156,17 +204,19 @@ class PanoController:
                         "longitude": row[2],
                         "filename": row[3],
                         "directory": row[4],
-                        "timestamp": row[5]
+                        "timestamp": row[5],
+                        "count": row[6]
                     }
                 
                 ts = res.get("timestamp")
                 results.append({
                     "id": res["id"],
-                    "latitude": res["latitude"] if res["latitude"] is not None else 0,
-                    "longitude": res["longitude"] if res["longitude"] is not None else 0,
+                    "latitude": float(res["latitude"]) if res["latitude"] is not None else 0.0,
+                    "longitude": float(res["longitude"]) if res["longitude"] is not None else 0.0,
                     "filename": res["filename"],
                     "directory": res["directory"],
-                    "timestamp": ts.isoformat() if ts else None
+                    "timestamp": ts.isoformat() if ts else None,
+                    "count": res["count"]
                 })
 
             return jsonify(results)
