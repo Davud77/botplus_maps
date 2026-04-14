@@ -2392,7 +2392,7 @@ h3 { margin: 0; color: var(--color-text); }
   position: absolute;
   top: 18px;
   right: 10px;
-  z-index: 1001; /* Поверх всего */
+  z-index: 1200; /* Поверх всего */
   display: flex;
   gap: 10px;
       align-items: center;

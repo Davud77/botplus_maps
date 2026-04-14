@@ -85,10 +85,13 @@ const PanoramaViewer: React.FC<PanoramaViewerProps> = ({ markerId, isExpanded, o
           // Geometry (Equirectangular)
           const geometry = new Marzipano.EquirectGeometry([{ width: 4000 }]);
           
+          // Максимальный угол обзора (120 градусов)
+          const maxFov = (120 * Math.PI) / 180;
+
           // View Limiter
           const limiter = Marzipano.RectilinearView.limit.traditional(
             4096,
-            (120 * Math.PI) / 180
+            maxFov
           );
           
           // Initial View
@@ -99,7 +102,7 @@ const PanoramaViewer: React.FC<PanoramaViewerProps> = ({ markerId, isExpanded, o
               yaw: initialYaw, 
               pitch: 0, 
               roll: 0, 
-              fov: Math.PI / 4 
+              fov: maxFov // Устанавливаем стартовый зум на максимальное отдаление
           }, limiter);
 
           const scene = viewer.createScene({
@@ -129,7 +132,7 @@ const PanoramaViewer: React.FC<PanoramaViewerProps> = ({ markerId, isExpanded, o
          viewerInstanceRef.current = null;
       }
     };
-  }, [markerId]);
+  }, [markerId, onDataLoad]); // Добавил onDataLoad в зависимости useEffect для корректности React
 
   return (
     <div className="panorama-container">

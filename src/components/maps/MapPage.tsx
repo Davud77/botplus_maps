@@ -128,12 +128,13 @@ const MapPage: React.FC = () => {
       
       {/* 1. HEADER */}
       <div style={{ position: 'relative', zIndex: 1100 }}>
-        <MapHeader 
+        
+      </div>
+      <MapHeader 
           onSearch={handleSearch}
           onTogglePano={() => setShowPanoLayer(!showPanoLayer)}
           isPanoLoading={isLoadingPano}
-        />
-      </div>
+      />
 
       {/* 2. SIDE PANELS */}
       <div style={{ position: 'relative', zIndex: 1100 }}>
