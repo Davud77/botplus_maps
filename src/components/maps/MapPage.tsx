@@ -37,6 +37,9 @@ const MapPage: React.FC = () => {
   // Local State (Map & View)
   const [mapCenter, setMapCenter] = useState<[number, number]>([43, 47]);
   
+  // Для отладки: храним текущий зум
+  const [currentZoom, setCurrentZoom] = useState<number>(5);
+  
   // Pano State
   const [showPanoLayer, setShowPanoLayer] = useState(false);
   const [isLoadingPano, setIsLoadingPano] = useState(false);
@@ -117,9 +120,26 @@ const MapPage: React.FC = () => {
     }
   };
 
+  // Вспомогательный компонент для получения доступа к экземпляру карты и отслеживания зума
   const SetMapRef = () => {
     const map = useMap();
-    useEffect(() => { mapRef.current = map; }, [map]);
+    useEffect(() => { 
+      mapRef.current = map; 
+      
+      // Устанавливаем изначальный зум при загрузке
+      setCurrentZoom(map.getZoom());
+      
+      // Слушаем событие изменения зума
+      const handleZoomEnd = () => {
+        setCurrentZoom(map.getZoom());
+      };
+      
+      map.on('zoomend', handleZoomEnd);
+      
+      return () => {
+        map.off('zoomend', handleZoomEnd);
+      };
+    }, [map]);
     return null;
   };
 
@@ -209,6 +229,26 @@ const MapPage: React.FC = () => {
 
       {/* 5. CONTEXT MENU */}
       <ContextMenu contextMenu={contextMenu} handleCopyCoordinates={() => handleCopyCoordinates(contextMenu)} />
+
+      {/* --- БЛОК ОТЛАДКИ ЗУМА --- */}
+      <div style={{
+        position: 'absolute',
+        bottom: '20px',
+        right: '20px',
+        backgroundColor: 'rgba(0, 0, 0, 0.7)',
+        color: '#00ff00',
+        padding: '5px 10px',
+        borderRadius: '5px',
+        fontFamily: 'monospace',
+        fontSize: '14px',
+        fontWeight: 'bold',
+        border: '1px solid #00ff00',
+        zIndex: 2000,
+        pointerEvents: 'none' // Чтобы не перекрывал клики по карте
+      }}>
+        Zoom: {currentZoom}
+      </div>
+      
     </div>
   );
 };
