@@ -4,6 +4,9 @@ import { MapContainer, TileLayer, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 
+// --- STYLES ---
+import './MapPage.css'; // <-- Подключаем вынесенные стили
+
 // --- STORES & HOOKS ---
 import { useUIStore } from './hooks/useUIStore';
 import { useMapStore } from './hooks/useMapStore';
@@ -144,10 +147,10 @@ const MapPage: React.FC = () => {
   };
 
   return (
-    <div className="map-page-wrapper" style={{ position: 'relative', width: '100%', height: '100vh', overflow: 'hidden' }}>
+    <div className="map-page-wrapper">
       
       {/* 1. HEADER */}
-      <div style={{ position: 'relative', zIndex: 1100 }}>
+      <div className="ui-overlay-layer">
         <MapHeader 
           onSearch={handleSearch}
           onTogglePano={() => setShowPanoLayer(!showPanoLayer)}
@@ -156,7 +159,7 @@ const MapPage: React.FC = () => {
       </div>
 
       {/* 2. SIDE PANELS */}
-      <div style={{ position: 'relative', zIndex: 1100 }}>
+      <div className="ui-overlay-layer">
         {activePanel === 'vector' && <VectorPanel onClose={closeAll} />}
         {activePanel === 'baseLayers' && <BaseLayersPanel onClose={closeAll} />}
         {activePanel === 'ortho' && <OrthoPanel onClose={closeAll} map={mapRef.current} />}
@@ -231,21 +234,7 @@ const MapPage: React.FC = () => {
       <ContextMenu contextMenu={contextMenu} handleCopyCoordinates={() => handleCopyCoordinates(contextMenu)} />
 
       {/* --- БЛОК ОТЛАДКИ ЗУМА --- */}
-      <div style={{
-        position: 'absolute',
-        bottom: '20px',
-        right: '20px',
-        backgroundColor: 'rgba(0, 0, 0, 0.7)',
-        color: '#00ff00',
-        padding: '5px 10px',
-        borderRadius: '5px',
-        fontFamily: 'monospace',
-        fontSize: '14px',
-        fontWeight: 'bold',
-        border: '1px solid #00ff00',
-        zIndex: 2000,
-        pointerEvents: 'none' // Чтобы не перекрывал клики по карте
-      }}>
+      <div className="debug-zoom-panel">
         Zoom: {currentZoom}
       </div>
       
