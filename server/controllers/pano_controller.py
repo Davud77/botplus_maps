@@ -121,25 +121,32 @@ class PanoController:
             east = request.args.get('east', type=float)
             west = request.args.get('west', type=float)
             zoom = request.args.get('zoom', type=int)
-            limit = request.args.get('limit', type=int, default=5000)
+            limit = request.args.get('limit', type=int, default=50000)
 
             cursor = self.db.get_cursor()
 
             # 2. Определяем размер сетки для кластеризации в зависимости от зума
             grid_size = None
-            if zoom is not None and zoom < 14:
-                # Чем меньше зум, тем крупнее ячейка сетки (в градусах)
+            
+            # Строгая логика зумов:
+            if zoom is not None and zoom <= 17:
+                # 1 градус ~ 111 км
                 grids = {
-                    1: 10.0, 2: 5.0, 3: 2.0, 4: 1.0, 5: 0.5,
-                    6: 0.25, 7: 0.1, 8: 0.05, 9: 0.02, 10: 0.01,
-                    11: 0.005, 12: 0.002, 13: 0.001
+                    # Зум 0-10: Очень сильная кластеризация (~1100 км -> ~11 км)
+                    0: 20.0, 1: 10.0, 2: 5.0, 3: 2.5, 4: 1.5,
+                    5: 1.0, 6: 0.5, 7: 0.25, 8: 0.15, 9: 0.1, 10: 0.1,
+                    
+                    # Зум 11-17: Умеренная кластеризация (~5.5 км -> ~50 метров)
+                    11: 0.05, 12: 0.02, 13: 0.01, 14: 0.005,
+                    15: 0.002, 16: 0.001, 17: 0.0005
                 }
-                grid_size = grids.get(zoom, 0.001)
+                grid_size = grids.get(zoom, 0.0005)
+            # Для zoom 18-23: grid_size остается None, кластеризация выключена
 
             # 3. Build Query
             if north is not None and south is not None:
                 if grid_size:
-                    # СЕРВЕРНАЯ КЛАСТЕРИЗАЦИЯ
+                    # СЕРВЕРНАЯ КЛАСТЕРИЗАЦИЯ (Зум 0 - 17)
                     query = """
                         SELECT 
                             MIN(id) as id, 
@@ -156,7 +163,7 @@ class PanoController:
                     """
                     params = (west, south, east, north, grid_size, limit)
                 else:
-                    # ОТДАЧА СЫРЫХ ТОЧЕК (при сильном приближении, zoom >= 14)
+                    # ОТДАЧА СЫРЫХ ТОЧЕК (Зум 18 - 23: Кластеризации нет вообще)
                     query = """
                         SELECT 
                             id, 

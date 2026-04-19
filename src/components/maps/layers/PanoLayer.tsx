@@ -23,8 +23,8 @@ interface PanoLayerProps {
 
 // --- Настройки ---
 const MIN_ZOOM_LEVEL = 3; 
-// Лимит можно смело уменьшить, так как серверная кластеризация не даст вернуть 100к точек
-const MAX_MARKERS_PER_REQUEST = 10000; 
+// Увеличиваем лимит: сервер отдаст до 50к сырых точек на зуме 18+
+const MAX_MARKERS_PER_REQUEST = 50000; 
 
 const API_ENDPOINT = '/api/panoramas'; 
 
@@ -49,9 +49,12 @@ const PanoLayer: React.FC<PanoLayerProps> = ({
   const [markers, setMarkers] = useState<MarkerType[]>([]);
   const map = useMap();
 
-  // Refs для управления запросами без ре-рендеров
+  // Refs для управления запросами и кэшем без ре-рендеров
   const abortControllerRef = useRef<AbortController | null>(null);
   const loadedBoundsRef = useRef<Set<string>>(new Set());
+  
+  // ВАЖНО: Следим за зумом, чтобы очищать кэш при его изменении
+  const lastZoomRef = useRef<number>(map.getZoom());
 
   // --- Функция загрузки данных ---
   const fetchMarkersInBounds = useCallback(
@@ -59,11 +62,11 @@ const PanoLayer: React.FC<PanoLayerProps> = ({
       // 1. Если зум слишком мелкий, не грузим данные
       if (currentZoom < MIN_ZOOM_LEVEL) return;
 
-      // 2. Формируем ключ кэша (добавляем зум, так как кластеры зависят от зума)
+      // 2. Формируем ключ кэша (обязательно включаем зум!)
       const precision = currentZoom > 15 ? 4 : 3;
       const boundsKey = `${currentZoom}_${bounds.getNorth().toFixed(precision)}_${bounds.getSouth().toFixed(precision)}_${bounds.getEast().toFixed(precision)}_${bounds.getWest().toFixed(precision)}`;
 
-      // 3. Если эта область уже загружена, выходим
+      // 3. Если эта область на этом масштабе уже загружена, выходим
       if (loadedBoundsRef.current.has(boundsKey)) return;
 
       // 4. Отменяем предыдущий запрос, если он еще висит
@@ -81,7 +84,7 @@ const PanoLayer: React.FC<PanoLayerProps> = ({
         url.searchParams.append('south', bounds.getSouth().toString());
         url.searchParams.append('east', bounds.getEast().toString());
         url.searchParams.append('west', bounds.getWest().toString());
-        url.searchParams.append('zoom', currentZoom.toString()); // <-- Передаем зум на сервер
+        url.searchParams.append('zoom', currentZoom.toString()); 
         url.searchParams.append('limit', MAX_MARKERS_PER_REQUEST.toString());
 
         const response = await fetch(url.toString(), {
@@ -159,22 +162,39 @@ const PanoLayer: React.FC<PanoLayerProps> = ({
   useEffect(() => {
     if (!map) return;
 
-    const handleMapEvent = () => {
-      // Передаем и границы, и текущий зум
+    // Вызывается при панорамировании (без смены зума)
+    const handleMoveEnd = () => {
       debouncedFetch(map.getBounds(), map.getZoom());
     };
 
-    map.on('moveend', handleMapEvent);
-    map.on('zoomend', handleMapEvent);
+    // Вызывается при скролле колесика мыши (изменение масштаба)
+    const handleZoomEnd = () => {
+      const currentZoom = map.getZoom();
+      
+      // ВАЖНО: Если зум изменился, полностью очищаем кэш и текущие маркеры!
+      // Это убирает эффект смешивания старых крупных кластеров с новыми точками.
+      if (currentZoom !== lastZoomRef.current) {
+        loadedBoundsRef.current.clear();
+        setMarkers([]); 
+        lastZoomRef.current = currentZoom;
+      }
+
+      if (currentZoom >= MIN_ZOOM_LEVEL) {
+        debouncedFetch(map.getBounds(), currentZoom);
+      }
+    };
+
+    map.on('moveend', handleMoveEnd);
+    map.on('zoomend', handleZoomEnd);
 
     // Загрузка при старте
     if (map.getZoom() >= MIN_ZOOM_LEVEL) {
-      handleMapEvent();
+      handleZoomEnd();
     }
 
     return () => {
-      map.off('moveend', handleMapEvent);
-      map.off('zoomend', handleMapEvent);
+      map.off('moveend', handleMoveEnd);
+      map.off('zoomend', handleZoomEnd);
       debouncedFetch.cancel();
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
@@ -193,13 +213,13 @@ const PanoLayer: React.FC<PanoLayerProps> = ({
       {/* 1. Отрисовка Серверных Кластеров (count > 1) */}
       {serverClusters.map((cluster) => (
         <Marker
-          key={`cluster-${cluster.id}`}
+          key={`cluster-${cluster.id}-${cluster.lat}-${cluster.lng}`}
           position={[cluster.lat, cluster.lng]}
           icon={createClusterIcon(cluster.count)}
           eventHandlers={{
             click: (e) => {
               e.originalEvent.stopPropagation();
-              // При клике на серверный кластер - приближаем карту
+              // При клике на серверный кластер - приближаем карту на 2 уровня
               map.setView([cluster.lat, cluster.lng], map.getZoom() + 2);
             },
           }}
@@ -207,7 +227,8 @@ const PanoLayer: React.FC<PanoLayerProps> = ({
       ))}
 
       {/* 2. Отрисовка обычных маркеров через MarkerClusterGroup 
-          (на случай если одиночные маркеры всё-таки стоят вплотную на крупном масштабе) */}
+          Здесь будут сырые точки от сервера. Плагин сгруппирует те, 
+          что стоят вплотную, а на 18+ зуме кластеризация отключится (disableClusteringAtZoom). */}
       <MarkerClusterGroup
         key="pano-cluster-group"
         chunkedLoading={true}
