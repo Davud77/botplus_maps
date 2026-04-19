@@ -1,18 +1,15 @@
 // src/components/maps/layers/PanoLayer.tsx
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { useMap, Marker } from 'react-leaflet';
+import { useMap, Marker, CircleMarker } from 'react-leaflet';
 import debounce from 'lodash/debounce';
-import MarkerClusterGroup from 'react-leaflet-cluster';
 import L, { LatLngBounds } from 'leaflet';
-// Убедитесь, что этот путь верный в вашей структуре проекта
-import { defaultIcon, activeIcon } from '../../icons';
 
 // --- Типы ---
 interface MarkerType {
   id: string;
   lat: number;
   lng: number;
-  count: number; // Новое поле: количество панорам в кластере (от сервера)
+  count: number; 
 }
 
 interface PanoLayerProps {
@@ -21,23 +18,53 @@ interface PanoLayerProps {
   togglePanoLayer?: (newMarkers: MarkerType[]) => void;
 }
 
-// --- Настройки ---
 const MIN_ZOOM_LEVEL = 3; 
-// Увеличиваем лимит: сервер отдаст до 50к сырых точек на зуме 18+
 const MAX_MARKERS_PER_REQUEST = 50000; 
-
 const API_ENDPOINT = '/api/panoramas'; 
 
-// Вспомогательная функция для генерации иконки серверного кластера
+// Красивая и независимая иконка для серверного кластера
 const createClusterIcon = (count: number) => {
-  let sizeClass = 'marker-cluster-small';
-  if (count > 100) sizeClass = 'marker-cluster-medium';
-  if (count > 1000) sizeClass = 'marker-cluster-large';
+  let size = 40;
+  let bgColor = 'rgba(110, 204, 57, 0.7)'; // Зеленый
+  let borderColor = 'rgba(110, 204, 57, 1)';
+
+  if (count > 100) {
+    size = 46;
+    bgColor = 'rgba(240, 194, 12, 0.8)'; // Желтый
+    borderColor = 'rgba(240, 194, 12, 1)';
+  }
+  if (count > 1000) {
+    size = 54;
+    bgColor = 'rgba(241, 128, 23, 0.8)'; // Оранжевый
+    borderColor = 'rgba(241, 128, 23, 1)';
+  }
+
+  const html = `
+    <div style="
+      background-color: ${bgColor};
+      border: 2px solid ${borderColor};
+      width: ${size}px;
+      height: ${size}px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      text-shadow: 0px 1px 2px rgba(0,0,0,0.8);
+      font-weight: bold;
+      font-family: Arial, sans-serif;
+      font-size: 13px;
+      box-shadow: 0 3px 6px rgba(0,0,0,0.3);
+    ">
+      ${count > 9999 ? '10k+' : count}
+    </div>
+  `;
 
   return L.divIcon({
-    html: `<div><span>${count}</span></div>`,
-    className: `marker-cluster ${sizeClass}`,
-    iconSize: L.point(40, 40)
+    html,
+    className: '', // Убрали сторонние классы
+    iconSize: L.point(size, size),
+    iconAnchor: L.point(size / 2, size / 2),
   });
 };
 
@@ -49,101 +76,64 @@ const PanoLayer: React.FC<PanoLayerProps> = ({
   const [markers, setMarkers] = useState<MarkerType[]>([]);
   const map = useMap();
 
-  // Refs для управления запросами и кэшем без ре-рендеров
   const abortControllerRef = useRef<AbortController | null>(null);
-  const loadedBoundsRef = useRef<Set<string>>(new Set());
-  
-  // ВАЖНО: Следим за зумом, чтобы очищать кэш при его изменении
-  const lastZoomRef = useRef<number>(map.getZoom());
 
   // --- Функция загрузки данных ---
   const fetchMarkersInBounds = useCallback(
     async (bounds: LatLngBounds, currentZoom: number) => {
-      // 1. Если зум слишком мелкий, не грузим данные
-      if (currentZoom < MIN_ZOOM_LEVEL) return;
+      if (currentZoom < MIN_ZOOM_LEVEL) {
+        setMarkers([]);
+        return;
+      }
 
-      // 2. Формируем ключ кэша (обязательно включаем зум!)
-      const precision = currentZoom > 15 ? 4 : 3;
-      const boundsKey = `${currentZoom}_${bounds.getNorth().toFixed(precision)}_${bounds.getSouth().toFixed(precision)}_${bounds.getEast().toFixed(precision)}_${bounds.getWest().toFixed(precision)}`;
-
-      // 3. Если эта область на этом масштабе уже загружена, выходим
-      if (loadedBoundsRef.current.has(boundsKey)) return;
-
-      // 4. Отменяем предыдущий запрос, если он еще висит
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
       }
       abortControllerRef.current = new AbortController();
 
       try {
-        // Формируем URL
         const url = new URL(API_ENDPOINT, window.location.origin);
         
-        // Добавляем параметры границ и текущий зум
-        url.searchParams.append('north', bounds.getNorth().toString());
-        url.searchParams.append('south', bounds.getSouth().toString());
-        url.searchParams.append('east', bounds.getEast().toString());
-        url.searchParams.append('west', bounds.getWest().toString());
-        url.searchParams.append('zoom', currentZoom.toString()); 
+        // Берем область карты с запасом 20%, чтобы не было резких пропаданий при сдвиге
+        const paddedBounds = bounds.pad(0.2);
+
+        url.searchParams.append('north', paddedBounds.getNorth().toString());
+        url.searchParams.append('south', paddedBounds.getSouth().toString());
+        url.searchParams.append('east', paddedBounds.getEast().toString());
+        url.searchParams.append('west', paddedBounds.getWest().toString());
+        url.searchParams.append('zoom', currentZoom.toString());
         url.searchParams.append('limit', MAX_MARKERS_PER_REQUEST.toString());
 
         const response = await fetch(url.toString(), {
           signal: abortControllerRef.current.signal,
         });
 
-        // 5. Защита от получения HTML вместо JSON
         const contentType = response.headers.get("content-type");
-        if (contentType && contentType.includes("text/html")) {
-            console.warn("API вернул HTML страницу вместо JSON. Проверьте адрес API или настройки прокси.");
-            return; 
-        }
+        if (contentType && contentType.includes("text/html")) return; 
 
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
+        if (!response.ok) throw new Error(`HTTP error`);
 
         const data = await response.json();
 
         if (Array.isArray(data)) {
-          setMarkers((prevMarkers) => {
-            const markerMap = new Map(prevMarkers.map((m) => [m.id, m]));
-            let hasChanges = false;
+          const updatedMarkers = data
+            .filter((item: any) => typeof item.latitude === 'number' && typeof item.longitude === 'number')
+            .map((item: any) => ({
+              id: String(item.id),
+              lat: item.latitude,
+              lng: item.longitude,
+              count: item.count || 1,
+            }));
 
-            data.forEach((item: any) => {
-              const id = String(item.id);
-              // Проверяем валидность координат
-              if (!markerMap.has(id) && typeof item.latitude === 'number' && typeof item.longitude === 'number') {
-                markerMap.set(id, {
-                  id,
-                  lat: item.latitude,
-                  lng: item.longitude,
-                  count: item.count || 1, // Читаем count из ответа сервера (по умолчанию 1)
-                });
-                hasChanges = true;
-              }
-            });
-
-            if (!hasChanges) return prevMarkers;
-
-            const updatedMarkers = Array.from(markerMap.values());
-            
-            // Передаем данные наверх (асинхронно)
-            if (togglePanoLayer) {
-               setTimeout(() => togglePanoLayer(updatedMarkers), 0);
-            }
-
-            return updatedMarkers;
-          });
-
-          // Запоминаем, что эта область загружена успешно
-          loadedBoundsRef.current.add(boundsKey);
+          // ПОЛНАЯ ЗАМЕНА СОСТОЯНИЯ (Без бесконечного накопления)
+          setMarkers(updatedMarkers);
+          
+          if (togglePanoLayer) {
+             setTimeout(() => togglePanoLayer(updatedMarkers), 0);
+          }
         }
-
       } catch (error: any) {
-        // Игнорируем ошибку отмены (AbortError)
-        if (error.name !== 'AbortError') {
-          console.error('Error fetching panoramas:', error);
-        }
+        if (error.name !== 'AbortError') console.error('Error fetching panoramas:', error);
       }
     },
     [togglePanoLayer]
@@ -151,10 +141,9 @@ const PanoLayer: React.FC<PanoLayerProps> = ({
 
   // --- Debounce ---
   const debouncedFetch = useMemo(
-    () =>
-      debounce((bounds: LatLngBounds, zoom: number) => {
+    () => debounce((bounds: LatLngBounds, zoom: number) => {
         fetchMarkersInBounds(bounds, zoom);
-      }, 500),
+    }, 300), // Уменьшили задержку для большей отзывчивости
     [fetchMarkersInBounds]
   );
 
@@ -162,96 +151,67 @@ const PanoLayer: React.FC<PanoLayerProps> = ({
   useEffect(() => {
     if (!map) return;
 
-    // Вызывается при панорамировании (без смены зума)
-    const handleMoveEnd = () => {
+    const handleMapEvent = () => {
       debouncedFetch(map.getBounds(), map.getZoom());
     };
 
-    // Вызывается при скролле колесика мыши (изменение масштаба)
-    const handleZoomEnd = () => {
-      const currentZoom = map.getZoom();
-      
-      // ВАЖНО: Если зум изменился, полностью очищаем кэш и текущие маркеры!
-      // Это убирает эффект смешивания старых крупных кластеров с новыми точками.
-      if (currentZoom !== lastZoomRef.current) {
-        loadedBoundsRef.current.clear();
-        setMarkers([]); 
-        lastZoomRef.current = currentZoom;
-      }
+    map.on('moveend', handleMapEvent);
+    map.on('zoomend', handleMapEvent);
 
-      if (currentZoom >= MIN_ZOOM_LEVEL) {
-        debouncedFetch(map.getBounds(), currentZoom);
-      }
-    };
-
-    map.on('moveend', handleMoveEnd);
-    map.on('zoomend', handleZoomEnd);
-
-    // Загрузка при старте
-    if (map.getZoom() >= MIN_ZOOM_LEVEL) {
-      handleZoomEnd();
-    }
+    if (map.getZoom() >= MIN_ZOOM_LEVEL) handleMapEvent();
 
     return () => {
-      map.off('moveend', handleMoveEnd);
-      map.off('zoomend', handleZoomEnd);
+      map.off('moveend', handleMapEvent);
+      map.off('zoomend', handleMapEvent);
       debouncedFetch.cancel();
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-      }
+      if (abortControllerRef.current) abortControllerRef.current.abort();
     };
   }, [map, debouncedFetch]);
-
-
-  // --- Разделяем маркеры на сырые (одиночные) и серверные кластеры ---
-  const rawMarkers = markers.filter(m => m.count === 1);
-  const serverClusters = markers.filter(m => m.count > 1);
 
   // --- Рендер ---
   return (
     <React.Fragment>
-      {/* 1. Отрисовка Серверных Кластеров (count > 1) */}
-      {serverClusters.map((cluster) => (
-        <Marker
-          key={`cluster-${cluster.id}-${cluster.lat}-${cluster.lng}`}
-          position={[cluster.lat, cluster.lng]}
-          icon={createClusterIcon(cluster.count)}
-          eventHandlers={{
-            click: (e) => {
-              e.originalEvent.stopPropagation();
-              // При клике на серверный кластер - приближаем карту на 2 уровня
-              map.setView([cluster.lat, cluster.lng], map.getZoom() + 2);
-            },
-          }}
-        />
-      ))}
+      {markers.map((marker) => {
+        // 1. Если сервер вернул кластер
+        if (marker.count > 1) {
+          return (
+            <Marker
+              key={`cluster-${marker.id}-${marker.lat}-${marker.lng}`}
+              position={[marker.lat, marker.lng]}
+              icon={createClusterIcon(marker.count)}
+              eventHandlers={{
+                click: (e) => {
+                  L.DomEvent.stopPropagation(e);
+                  // Приближаем карту ровно в центр кластера
+                  map.setView([marker.lat, marker.lng], map.getZoom() + 2);
+                },
+              }}
+            />
+          );
+        }
 
-      {/* 2. Отрисовка обычных маркеров через MarkerClusterGroup 
-          Здесь будут сырые точки от сервера. Плагин сгруппирует те, 
-          что стоят вплотную, а на 18+ зуме кластеризация отключится (disableClusteringAtZoom). */}
-      <MarkerClusterGroup
-        key="pano-cluster-group"
-        chunkedLoading={true}
-        spiderfyOnMaxZoom={true}
-        maxClusterRadius={60}
-        removeOutsideVisibleBounds={true}
-        disableClusteringAtZoom={18}
-        showCoverageOnHover={false}
-      >
-        {rawMarkers.map((marker) => (
-          <Marker
-            key={`marker-${marker.id}`}
-            position={[marker.lat, marker.lng]}
-            icon={selectedMarker === marker.id ? activeIcon : defaultIcon}
+        // 2. Если сервер вернул сырую точку (Зум 18-23). 
+        // Используем Canvas (CircleMarker), он работает в 100 раз быстрее обычного DOM Marker.
+        return (
+          <CircleMarker
+            key={`raw-${marker.id}`}
+            center={[marker.lat, marker.lng]}
+            radius={6} // Размер точки
+            pathOptions={{
+              fillColor: selectedMarker === marker.id ? '#ff3b30' : '#2db7f5', // Красный при выборе, иначе голубой
+              color: '#ffffff', // Белая обводка
+              weight: 1.5,
+              fillOpacity: 1
+            }}
             eventHandlers={{
               click: (e) => {
-                e.originalEvent.stopPropagation();
+                L.DomEvent.stopPropagation(e);
                 if (onMarkerClick) onMarkerClick(marker);
               },
             }}
           />
-        ))}
-      </MarkerClusterGroup>
+        );
+      })}
     </React.Fragment>
   );
 };
