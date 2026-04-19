@@ -213,6 +213,7 @@ const MapPage: React.FC = () => {
         className="main-map-container" 
         zoomControl={false} 
         maxZoom={23}
+        preferCanvas={true} // <--- ВАЖНО: Включает аппаратное ускорение для отрисовки точек
       >
         <SetMapRef />
         <TileLayer url={baseLayerUrl} maxZoom={23} />

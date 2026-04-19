@@ -1,6 +1,6 @@
 # server/controllers/pano_controller.py
 
-from flask import Blueprint, request, jsonify, send_file
+from flask import Blueprint, request, jsonify, send_file, Response
 from flask_cors import cross_origin
 import io
 import os
@@ -10,11 +10,14 @@ from PIL import Image
 from datetime import datetime
 import traceback
 import logging
+import json
 
+# Use centralized Database class
 from database import Database
 from storage import MinioStorage
 import config
 
+# Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -22,22 +25,31 @@ pano_blueprint = Blueprint("pano", __name__)
 
 class PanoController:
     def __init__(self):
+        # Use centralized Database class (connects via pgbouncer)
         self.db = Database()
         self.storage = MinioStorage()
+        
+        # Подтягиваем имя бакета из конфигурации (.env)
         self.pano_bucket = getattr(config, 'MINIO_BUCKET_NAME', 'panoramas')
+        
+        # Гарантируем, что таблица photos_4326 и индексы существуют!
         self._ensure_table()
         
+        # Ensure bucket exists
         if self.storage.client:
             try:
+                # Используем динамическое имя бакета
                 if not self.storage.client.bucket_exists(self.pano_bucket):
                     self.storage.client.make_bucket(self.pano_bucket)
             except Exception as e:
                 logger.warning(f"MinIO bucket warning: {e}")
 
     def _ensure_table(self):
+        """Создает таблицу photos_4326 и необходимые индексы, если их нет"""
         try:
             cursor = self.db.get_cursor()
             
+            # 1. Создаем таблицу (если нет)
             query_table = """
                 CREATE TABLE IF NOT EXISTS public.photos_4326 (
                     id SERIAL PRIMARY KEY,
@@ -56,12 +68,14 @@ class PanoController:
             """
             cursor.execute(query_table)
 
+            # 2. Идемпотентное создание пространственного индекса
             query_gist_index = """
                 CREATE INDEX IF NOT EXISTS idx_photos_4326_geom_gist 
                 ON public.photos_4326 USING GIST (geom);
             """
             cursor.execute(query_gist_index)
 
+            # 3. Опциональное создание обычного индекса по ID для быстрой сортировки
             query_id_index = """
                 CREATE INDEX IF NOT EXISTS idx_photos_4326_id 
                 ON public.photos_4326 (id DESC);
@@ -89,6 +103,9 @@ class PanoController:
 
     @cross_origin()
     def get_panoramas(self):
+        """
+        Сверхбыстрая отдача панорам. Формирование JSON происходит прямо в PostgreSQL (C-level).
+        """
         try:
             north = request.args.get('north', type=float)
             south = request.args.get('south', type=float)
@@ -102,7 +119,6 @@ class PanoController:
             
             # Строгая логика зумов:
             if zoom is not None and zoom <= 17:
-                # Математически точная сетка, чтобы кластеры не перекрывали друг друга
                 grids = {
                     # Зум 0-10: Очень сильная кластеризация (~2000 км -> ~11 км). 1 кластер на город/регион.
                     0: 20.0, 1: 10.0, 2: 5.0, 3: 2.5, 4: 1.5,
@@ -113,75 +129,82 @@ class PanoController:
                     15: 0.003, 16: 0.0015, 17: 0.0005
                 }
                 grid_size = grids.get(zoom, 0.0005)
-            # Для zoom 18-23: grid_size = None, отдаем только сырые точки без группировки
 
             if north is not None and south is not None:
                 if grid_size:
-                    # СЕРВЕРНАЯ КЛАСТЕРИЗАЦИЯ
+                    # PostgreSQL сам группирует и собирает JSON массив
                     query = """
-                        SELECT 
-                            MIN(id) as id, 
-                            AVG(ST_Y(geom)) AS latitude, 
-                            AVG(ST_X(geom)) AS longitude, 
-                            MIN(filename) as filename, 
-                            NULL as directory,
-                            NULL as "timestamp",
-                            COUNT(*) as count
-                        FROM public.photos_4326
-                        WHERE geom && ST_MakeEnvelope(%s, %s, %s, %s, 4326)
-                        GROUP BY ST_SnapToGrid(geom, %s)
-                        LIMIT %s
+                        SELECT COALESCE(json_agg(json_build_object(
+                            'id', sub.id,
+                            'lat', sub.lat,
+                            'lng', sub.lng,
+                            'count', sub.count
+                        )), '[]'::json)
+                        FROM (
+                            SELECT 
+                                MIN(id) as id, 
+                                ROUND(AVG(ST_Y(geom))::numeric, 6) AS lat, 
+                                ROUND(AVG(ST_X(geom))::numeric, 6) AS lng, 
+                                COUNT(*) as count
+                            FROM public.photos_4326
+                            WHERE geom && ST_MakeEnvelope(%s, %s, %s, %s, 4326)
+                            GROUP BY ST_SnapToGrid(geom, %s)
+                            LIMIT %s
+                        ) sub;
                     """
                     params = (west, south, east, north, grid_size, limit)
                 else:
-                    # СЫРЫЕ ТОЧКИ
+                    # Сырые точки (Зум 18+)
                     query = """
-                        SELECT 
-                            id, 
-                            NULLIF(latitude, '')::float AS latitude, 
-                            NULLIF(longitude, '')::float AS longitude, 
-                            filename, 
-                            directory,
-                            "timestamp",
-                            1 as count
-                        FROM public.photos_4326
-                        WHERE geom && ST_MakeEnvelope(%s, %s, %s, %s, 4326)
-                        ORDER BY id DESC
-                        LIMIT %s
+                        SELECT COALESCE(json_agg(json_build_object(
+                            'id', sub.id,
+                            'lat', sub.lat,
+                            'lng', sub.lng,
+                            'count', 1
+                        )), '[]'::json)
+                        FROM (
+                            SELECT 
+                                id, 
+                                ROUND(ST_Y(geom)::numeric, 6) as lat, 
+                                ROUND(ST_X(geom)::numeric, 6) as lng
+                            FROM public.photos_4326
+                            WHERE geom && ST_MakeEnvelope(%s, %s, %s, %s, 4326)
+                            ORDER BY id DESC
+                            LIMIT %s
+                        ) sub;
                     """
                     params = (west, south, east, north, limit)
             else:
+                # Дефолтный ответ без BBOX
                 query = """
-                    SELECT id, NULLIF(latitude, '')::float AS latitude, NULLIF(longitude, '')::float AS longitude, filename, directory, "timestamp", 1 as count
-                    FROM public.photos_4326 ORDER BY id DESC LIMIT %s
+                    SELECT COALESCE(json_agg(json_build_object(
+                        'id', id, 
+                        'lat', ROUND(ST_Y(geom)::numeric, 6), 
+                        'lng', ROUND(ST_X(geom)::numeric, 6), 
+                        'count', 1
+                    )), '[]'::json)
+                    FROM (
+                        SELECT id, geom FROM public.photos_4326 ORDER BY id DESC LIMIT %s
+                    ) sub;
                 """
                 params = (limit,)
 
             cursor.execute(query, params)
-            rows = cursor.fetchall()
-
-            results = []
-            for row in rows:
-                if isinstance(row, dict):
-                    res = row
-                else:
-                    res = {"id": row[0], "latitude": row[1], "longitude": row[2], "filename": row[3], "directory": row[4], "timestamp": row[5], "count": row[6]}
-                
-                ts = res.get("timestamp")
-                results.append({
-                    "id": res["id"],
-                    "latitude": float(res["latitude"]) if res["latitude"] is not None else 0.0,
-                    "longitude": float(res["longitude"]) if res["longitude"] is not None else 0.0,
-                    "filename": res["filename"],
-                    "directory": res["directory"],
-                    "timestamp": ts.isoformat() if ts else None,
-                    "count": res["count"]
-                })
-
-            return jsonify(results)
+            
+            # Получаем готовый JSON от базы! Никаких циклов Python.
+            result = cursor.fetchone()[0]
+            
+            # Возвращаем напрямую
+            if isinstance(result, str):
+                return Response(result, mimetype='application/json')
+            elif isinstance(result, dict) or isinstance(result, list):
+                return jsonify(result)
+            else:
+                return Response(json.dumps(result), mimetype='application/json')
 
         except Exception as e:
             logger.error(f"Error getting panoramas: {e}")
+            traceback.print_exc()
             if self.db.connection:
                 self.db.connection.rollback()
             return jsonify({"error": str(e)}), 500

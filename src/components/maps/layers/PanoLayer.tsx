@@ -3,6 +3,8 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useMap, Marker, CircleMarker } from 'react-leaflet';
 import debounce from 'lodash/debounce';
 import L, { LatLngBounds } from 'leaflet';
+// Убедитесь, что этот путь верный в вашей структуре проекта
+import { defaultIcon, activeIcon } from '../../icons';
 
 // --- Типы ---
 interface MarkerType {
@@ -62,7 +64,7 @@ const createClusterIcon = (count: number) => {
 
   return L.divIcon({
     html,
-    className: '', // Убрали сторонние классы
+    className: '', // Убрали сторонние классы, чтобы не мешали
     iconSize: L.point(size, size),
     iconAnchor: L.point(size / 2, size / 2),
   });
@@ -94,7 +96,7 @@ const PanoLayer: React.FC<PanoLayerProps> = ({
       try {
         const url = new URL(API_ENDPOINT, window.location.origin);
         
-        // Берем область карты с запасом 20%, чтобы не было резких пропаданий при сдвиге
+        // Берем область карты с запасом 20%, чтобы избежать "прострелов" при легком скролле
         const paddedBounds = bounds.pad(0.2);
 
         url.searchParams.append('north', paddedBounds.getNorth().toString());
@@ -111,21 +113,22 @@ const PanoLayer: React.FC<PanoLayerProps> = ({
         const contentType = response.headers.get("content-type");
         if (contentType && contentType.includes("text/html")) return; 
 
-        if (!response.ok) throw new Error(`HTTP error`);
+        if (!response.ok) throw new Error(`HTTP error: ${response.status}`);
 
         const data = await response.json();
 
         if (Array.isArray(data)) {
+          // ВАЖНО: В новом бэкенде поля называются lat и lng (для экономии трафика)
           const updatedMarkers = data
-            .filter((item: any) => typeof item.latitude === 'number' && typeof item.longitude === 'number')
+            .filter((item: any) => typeof item.lat === 'number' && typeof item.lng === 'number')
             .map((item: any) => ({
               id: String(item.id),
-              lat: item.latitude,
-              lng: item.longitude,
+              lat: item.lat,
+              lng: item.lng,
               count: item.count || 1,
             }));
 
-          // ПОЛНАЯ ЗАМЕНА СОСТОЯНИЯ (Без бесконечного накопления)
+          // ПОЛНАЯ ЗАМЕНА СОСТОЯНИЯ (Без бесконечного накопления в памяти)
           setMarkers(updatedMarkers);
           
           if (togglePanoLayer) {
@@ -143,7 +146,7 @@ const PanoLayer: React.FC<PanoLayerProps> = ({
   const debouncedFetch = useMemo(
     () => debounce((bounds: LatLngBounds, zoom: number) => {
         fetchMarkersInBounds(bounds, zoom);
-    }, 300), // Уменьшили задержку для большей отзывчивости
+    }, 250), // Задержка 250мс идеальна для UX: быстро, но не спамит сервер
     [fetchMarkersInBounds]
   );
 
@@ -172,7 +175,7 @@ const PanoLayer: React.FC<PanoLayerProps> = ({
   return (
     <React.Fragment>
       {markers.map((marker) => {
-        // 1. Если сервер вернул кластер
+        // 1. Если сервер вернул кластер (Зумы 0-17)
         if (marker.count > 1) {
           return (
             <Marker
@@ -190,16 +193,16 @@ const PanoLayer: React.FC<PanoLayerProps> = ({
           );
         }
 
-        // 2. Если сервер вернул сырую точку (Зум 18-23). 
-        // Используем Canvas (CircleMarker), он работает в 100 раз быстрее обычного DOM Marker.
+        // 2. Если сервер вернул сырую точку (Зумы 18-23). 
+        // Используем Canvas (CircleMarker), он работает аппаратно и в 100 раз быстрее DOM Marker'ов.
         return (
           <CircleMarker
             key={`raw-${marker.id}`}
             center={[marker.lat, marker.lng]}
-            radius={6} // Размер точки
+            radius={6} // Размер точки в пикселях
             pathOptions={{
               fillColor: selectedMarker === marker.id ? '#ff3b30' : '#2db7f5', // Красный при выборе, иначе голубой
-              color: '#ffffff', // Белая обводка
+              color: '#ffffff', // Белая обводка для контраста
               weight: 1.5,
               fillOpacity: 1
             }}
