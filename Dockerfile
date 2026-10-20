@@ -3,18 +3,14 @@ FROM node:22-alpine AS ui
 WORKDIR /ui
 
 COPY package.json package-lock.json* ./
-RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
+RUN npm ci
 
 COPY tsconfig.json ./
 COPY public ./public
 COPY src ./src
 
-# Фикс для некоторых версий npm/node
-RUN npm install -D @babel/plugin-proposal-private-property-in-object \
- && npx update-browserslist-db@latest --yes || true
-
-# ОТКЛЮЧАЕМ СТРОГИЙ CI-РЕЖИМ, ЧТОБЫ WARNING НЕ КРАШИЛ СБОРКУ
-RUN CI=false npm run build
+# Dependencies, including the legacy CRA Babel compatibility plugin, are locked.
+RUN CI=true BROWSERSLIST_IGNORE_OLD_DATA=true npm run build
 
 # ---------- 2) Runtime Flask ----------
 FROM python:3.12-slim-bookworm AS runner
@@ -35,7 +31,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     g++ \
     ca-certificates \
     curl \
-    libpq-dev \ 
+    libpq-dev \
  && rm -rf /var/lib/apt/lists/*
 
 # Обязательные переменные окружения для компиляции Python-пакета GDAL
@@ -53,7 +49,7 @@ RUN python -m pip install --upgrade pip setuptools wheel \
 RUN pip install --no-cache-dir GDAL==$(gdal-config --version)
 
 # Код бэкенда
-# ВАЖНО: Убедитесь, что файл entrypoint.sh лежит в папке server на вашем компьютере, 
+# ВАЖНО: Убедитесь, что файл entrypoint.sh лежит в папке server на вашем компьютере,
 # чтобы он скопировался внутрь контейнера вместе с остальным кодом.
 COPY server ./server
 

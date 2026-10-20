@@ -1,0 +1,14 @@
+.git
+.env
+.env.*
+!.env.example
+node_modules
+build
+data
+server/uploads
+**/__pycache__
+.venv
+.venv-*
+*.log
+.DS_Store
+pgbouncer_data

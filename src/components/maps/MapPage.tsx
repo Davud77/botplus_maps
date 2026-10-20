@@ -5,7 +5,7 @@ import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 
 // --- STYLES ---
-import './MapPage.css'; // <-- Подключаем вынесенные стили
+// Map layout styles are currently part of the global index.css bundle.
 
 // --- STORES & HOOKS ---
 import { useUIStore } from './hooks/useUIStore';
@@ -38,14 +38,14 @@ const MapPage: React.FC = () => {
   const { baseLayerUrl } = useMapStore();
 
   // Local State (Map & View)
-  const [mapCenter, setMapCenter] = useState<[number, number]>([43, 47]);
+  const mapCenter: [number, number] = [43, 47];
   
   // Для отладки: храним текущий зум
   const [currentZoom, setCurrentZoom] = useState<number>(5);
   
   // Pano State
   const [showPanoLayer, setShowPanoLayer] = useState(false);
-  const [isLoadingPano, setIsLoadingPano] = useState(false);
+  const isLoadingPano = false;
   const [selectedMarker, setSelectedMarker] = useState<string | null>(null);
   const [isPanoVisible, setIsPanoVisible] = useState(false);
   
@@ -213,7 +213,7 @@ const MapPage: React.FC = () => {
         className="main-map-container" 
         zoomControl={false} 
         maxZoom={23}
-        preferCanvas={true} // <--- ВАЖНО: Включает аппаратное ускорение для отрисовки точек
+        preferCanvas={true} // Use Canvas instead of one SVG node per point.
       >
         <SetMapRef />
         <TileLayer url={baseLayerUrl} maxZoom={23} />

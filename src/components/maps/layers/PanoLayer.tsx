@@ -4,7 +4,6 @@ import { useMap, Marker, CircleMarker } from 'react-leaflet';
 import debounce from 'lodash/debounce';
 import L, { LatLngBounds } from 'leaflet';
 // Убедитесь, что этот путь верный в вашей структуре проекта
-import { defaultIcon, activeIcon } from '../../icons';
 
 // --- Типы ---
 interface MarkerType {
@@ -194,7 +193,7 @@ const PanoLayer: React.FC<PanoLayerProps> = ({
         }
 
         // 2. Если сервер вернул сырую точку (Зумы 18-23). 
-        // Используем Canvas (CircleMarker), он работает аппаратно и в 100 раз быстрее DOM Marker'ов.
+        // CircleMarker uses the map Canvas renderer; dense datasets still need tile-based rendering.
         return (
           <CircleMarker
             key={`raw-${marker.id}`}

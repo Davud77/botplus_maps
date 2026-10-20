@@ -1,0 +1,31 @@
+name: Foundation checks
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  frontend:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npx tsc --noEmit --incremental false
+      - run: npm test -- --watchAll=false --runInBand
+      - run: npm run build
+        env:
+          CI: 'true'
+          BROWSERSLIST_IGNORE_OLD_DATA: 'true'
+  backend:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y python3-gdal python3-venv
+      - run: /usr/bin/python3 -m venv --system-site-packages /tmp/botplus-test
+      - run: /tmp/botplus-test/bin/pip install Flask==3.1.2
+      - run: /tmp/botplus-test/bin/python -m unittest discover -s tests -v
+        env:
+          PROJ_NETWORK: 'OFF'
+          REQUIRE_GDAL_TESTS: '1'

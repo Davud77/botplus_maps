@@ -22,10 +22,10 @@ class OrthoService:
         self.storage = storage_service
         self.gdal = gdal_service
         self.tasks = task_service
-        
+
         # [UPDATED] Берем путь из конфигурации (.env)
         self.temp_dir = getattr(config, 'TEMP_FOLDER', "data/temp/orthos")
-        
+
         if not os.path.exists(self.temp_dir):
             try: os.makedirs(self.temp_dir, exist_ok=True)
             except: pass
@@ -37,8 +37,8 @@ class OrthoService:
             b = None
             if o.bounds:
                 try: b = json.loads(o.bounds)
-                except: pass 
-            
+                except: pass
+
             crs_val = getattr(o, 'crs', None)
             if not crs_val and o.filename and "_3857" in o.filename:
                 crs_val = "EPSG:3857"
@@ -64,8 +64,8 @@ class OrthoService:
             # Обновляем статус, только если процент изменился, чтобы не спамить диск
             if getattr(progress_callback, "last_pct", -1) != percent:
                 self.tasks.save_state(task_id, {
-                    "status": "processing", 
-                    "progress": percent, 
+                    "status": "processing",
+                    "progress": percent,
                     "message": f"{message} {percent}%"
                 })
                 progress_callback.last_pct = percent
@@ -83,7 +83,7 @@ class OrthoService:
             try:
                 self.tasks.save_state(task_id, {"status": "processing", "progress": 10, "message": "Сбор метаданных..."})
                 logs.append(f"Начало фоновой обработки: {filename}")
-                
+
                 # 1. Сбор метаданных
                 bounds = self.gdal.get_bounds(temp_file_path)
                 crs = self.gdal.get_crs(temp_file_path)
@@ -96,7 +96,7 @@ class OrthoService:
                 preview_filename = f"{os.path.splitext(filename)[0]}_preview.png"
                 preview_path = os.path.join(self.temp_dir, preview_filename)
                 has_preview = False
-                
+
                 try:
                     # Нативный GDAL Translate для превью
                     translate_options = gdal.TranslateOptions(
@@ -116,7 +116,7 @@ class OrthoService:
                 self.tasks.save_state(task_id, {"status": "processing", "progress": 70, "message": "Отправка в хранилище..."})
                 self.storage.upload_file(filename, temp_file_path)
                 logs.append("Основной файл загружен в MinIO")
-                
+
                 if has_preview:
                     self.storage.upload_file(preview_filename, preview_path)
                     logs.append("Миниатюра загружена в MinIO")
@@ -124,22 +124,22 @@ class OrthoService:
                 # 4. Запись в БД
                 self.tasks.save_state(task_id, {"status": "processing", "progress": 90, "message": "Сохранение в БД..."})
                 ortho_obj = Ortho(
-                    filename=filename, 
+                    filename=filename,
                     bounds=json.dumps(bounds),
                     url=None,
                     is_visible=False,
                     crs=crs,
-                    is_cog=is_cog,             
+                    is_cog=is_cog,
                     geometry_wkt=footprint_wkt,
                     preview_filename=preview_filename if has_preview else None
                 )
-                
+
                 ortho_id = self.manager.insert_ortho(ortho_obj)
                 logs.append(f"Успех. Запись добавлена в БД (ID: {ortho_id})")
-                
+
                 self.tasks.save_state(task_id, {
-                    "status": "success", 
-                    "progress": 100, 
+                    "status": "success",
+                    "progress": 100,
                     "message": "Готово",
                     "logs": logs
                 })
@@ -179,7 +179,7 @@ class OrthoService:
 
                 # Нативный GDAL с коллбэком прогресса
                 cb = self._create_progress_callback(task_id, message="Конвертация в COG...")
-                
+
                 translate_options = gdal.TranslateOptions(
                     format="COG",
                     creationOptions=[
@@ -194,9 +194,9 @@ class OrthoService:
 
                 ds = gdal.Translate(cog_path, local_path, options=translate_options)
                 ds = None # Завершаем запись файла
-                
+
                 self.tasks.save_state(task_id, {"status": "processing", "progress": 95, "message": "Сохранение метаданных..."})
-                
+
                 # Обновляем метаданные и загружаем результат
                 bounds = self.gdal.get_bounds(cog_path)
                 crs = self.gdal.get_crs(cog_path)
@@ -206,12 +206,12 @@ class OrthoService:
                 self.storage.upload_file(new_filename, cog_path)
 
                 new_ortho = Ortho(
-                    filename=new_filename, 
-                    bounds=json.dumps(bounds), 
-                    url=None, 
-                    crs=crs, 
+                    filename=new_filename,
+                    bounds=json.dumps(bounds),
+                    url=None,
+                    crs=crs,
                     is_visible=False,
-                    is_cog=is_cog,          
+                    is_cog=is_cog,
                     geometry_wkt=geom_wkt,
                     preview_filename=getattr(ortho, 'preview_filename', None)
                 )
@@ -246,7 +246,7 @@ class OrthoService:
             try:
                 self.tasks.save_state(task_id, {"status": "processing", "progress": 2, "message": "Скачивание из S3..."})
                 self.storage.download_file(ortho.filename, local_path)
-                
+
                 name_part, ext = os.path.splitext(ortho.filename)
                 clean_name = name_part.replace("_cog", "").replace("_3857", "")
                 new_filename = f"{clean_name}_3857_cog.tif"
@@ -270,7 +270,7 @@ class OrthoService:
 
                 ds = gdal.Warp(output_path, local_path, options=warp_options)
                 ds = None # Завершаем запись
-                
+
                 self.tasks.save_state(task_id, {"status": "processing", "progress": 95, "message": "Сохранение метаданных..."})
 
                 # Забираем новые метаданные
@@ -281,12 +281,12 @@ class OrthoService:
                 self.storage.upload_file(new_filename, output_path)
 
                 new_ortho = Ortho(
-                    filename=new_filename, 
+                    filename=new_filename,
                     bounds=json.dumps(new_bounds),
-                    url=None, 
-                    crs="EPSG:3857", 
+                    url=None,
+                    crs="EPSG:3857",
                     is_visible=False,
-                    is_cog=is_cog,         
+                    is_cog=is_cog,
                     geometry_wkt=geom_wkt,
                     preview_filename=getattr(ortho, 'preview_filename', None)
                 )
@@ -321,7 +321,7 @@ class OrthoService:
             try:
                 self.tasks.save_state(task_id, {"status": "processing", "progress": 10, "message": "Скачивание исходника..."})
                 self.storage.download_file(ortho.filename, local_path)
-                
+
                 name_part, ext = os.path.splitext(ortho.filename)
                 preview_filename = f"{name_part}_preview.png"
                 preview_path = os.path.join(self.temp_dir, preview_filename)
@@ -335,15 +335,15 @@ class OrthoService:
                     resampleAlg="nearest",
                     callback=cb
                 )
-                
+
                 ds = gdal.Translate(preview_path, local_path, options=translate_options)
                 ds = None
 
                 self.tasks.save_state(task_id, {"status": "processing", "progress": 90, "message": "Загрузка превью в хранилище..."})
                 self.storage.upload_file(preview_filename, preview_path)
-                
+
                 self.manager.update_ortho(ortho_id, {"preview_filename": preview_filename})
-                
+
                 self.tasks.save_state(task_id, {"status": "success", "progress": 100, "message": "Превью сгенерировано"})
             except Exception as e:
                 traceback.print_exc()
@@ -367,9 +367,9 @@ class OrthoService:
         titiler_host = getattr(config, 'TITILER_INTERNAL_URL', "http://titiler:80")
         minio_endpoint = getattr(config, 'MINIO_ENDPOINT', "minio:9000")
         bucket_name = getattr(config, 'MINIO_ORTHO_BUCKET', "orthophotos")
-        
+
         s3_url = f"http://{minio_endpoint}/{bucket_name}/{ortho.filename}"
-        
+
         try:
             resp = requests.get(
                 f"{titiler_host}/cog/tiles/WebMercatorQuad/{z}/{x}/{y}",
@@ -380,9 +380,6 @@ class OrthoService:
                 return resp.content
         except:
             pass
-            
-        img = Image.new("RGBA", (256, 256), (0, 0, 0, 0))
-        buf = BytesIO()
-        img.save(buf, format="PNG")
-        buf.seek(0)
-        return buf.read()
+
+        # Rendering failures must not become successful, cacheable blank tiles.
+        return None

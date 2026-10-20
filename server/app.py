@@ -89,14 +89,14 @@ def ensure_default_admin():
 
     try:
         existing_user = user_repository.get_user_by_username(username)
-        
+
         if existing_user:
             print(f"[Worker {os.getpid()}] Startup: User '{username}' already exists. Skipping creation.")
         else:
             print(f"[Worker {os.getpid()}] Startup: User '{username}' not found. Creating...")
             pw_hash = generate_password_hash(password)
             new_id = user_repository.create_user(username, pw_hash)
-            
+
             if new_id:
                 print(f"[Worker {os.getpid()}] Startup: User '{username}' successfully created (ID: {new_id}).")
             else:
@@ -105,20 +105,20 @@ def ensure_default_admin():
                      print(f"[Worker {os.getpid()}] Startup: User '{username}' was created by another worker.")
                 else:
                      print(f"[Worker {os.getpid()}] Startup: Failed to create user '{username}'. Check DB connection.")
-                
+
     except Exception as e:
         print(f"[Worker {os.getpid()}] Startup Warning: Could not verify/create admin. Error: {e}")
 
 def create_app():
     app = Flask(__name__, static_folder=None)
-    
+
     # Читаем секретные ключи из .env
     app.secret_key = os.getenv("SECRET_KEY", getattr(config, "SECRET_KEY", "fallback-secret-key"))
 
     # --- Безопасный парсинг настроек Cookie из .env ---
     cookie_secure_env = os.getenv("COOKIE_SECURE", getattr(config, "COOKIE_SECURE", "False"))
     is_cookie_secure = str(cookie_secure_env).lower() in ("true", "1", "yes", "t")
-    
+
     cookie_domain = os.getenv("SESSION_COOKIE_DOMAIN", getattr(config, "SESSION_COOKIE_DOMAIN", ""))
     if not cookie_domain:  # Если пустая строка в .env, превращаем в None
         cookie_domain = None
@@ -132,22 +132,26 @@ def create_app():
         SESSION_COOKIE_SECURE=is_cookie_secure,
         SESSION_COOKIE_HTTPONLY=True,
         JSON_AS_ASCII=False,
-        MAX_CONTENT_LENGTH= 1024 * 1024 * 1024 * 1024,  
+        MAX_CONTENT_LENGTH= 1024 * 1024 * 1024 * 1024,
     )
 
     # ---------------- COMPRESSION SETTINGS (GZIP) ----------------
     app.config['COMPRESS_MIMETYPES'] = [
-        'text/html', 
-        'text/css', 
-        'text/xml', 
-        'application/json', 
+        'text/html',
+        'text/css',
+        'text/xml',
+        'application/json',
         'application/javascript',
         'application/vnd.mapbox-vector-tile'
     ]
     app.config['COMPRESS_LEVEL'] = 6
     app.config['COMPRESS_MIN_SIZE'] = 500
-    
+
     Compress(app)
+
+    from http_policies import register_http_policies
+    from services.auth_service import decode_access_token
+    register_http_policies(app, decode_access_token, origin_allowed)
 
     # ---------------- CORS ----------------
     CORS(
@@ -164,15 +168,11 @@ def create_app():
         origin = request.headers.get("Origin")
         if origin_allowed(origin):
             response.headers["Access-Control-Allow-Origin"] = origin or "*"
-            response.headers["Vary"] = "Origin"
+            response.vary.add("Origin")
         response.headers["Access-Control-Allow-Credentials"] = "true"
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
         response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With"
-        
-        # Disable caching for API, but keep for map tiles
-        if 'application/vnd.mapbox-vector-tile' not in response.headers.get('Content-Type', ''):
-             response.headers["Cache-Control"] = "no-store"
-             
+
         return response
 
     @app.route("/<path:any_path>", methods=["OPTIONS"])
@@ -182,13 +182,13 @@ def create_app():
     # ---------------- API REGISTRATION (Routing) ----------------
     if auth_blueprint:
         app.register_blueprint(auth_blueprint, url_prefix="/api/auth")
-    
+
     if vector_bp:
         app.register_blueprint(vector_bp, url_prefix="/api")
 
     if pano_blueprint:
         app.register_blueprint(pano_blueprint, url_prefix="/api")
-    
+
     if ortho_blueprint:
         app.register_blueprint(ortho_blueprint, url_prefix="/api")
 
@@ -198,7 +198,7 @@ def create_app():
         return jsonify({"ok": True, "db": "postgres", "env": os.getenv("APP_ENV", "unknown")})
 
     # ---------------- STATIC SERVING (Frontend / SPA) ----------------
-    
+
     @app.route("/favicon.ico")
     def favicon():
         if (BUILD_DIR / "favicon.ico").exists():
@@ -234,6 +234,8 @@ def create_app():
     @app.route("/", defaults={"path": ""})
     @app.route("/<path:path>")
     def spa_fallback(path: str):
+        if path == "api" or path.startswith("api/"):
+            return jsonify({"error": "API endpoint not found"}), 404
         candidate = BUILD_DIR / path
         if candidate.is_file():
             rel = os.path.relpath(candidate, BUILD_DIR)
