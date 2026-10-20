@@ -7,6 +7,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends gdal-bin libgda
 WORKDIR /app
 COPY server/geo /app/server/geo
 COPY server/cli.py /app/server/cli.py
-RUN useradd --uid 10001 --create-home operator
-USER operator
+RUN groupadd --gid 10001 botplustools \
+    && useradd --uid 10001 --gid 10001 --create-home botplustools
+USER 10001:10001
 ENTRYPOINT ["python", "-m", "server.cli"]

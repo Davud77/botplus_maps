@@ -35,3 +35,7 @@ jobs:
       - uses: actions/checkout@v4
       - run: docker build -f Dockerfile.tools -t botplus-tools:ci .
       - run: docker run --rm --network none botplus-tools:ci --help
+      - run: >-
+          docker run --rm --network none --env PYTHONPATH=/app
+          --mount type=bind,src=${{ github.workspace }}/tests,dst=/checks,readonly
+          --entrypoint python botplus-tools:ci /checks/tools_image_smoke.py
