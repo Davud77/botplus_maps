@@ -1,3 +1,5 @@
+> **Self-host rebuild started on 21 October 2026.** The original setup documentation below describes the legacy application. Start with the [roadmap and release gates](ROADMAP.md), [architecture decision](docs/architecture/0001-self-host-data-and-ingestion.md), [local raster tools](docs/LOCAL_IMPORT.md), and [current security limitations](SECURITY.md). No-copy disk/NAS import and resumable uploads are planned; the first CLI currently performs metadata inspection only.
+
 ```markdown
 # Botplus Maps (GIS Platform)
 
