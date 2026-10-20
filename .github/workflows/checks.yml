@@ -29,3 +29,9 @@ jobs:
         env:
           PROJ_NETWORK: 'OFF'
           REQUIRE_GDAL_TESTS: '1'
+  tools-image:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -f Dockerfile.tools -t botplus-tools:ci .
+      - run: docker run --rm --network none botplus-tools:ci --help
