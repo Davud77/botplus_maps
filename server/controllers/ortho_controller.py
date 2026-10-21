@@ -10,8 +10,6 @@ import json
 import os
 from services.upload_names import ortho_upload_key
 
-ortho_blueprint = Blueprint("ortho", __name__)
-
 class OrthoController:
     def __init__(self):
         # Инициализация зависимостей
@@ -33,8 +31,8 @@ class OrthoController:
         )
 
     @staticmethod
-    def register_routes(blueprint):
-        c = OrthoController()
+    def register_routes(blueprint, controller=None):
+        c = controller if controller is not None else OrthoController()
 
         blueprint.add_url_rule("/orthophotos", view_func=c.get_orthophotos, methods=["GET"])
         blueprint.add_url_rule("/upload_ortho", view_func=c.upload_ortho, methods=["POST"])
@@ -198,4 +196,7 @@ class OrthoController:
         return jsonify(state), 200
 
 # Регистрация
-OrthoController.register_routes(ortho_blueprint)
+def create_ortho_blueprint(controller=None):
+    blueprint = Blueprint("ortho", __name__)
+    OrthoController.register_routes(blueprint, controller)
+    return blueprint

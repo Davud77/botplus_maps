@@ -1,91 +1,111 @@
-# ./backend/database.py
-
-import psycopg2
-from psycopg2.extras import RealDictCursor
-import config
+"""Short, isolated PostgreSQL transactions; no connection is stored on a controller."""
+from contextlib import contextmanager
+import logging
 import os
 
+import psycopg2
+from psycopg2 import extensions
+from psycopg2.extras import RealDictCursor
+
+logger = logging.getLogger(__name__)
+
+
+def _enable_cooperative_io():
+    """Gunicorn's gevent socket patch does not make libpq cooperative by itself."""
+    try:
+        from gevent.monkey import is_module_patched
+    except ImportError:
+        return
+    if is_module_patched("socket") and extensions.get_wait_callback() is None:
+        from psycogreen.gevent import patch_psycopg
+        patch_psycopg()
+
+
+def _setting(name, default, minimum):
+    value = int(os.environ.get(name, default))
+    if value < minimum:
+        raise ValueError(f"{name} must be at least {minimum}")
+    return value
+
+
 class Database:
-    """
-    Класс-обёртка для работы с PostgreSQL.
-    Настройки подключения берутся строго из config.py.
-    """
-    def __init__(self):
-        # Используем готовую строку подключения DATABASE_URL из config (приоритетный способ), 
-        # либо собираем из отдельных переменных, если её нет.
-        self.database_url = getattr(config, "DATABASE_URL", None)
-        
-        # Оставляем отдельные переменные для обратной совместимости 
-        # и детального логирования при ошибках
-        self.host = getattr(config, "DB_HOST", "pgbouncer")
-        self.port = getattr(config, "DB_PORT", "6432")
-        self.database = getattr(config, "DB_NAME", "botplus_db")
-        self.user = getattr(config, "DB_USER", "botplus_user")
-        self.password = getattr(config, "DB_PASSWORD", "botplus_password")
-        
-        self.connection = None
+    """Reusable factory. Each cursor context owns its connection.
 
-    def connect(self):
-        """
-        Устанавливает соединение, если оно отсутствует или закрыто.
-        """
-        # Если объект соединения есть, но связь разорвана (closed != 0) — сбрасываем
-        if self.connection is not None:
-            if self.connection.closed != 0:
-                self.connection = None
+    Reads are read-only and roll back on exit. Writes commit only after a clean
+    exit; errors, including cancellations, roll back. Nested contexts are separate
+    transactions, so multi-statement atomic operations must use one context.
+    """
 
-        if self.connection is None:
+    LEGACY_SCHEMA_LOCK = 941027001
+
+    def __init__(self, dsn=None, *, connect_timeout=None, statement_timeout_ms=None,
+                 idle_transaction_timeout_ms=None):
+        if dsn is None:
             try:
-                if self.database_url:
-                    # Подключение через единый URL (идеально для PgBouncer и SQLAlchemy)
-                    self.connection = psycopg2.connect(
-                        self.database_url,
-                        cursor_factory=RealDictCursor
-                    )
-                else:
-                    # Fallback на классический метод передачи аргументов
-                    self.connection = psycopg2.connect(
-                        host=self.host,
-                        port=self.port,
-                        database=self.database,
-                        user=self.user,
-                        password=self.password,
-                        cursor_factory=RealDictCursor
-                    )
-                
-                # Автокоммит отключен, чтобы мы могли управлять транзакциями вручную (self.commit())
-                self.connection.autocommit = False
-            except Exception as e:
-                # Логируем точные параметры подключения при ошибке
-                print(f"CRITICAL: Failed to connect to PostgreSQL at {self.host}:{self.port}/{self.database}")
-                print(f"Error details: {e}")
-                raise e
+                from .config import DATABASE_URL
+            except ImportError:
+                from config import DATABASE_URL
+            dsn = DATABASE_URL
+        self._dsn = dsn
+        self.connect_timeout = (connect_timeout if connect_timeout is not None
+                                else _setting("DB_CONNECT_TIMEOUT_SECONDS", 5, 1))
+        self.statement_timeout_ms = (statement_timeout_ms if statement_timeout_ms is not None
+                                     else _setting("DB_STATEMENT_TIMEOUT_MS", 30000, 1))
+        self.idle_transaction_timeout_ms = (idle_transaction_timeout_ms if idle_transaction_timeout_ms is not None
+                                            else _setting("DB_IDLE_TRANSACTION_TIMEOUT_MS", 10000, 1))
+        if min(self.connect_timeout, self.statement_timeout_ms, self.idle_transaction_timeout_ms) <= 0:
+            raise ValueError("Database timeouts must be positive")
 
-    def get_cursor(self):
-        """
-        Возвращает курсор для выполнения запросов.
-        """
-        self.connect()
-        return self.connection.cursor()
+    def connect(self, database_name=None, *, dict_rows=True, autocommit=False):
+        """Open a fresh connection. Low-level callers must close it themselves."""
+        _enable_cooperative_io()
+        dsn = (extensions.make_dsn(self._dsn, dbname=database_name)
+               if database_name is not None else self._dsn)
+        kwargs = {"connect_timeout": self.connect_timeout}
+        if dict_rows:
+            kwargs["cursor_factory"] = RealDictCursor
+        connection = psycopg2.connect(dsn, **kwargs)
+        try:
+            connection.autocommit = autocommit
+            return connection
+        except BaseException:
+            connection.close()
+            raise
 
-    def commit(self):
-        """
-        Фиксирует транзакцию.
-        """
-        if self.connection:
-            self.connection.commit()
+    def configure_transaction(self, cursor, *, read_only=False):
+        # SET LOCAL is compatible with transaction-mode PgBouncer. Settings must
+        # not leak to its next client; libpq startup options are intentionally unused.
+        if read_only:
+            cursor.execute("SET TRANSACTION READ ONLY")
+        cursor.execute("SET LOCAL statement_timeout = %s", (self.statement_timeout_ms,))
+        cursor.execute("SET LOCAL idle_in_transaction_session_timeout = %s",
+                       (self.idle_transaction_timeout_ms,))
 
-    def rollback(self):
-        """
-        Откатывает транзакцию (полезно при обработке исключений).
-        """
-        if self.connection:
-            self.connection.rollback()
+    @staticmethod
+    def release(connection):
+        """End any remaining transaction and close, even when rollback fails."""
+        if connection is None:
+            return
+        try:
+            if not connection.closed and not connection.autocommit:
+                connection.rollback()
+        except Exception:
+            logger.warning("PostgreSQL rollback failed during cleanup")
+        finally:
+            try:
+                connection.close()
+            except Exception:
+                logger.warning("PostgreSQL connection cleanup failed")
 
-    def close(self):
-        """
-        Закрывает соединение.
-        """
-        if self.connection:
-            self.connection.close()
-            self.connection = None
+    @contextmanager
+    def cursor(self, *, write=False, dict_rows=True, database_name=None):
+        connection = self.connect(database_name, dict_rows=dict_rows)
+        try:
+            with connection.cursor() as cursor:
+                self.configure_transaction(cursor, read_only=not write)
+                yield cursor
+            if write:
+                connection.commit()
+            # Reads and errors roll back in release(). No implicit write commit.
+        finally:
+            self.release(connection)

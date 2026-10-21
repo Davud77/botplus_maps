@@ -51,7 +51,7 @@ Felt — ориентир понятного сценария «добавить
 - [x] Отмена запросов panorama viewer и освобождение viewer при закрытии/смене.
 - [x] Исправлен отсутствующий CSS import; исправлены предупреждения, блокировавшие строгую production-сборку.
 - [x] Зафиксированы frontend dependencies и npm lock; добавлены регрессионные проверки и GitHub CI.
-- [ ] Завершить изоляцию DB connection/transaction на запрос и задачу.
+- [x] Изолировать DB connection/transaction по коротким операциям; добавить read-only scopes, timeout и gevent-адаптер. Подробности: [ADR 0002](docs/architecture/0002-isolated-database-transactions.md).
 - [ ] Убрать небезопасные fallback-секреты/пользователей, public bucket policy и root runtime; миграция существующих установок.
 - [ ] Закрыть полный download-path от чтения оригинала в RAM.
 - [ ] Заменить startup DDL настоящими миграциями; fail-fast/readiness.
@@ -135,10 +135,9 @@ CRS registry принимает EPSG, WKT2, PROJJSON, PRJ/WKT и поддерж�
 
 ## Следующий конкретный пакет
 
-1. Request-scoped DB sessions и регрессионный тест пересекающихся транзакций.
-2. Настоящая миграция auth/projects/catalog/versions/jobs с переводом legacy-данных.
-3. Установочный профиль с управляемыми storage roots и секретами, без public buckets/root/default user.
-4. Затем вертикальный срез: импорт готового COG с server path → durable job → версия каталога → карта, с restart/retry и ограниченным потреблением RAM.
+1. Настоящая миграция auth/projects/catalog/versions/jobs с переводом legacy-данных.
+2. Установочный профиль с управляемыми storage roots и секретами, без public buckets/root/default user.
+3. Затем вертикальный срез: импорт готового COG с server path → durable job → версия каталога → карта, с restart/retry и ограниченным потреблением RAM.
 
 ## Источники и связанные документы
 

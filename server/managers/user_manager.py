@@ -1,54 +1,26 @@
-# ./backend/managers/user_manager.py
+"""Legacy user facade, using isolated PostgreSQL operations."""
+try:
+    from ..models.user import User
+except ImportError:
+    from models.user import User
+from werkzeug.security import generate_password_hash, check_password_hash
 
-from models.user import User
-from werkzeug.security import generate_password_hash
 
 class UserManager:
     def __init__(self, db):
         self.db = db
 
     def find_by_username(self, username):
-        """
-        Ищем пользователя по логину.
-        Возвращаем объект User или None.
-        """
-        cursor = self.db.get_cursor()
-        query = "SELECT * FROM users WHERE username = ?"
-        cursor.execute(query, (username,))
-        row = cursor.fetchone()
-        if row:
-            user = User(
-                user_id=row["id"],
-                username=row["username"],
-                password=row["password"]
-            )
-            return user
-        return None
+        with self.db.cursor() as cursor:
+            cursor.execute("SELECT id, username, password FROM users WHERE username = %s", (username,))
+            row = cursor.fetchone()
+        return User(user_id=row["id"], username=row["username"], password=row["password"]) if row else None
 
     def create_user(self, username, password):
-        """
-        Создаем пользователя с хешированным паролем.
-        """
-        cursor = self.db.get_cursor()
-        hashed_password = generate_password_hash(password)
-        query = "INSERT INTO users (username, password) VALUES (?, ?)"
-        cursor.execute(query, (username, hashed_password))
-        self.db.commit()
+        password_hash = generate_password_hash(password)
+        with self.db.cursor(write=True) as cursor:
+            cursor.execute("INSERT INTO users (username, password) VALUES (%s, %s)", (username, password_hash))
 
     def find_by_credentials(self, username, password):
-        """
-        (Не используется напрямую, но если понадобится сравнивать
-         пароль в открытом виде - устаревший вариант, лучше check_password_hash)
-        """
-        cursor = self.db.get_cursor()
-        query = "SELECT * FROM users WHERE username = ? AND password = ?"
-        cursor.execute(query, (username, password))
-        row = cursor.fetchone()
-        if row:
-            user = User(
-                user_id=row["id"],
-                username=row["username"],
-                password=row["password"]
-            )
-            return user
-        return None
+        user = self.find_by_username(username)
+        return user if user and check_password_hash(user.password, password) else None

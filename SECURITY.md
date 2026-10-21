@@ -4,7 +4,9 @@ The repository is undergoing a staged self-hosting rebuild. The first foundation
 
 Implemented in the foundation patch: API session gate, baseline mutation Origin checks, safe unique orthophoto upload keys, text-only vector popups, private short-lived tile caching and non-cacheable failed tile responses. These are installation-wide sessions; project ACL/RBAC, session revocation and service tokens are not implemented yet.
 
-Outstanding priorities: request/task-scoped database transactions; replacement of fallback secrets/default accounts; removal of automatic public bucket policies; non-root runtime and private service ports; bounded/streaming original downloads; login throttling; strict configuration validation; durable jobs; actual migration/readiness and backup/restore tests. Published credentials from old installations should be rotated if used. Existing public storage policies are not automatically made private by this patch.
+The second package isolates PostgreSQL connections per short operation, enforces read-only transactions by default, adds transaction-local SQL/idle timeouts and cooperative libpq I/O for gevent. Required route initialization and database bootstrap fail instead of silently reporting success. See [ADR 0002](docs/architecture/0002-isolated-database-transactions.md).
+
+Outstanding priorities: replacement of fallback secrets/default accounts; removal of automatic public bucket policies; non-root runtime and private service ports; bounded/streaming original downloads; login throttling; strict configuration validation; durable jobs; actual migration/readiness and backup/restore tests. Published credentials from old installations should be rotated if used. Existing public storage policies are not automatically made private by these patches.
 
 The CLI preflight is intended for an operator inspecting trusted local GeoTIFFs. It is not an isolated parser for hostile uploads. A read-only mount and `--network none` are recommended; production upload processing requires resource-limited isolated workers and additional format validation.
 

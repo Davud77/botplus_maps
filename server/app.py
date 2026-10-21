@@ -10,37 +10,12 @@ import time
 import random
 from werkzeug.security import generate_password_hash
 
-# --- Database / Repository Imports ---
-try:
-    from repositories import user_repository
-except ImportError:
-    print("Warning: Could not import user_repository. Database operations might fail.")
-    user_repository = None
-
-# --- Blueprint Imports ---
-try:
-    from controllers.auth_controller import auth_blueprint
-except Exception as e:
-    print(f"Warning: Could not import auth_blueprint. {e}")
-    auth_blueprint = None
-
-try:
-    from controllers.pano_controller import pano_blueprint
-except Exception as e:
-    print(f"Warning: Could not import pano_blueprint. {e}")
-    pano_blueprint = None
-
-try:
-    from controllers.ortho_controller import ortho_blueprint
-except Exception as e:
-    print(f"Warning: Could not import ortho_blueprint. {e}")
-    ortho_blueprint = None
-
-try:
-    from controllers.vector import vector_bp
-except Exception as e:
-    print(f"Warning: Could not import vector_bp. {e}")
-    vector_bp = None
+# Required routes fail at startup instead of disappearing behind a healthy response.
+from repositories import user_repository
+from controllers.auth_controller import auth_blueprint
+from controllers.pano_controller import create_pano_blueprint
+from controllers.ortho_controller import create_ortho_blueprint
+from controllers.vector import vector_bp
 
 # Paths to static files (Frontend build)
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -75,9 +50,6 @@ def ensure_default_admin():
     Checks if the default admin user exists in the database.
     If not, creates it using credentials from config/env.
     """
-    if user_repository is None:
-        return
-
     # Small random delay based on PID to desynchronize workers
     time.sleep((os.getpid() % 10) * 0.2 + random.uniform(0.1, 0.5))
 
@@ -180,17 +152,10 @@ def create_app():
         return make_response("", 204)
 
     # ---------------- API REGISTRATION (Routing) ----------------
-    if auth_blueprint:
-        app.register_blueprint(auth_blueprint, url_prefix="/api/auth")
-
-    if vector_bp:
-        app.register_blueprint(vector_bp, url_prefix="/api")
-
-    if pano_blueprint:
-        app.register_blueprint(pano_blueprint, url_prefix="/api")
-
-    if ortho_blueprint:
-        app.register_blueprint(ortho_blueprint, url_prefix="/api")
+    app.register_blueprint(auth_blueprint, url_prefix="/api/auth")
+    app.register_blueprint(vector_bp, url_prefix="/api")
+    app.register_blueprint(create_pano_blueprint(), url_prefix="/api")
+    app.register_blueprint(create_ortho_blueprint(), url_prefix="/api")
 
     # API Health Check
     @app.get("/api/health")
