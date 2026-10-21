@@ -3,14 +3,14 @@ import Search from './Search';
 import { MapButtons } from './MapButtons';
 
 interface MapHeaderProps {
-  documentControls?: React.ReactNode;
+  showSettings?: boolean;
   readOnly?: boolean;
   onSearch: (query: string) => void;
   onTogglePano: () => void;
   isPanoLoading: boolean;
 }
 
-export const MapHeader: React.FC<MapHeaderProps> = ({ onSearch, onTogglePano, isPanoLoading, documentControls, readOnly }) => {
+export const MapHeader: React.FC<MapHeaderProps> = ({ onSearch, onTogglePano, isPanoLoading, showSettings, readOnly }) => {
   const headerRef = useRef<HTMLElement>(null);
   useLayoutEffect(() => {
     const header = headerRef.current;
@@ -34,10 +34,9 @@ export const MapHeader: React.FC<MapHeaderProps> = ({ onSearch, onTogglePano, is
       </div>
 
       <div className="end-box">
-        {!readOnly && <div className="map-buttons-wrapper">
-           <MapButtons onTogglePano={onTogglePano} isPanoLoading={isPanoLoading} />
-        </div>}
-        {documentControls}
+        <div className="map-buttons-wrapper">
+           <MapButtons showSettings={showSettings} readOnly={readOnly} onTogglePano={onTogglePano} isPanoLoading={isPanoLoading} />
+        </div>
       </div>
     </header>
   );

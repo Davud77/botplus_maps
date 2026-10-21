@@ -2,7 +2,7 @@
 import { create } from 'zustand';
 
 // Добавлено 'pano' в список доступных панелей
-export type PanelType = 'activeLayers' | 'baseLayers' | 'vector' | 'ortho' | 'selection' | 'pano' | null;
+export type PanelType = 'settings' | 'activeLayers' | 'baseLayers' | 'vector' | 'ortho' | 'selection' | 'pano' | null;
 
 interface UIState {
   activePanel: PanelType;

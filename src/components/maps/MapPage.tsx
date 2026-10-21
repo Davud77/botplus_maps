@@ -18,6 +18,7 @@ import { useUIStore } from './hooks/useUIStore';
 import { useMapStore } from './hooks/useMapStore';
 
 // --- UI COMPONENTS ---
+import { BasePanel } from './ui/panels/BasePanel';
 import { MapHeader } from './ui/MapHeader';
 import { VectorPanel } from './ui/panels/VectorPanel';
 import { OrthoPanel } from './ui/panels/OrthoPanel';
@@ -154,7 +155,7 @@ const MapPage: React.FC<MapPageProps> = ({ initialConfig, readOnly = false, docu
       {/* 1. HEADER */}
       <div className="ui-overlay-layer">
         <MapHeader
-          documentControls={documentControls}
+          showSettings={!!documentControls}
           readOnly={readOnly}
           onSearch={handleSearch}
           onTogglePano={() => setShowPanoLayer(!showPanoLayer)}
@@ -163,6 +164,9 @@ const MapPage: React.FC<MapPageProps> = ({ initialConfig, readOnly = false, docu
       </div>
 
       {/* 2. SIDE PANELS */}
+      <div className="ui-overlay-layer">
+        {activePanel === 'settings' && documentControls && <BasePanel title="Настройки карты" onClose={closeAll}>{documentControls}</BasePanel>}
+      </div>
       <div className="ui-overlay-layer" hidden={readOnly}>
         {activePanel === 'activeLayers' && <ActiveLayersPanel onClose={closeAll} onRemovePanos={()=>setShowPanoLayer(false)} />}
         {activePanel === 'vector' && <VectorPanel onClose={closeAll} />}
