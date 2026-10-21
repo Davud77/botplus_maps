@@ -1,4 +1,5 @@
 // src/components/maps/MapPage.tsx
+import { MapConfig } from '../../utils/workspaceApi';
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { MapContainer, TileLayer, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -32,19 +33,45 @@ import { MapEventHandlers, handleCopyCoordinates, ContextMenu } from './ui/Conte
 
 interface MarkerType { id: string; lat: number; lng: number; }
 
-const MapPage: React.FC = () => {
+function MapStateObserver({ mapRef, onViewChange, onZoomChange }: {
+  mapRef: React.MutableRefObject<L.Map | null>;
+  onViewChange?: (view: MapConfig['view']) => void; onZoomChange: (zoom: number) => void;
+}) {
+  const map = useMap();
+  useEffect(() => {
+    mapRef.current = map;
+    useMapStore.getState().setMapInstance(map);
+    onZoomChange(map.getZoom());
+    const zoom = () => onZoomChange(map.getZoom());
+    const move = () => {
+      const center = map.getCenter().wrap();
+      onViewChange?.({ center: [Math.max(-85.051129, Math.min(85.051129, center.lat)), center.lng], zoom: map.getZoom() });
+    };
+    map.on('moveend', move); map.on('zoomend', zoom);
+    return () => {
+      map.off('moveend', move); map.off('zoomend', zoom);
+      if (mapRef.current === map) mapRef.current = null;
+      if (useMapStore.getState().mapInstance === map) useMapStore.setState({ mapInstance: null });
+    };
+  }, [map, mapRef, onViewChange, onZoomChange]);
+  return null;
+}
+
+interface MapPageProps { initialConfig?: MapConfig; readOnly?: boolean;
+  onViewChange?: (view: MapConfig['view']) => void; onPanoramasChange?: (enabled: boolean) => void; }
+const MapPage: React.FC<MapPageProps> = ({ initialConfig, readOnly = false, onViewChange, onPanoramasChange }) => {
   // Global Stores
   const { activePanel, closeAll } = useUIStore();
   const { baseLayerUrl } = useMapStore();
 
   // Local State (Map & View)
-  const mapCenter: [number, number] = [43, 47];
+  const mapCenter: [number, number] = initialConfig?.view.center || [43, 47];
   
   // Для отладки: храним текущий зум
   const [currentZoom, setCurrentZoom] = useState<number>(5);
   
   // Pano State
-  const [showPanoLayer, setShowPanoLayer] = useState(false);
+  const [showPanoLayer, setShowPanoLayer] = useState(initialConfig?.show_panoramas || false);
   const isLoadingPano = false;
   const [selectedMarker, setSelectedMarker] = useState<string | null>(null);
   const [isPanoVisible, setIsPanoVisible] = useState(false);
@@ -65,6 +92,8 @@ const MapPage: React.FC = () => {
       setShowPanoLayer(true);
     }
   }, [activePanel]);
+
+  useEffect(() => { onPanoramasChange?.(showPanoLayer); }, [showPanoLayer, onPanoramasChange]);
 
   // --- ВАЖНО: Фикс размера карты, управление классами и скрытие .end-box ---
   useEffect(() => {
@@ -123,34 +152,11 @@ const MapPage: React.FC = () => {
     }
   };
 
-  // Вспомогательный компонент для получения доступа к экземпляру карты и отслеживания зума
-  const SetMapRef = () => {
-    const map = useMap();
-    useEffect(() => { 
-      mapRef.current = map; 
-      
-      // Устанавливаем изначальный зум при загрузке
-      setCurrentZoom(map.getZoom());
-      
-      // Слушаем событие изменения зума
-      const handleZoomEnd = () => {
-        setCurrentZoom(map.getZoom());
-      };
-      
-      map.on('zoomend', handleZoomEnd);
-      
-      return () => {
-        map.off('zoomend', handleZoomEnd);
-      };
-    }, [map]);
-    return null;
-  };
-
   return (
     <div className="map-page-wrapper">
       
       {/* 1. HEADER */}
-      <div className="ui-overlay-layer">
+      <div className="ui-overlay-layer" hidden={readOnly}>
         <MapHeader 
           onSearch={handleSearch}
           onTogglePano={() => setShowPanoLayer(!showPanoLayer)}
@@ -159,7 +165,7 @@ const MapPage: React.FC = () => {
       </div>
 
       {/* 2. SIDE PANELS */}
-      <div className="ui-overlay-layer">
+      <div className="ui-overlay-layer" hidden={readOnly}>
         {activePanel === 'vector' && <VectorPanel onClose={closeAll} />}
         {activePanel === 'baseLayers' && <BaseLayersPanel onClose={closeAll} />}
         {activePanel === 'ortho' && <OrthoPanel onClose={closeAll} map={mapRef.current} />}
@@ -209,14 +215,14 @@ const MapPage: React.FC = () => {
       {/* 4. MAP CONTAINER */}
       <MapContainer 
         center={mapCenter} 
-        zoom={5} 
+        zoom={initialConfig?.view.zoom ?? 5}
         className="main-map-container" 
         zoomControl={false} 
         maxZoom={23}
         preferCanvas={true} // Use Canvas instead of one SVG node per point.
       >
-        <SetMapRef />
-        <TileLayer url={baseLayerUrl} maxZoom={23} />
+        <MapStateObserver mapRef={mapRef} onViewChange={onViewChange} onZoomChange={setCurrentZoom} />
+        <>{baseLayerUrl && <TileLayer url={baseLayerUrl} maxZoom={23} attribution="© OpenStreetMap contributors · CARTO / provider" />}</>
         <CustomZoomControl />
 
         {/* --- Layers --- */}
@@ -231,6 +237,7 @@ const MapPage: React.FC = () => {
         <MapEventHandlers setContextMenu={setContextMenu} />
       </MapContainer>
 
+      {!baseLayerUrl && !readOnly && <div className="map-no-basemap-hint">Подложка отключена · ваши слои отображаются локально. Выбрать фон: «Слои карты».</div>}
       {/* 5. CONTEXT MENU */}
       <ContextMenu contextMenu={contextMenu} handleCopyCoordinates={() => handleCopyCoordinates(contextMenu)} />
 

@@ -10,6 +10,7 @@ interface LayerOption {
 }
 
 const LAYERS: LayerOption[] = [
+  { name: "Без подложки · локальные данные", url: "", image: "" },
   // --- 1. Основные (Google & OSM) ---
   { 
     name: "Google Hybrid", 
@@ -99,7 +100,7 @@ export const BaseLayersPanel: React.FC<{ onClose: () => void }> = ({ onClose }) 
     <BasePanel title="Слои карты" onClose={onClose}>
       <div className="layers-container">
         <div className="layers-grid">
-          {LAYERS.map((layer) => (
+          {LAYERS.filter(layer => !layer.url.includes("cartocdn") && !layer.url.includes("maps.wikimedia.org")).map((layer) => (
             <div 
               key={layer.name} 
               className={`layer-card ${baseLayerUrl === layer.url ? 'active' : ''}`}

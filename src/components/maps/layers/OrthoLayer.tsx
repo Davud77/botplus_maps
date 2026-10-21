@@ -4,13 +4,7 @@ import { TileLayer } from 'react-leaflet';
 // [FIX] Исправлен путь импорта: поднимаемся на одну папку вверх (..) в maps, затем в hooks
 import { useMapStore } from '../hooks/useMapStore';
 
-// Определяем базовый URL API так же, как в api.ts
-// Если мы разрабатываем локально, стучимся на порт бэкенда.
-// Если на проде (botplus.ru), используем относительный путь, и Nginx сам проксирует запрос.
-const isLocalhost = 
-  typeof window !== 'undefined' && 
-  (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
-const API_BASE = isLocalhost ? 'http://localhost:5580' : '';
+import { API_BASE } from '../../../utils/api';
 
 export const OrthoTileLayer = () => {
   // Теперь TypeScript видит типы из стора

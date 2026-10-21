@@ -31,7 +31,7 @@ interface MapState {
 
 export const useMapStore = create<MapState>((set, get) => ({
   mapInstance: null,
-  baseLayerUrl: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',
+  baseLayerUrl: '',
   
   orthoImages: [],
   selectedOrthoIds: [],

@@ -1,88 +1,32 @@
-import React, { useState, FormEvent } from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
-
-const LoginPage: React.FC = () => {
-  const [username, setUsername] = useState<string>('');
-  const [password, setPassword] = useState<string>('');
-  const [error, setError] = useState<string>('');
-  const [pending, setPending] = useState<boolean>(false);
-  const navigate = useNavigate();
+import AuthLayout from './workspace/AuthLayout';
+export default function LoginPage() {
   const { login } = useAuth();
-
-  const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setError('');
-    setPending(true);
-
+  const navigate = useNavigate();
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [visible, setVisible] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState('');
+  async function submit(event: React.FormEvent) {
+    event.preventDefault(); if (pending) return;
+    setPending(true); setError('');
     try {
-      // Новый контракт: login(username, password) -> Promise<boolean>
-      const ok = await login(username, password);
-      if (ok) {
-        navigate('/');
-      } else {
-        setError('Неверное имя пользователя или пароль');
-      }
-    } catch (e: any) {
-      console.error('Ошибка подключения:', e);
-      setError('Ошибка при подключении к серверу: ' + (e?.message || 'неизвестная ошибка'));
-    } finally {
-      setPending(false);
-    }
-  };
-
-  return (
-    <div className="login">
-      <div className="login-screen">
-        <div className="app-title">
-          <h1>Авторизация</h1>
-        </div>
-
-        <form className="login-form" onSubmit={handleLogin}>
-          <div className="control-group">
-            <input
-              type="text"
-              className="login-field"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              placeholder="Имя пользователя"
-              id="login-name"
-              name="username"
-              aria-label="Имя пользователя"
-              autoComplete="username"
-              required
-              disabled={pending}
-            />
-            <label className="login-field-icon fui-user" htmlFor="login-name"></label>
-          </div>
-
-          <div className="control-group">
-            <input
-              type="password"
-              className="login-field"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="Пароль"
-              id="login-pass"
-              name="password"
-              aria-label="Пароль"
-              autoComplete="current-password"
-              required
-              disabled={pending}
-            />
-            <label className="login-field-icon fui-lock" htmlFor="login-pass"></label>
-          </div>
-
-          {error && <div className="error-message">{error}</div>}
-
-          <button type="submit" className="buttonlogin btn-primary btn-large btn-block" disabled={pending}>
-            {pending ? 'Входим…' : 'Войти'}
-          </button>
-          <p className="register-prompt">Доступ и восстановление аккаунта — у администратора вашей установки.</p>
-        </form>
-      </div>
-    </div>
-  );
-};
-
-export default LoginPage;
+      if (await login(username, password)) navigate('/', { replace: true });
+      else setError('Не удалось войти. Проверьте логин, пароль и доступность аккаунта.');
+    } catch { setError('Сервер недоступен. Повторите попытку.'); }
+    finally { setPending(false); }
+  }
+  return <AuthLayout title="Вход в аккаунт"><div className="setup-card">
+    <div className="setup-step"><span>↗</span> Ваше рабочее пространство</div>
+    <h2>С возвращением</h2><p className="setup-subtitle">Войдите, чтобы продолжить работу с картами и данными вашей организации.</p>
+    <form onSubmit={submit} aria-busy={pending}>
+      <label htmlFor="login-username">Логин</label><input id="login-username" autoComplete="username" autoFocus required maxLength={50} value={username} onChange={e => setUsername(e.target.value)} disabled={pending} placeholder="Ваш логин" />
+      <label htmlFor="login-password">Пароль</label><div className="setup-password"><input id="login-password" type={visible ? 'text' : 'password'} autoComplete="current-password" required value={password} onChange={e => setPassword(e.target.value)} disabled={pending} placeholder="Ваш пароль" /><button type="button" aria-label={visible ? 'Скрыть пароль' : 'Показать пароль'} onClick={() => setVisible(!visible)}>{visible ? 'Скрыть' : 'Показать'}</button></div>
+      {error && <p className="setup-error" role="alert">{error}</p>}
+      <button className="setup-submit" disabled={pending}>{pending ? 'Входим…' : 'Войти в пространство'} <span aria-hidden="true">→</span></button>
+    </form><div className="setup-note"><span aria-hidden="true">⌁</span><p>Доступ и восстановление аккаунта — у администратора вашей установки.</p></div>
+  </div></AuthLayout>;
+}

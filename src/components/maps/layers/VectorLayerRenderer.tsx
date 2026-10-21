@@ -13,7 +13,7 @@ const stringToColor = (str: string) => {
 };
 
 export const VectorLayerRenderer = () => {
-  const { activeVectorIds } = useVectorStore();
+  const { activeVectorIds, layerSources } = useVectorStore();
   
   // [ИЗМЕНЕНО] Хранилище КОНФИГУРАЦИЙ стилей: 
   // { [layerId]: { type: 'single' | 'categorized', style?: ..., rules?: ... } }
@@ -31,9 +31,10 @@ export const VectorLayerRenderer = () => {
       const parts = layerId.split('-');
       if (parts.length < 3) return;
 
-      const dbName = parts[0];
-      const schema = parts[1];
-      const tableName = parts.slice(2).join('-'); 
+      const source = layerSources[layerId];
+      const dbName = source?.dbName || parts[0];
+      const schema = source?.schema || parts[1];
+      const tableName = source?.tableName || parts.slice(2).join('-');
 
       // Если конфиг уже есть или грузится — выходим
       if (styleConfigs[layerId] || fetchingRef.current.has(layerId)) return;
@@ -77,7 +78,7 @@ export const VectorLayerRenderer = () => {
         fetchingRef.current.delete(layerId);
       }
     });
-  }, [activeVectorIds, styleConfigs]);
+  }, [activeVectorIds, styleConfigs, layerSources]);
 
   // 2. ГРУППИРОВКА СЛОЕВ ДЛЯ КОМБИНИРОВАННЫХ ТАЙЛОВ
   const groupedLayers = useMemo(() => {
@@ -89,9 +90,10 @@ export const VectorLayerRenderer = () => {
       const parts = layerId.split('-');
       if (parts.length < 3) return;
 
-      const dbName = parts[0];
-      const schema = parts[1];
-      const tableName = parts.slice(2).join('-');
+      const source = layerSources[layerId];
+      const dbName = source?.dbName || parts[0];
+      const schema = source?.schema || parts[1];
+      const tableName = source?.tableName || parts.slice(2).join('-');
 
       const groupKey = `${dbName}/${schema}`;
 
@@ -103,7 +105,7 @@ export const VectorLayerRenderer = () => {
 
     Object.values(groups).forEach((tables) => tables.sort());
     return groups;
-  }, [activeVectorIds]);
+  }, [activeVectorIds, layerSources]);
 
   const renderGroups = useMemo(() => Object.entries(groupedLayers).map(([groupKey, tableNames]) => {
     const [dbName, schema] = groupKey.split('/');

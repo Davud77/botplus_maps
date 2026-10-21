@@ -457,6 +457,10 @@ def get_layer_style(db_name, schema, table_name):
 
         cur = conn.cursor()
 
+        cur.execute("SELECT to_regclass('public.layer_styles')")
+        if cur.fetchone()[0] is None:
+            return jsonify(type='single', style={'color': '#20664e', 'weight': 2, 'fillOpacity': 0.3})
+
         # Получаем QML XML из БД
         cur.execute("""
             SELECT styleqml FROM public.layer_styles

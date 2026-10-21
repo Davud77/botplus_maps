@@ -3,7 +3,8 @@ import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import SetupPage from './components/SetupPage';
 import Home from './components/Home';
-import MapPage from './components/maps/MapPage';
+import MapDocumentPage from './components/workspace/MapDocumentPage';
+import PublicMapPage from './components/workspace/PublicMapPage';
 import LoginPage from './components/LoginPage';
 import ProfilePage from './components/ProfilePage';
 import UploadOrtho from './components/UploadOrtho';
@@ -27,6 +28,8 @@ const App: React.FC = () => {
   return (
     <BrowserRouter>
       <Routes>
+        <Route path="/p/:slug" element={<PublicMapPage />} />
+        <Route path="/maps/:mapId" element={isAuthenticated ? <MapDocumentPage /> : <Navigate to="/login" replace />} />
         <Route
           path="/"
           element={isAuthenticated ? <Home /> : <Navigate to="/login" replace />}
@@ -37,7 +40,7 @@ const App: React.FC = () => {
         />
         <Route
           path="/map"
-          element={isAuthenticated ? <MapPage /> : <Navigate to="/login" replace />}
+          element={<Navigate to="/" replace />}
         />
         <Route
           path="/profile"

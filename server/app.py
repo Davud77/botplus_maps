@@ -3,6 +3,7 @@ from flask import Flask, request, make_response, send_from_directory, jsonify
 from flask_cors import CORS
 from flask_compress import Compress
 from pathlib import Path
+from werkzeug.exceptions import HTTPException
 import os
 import re
 import config
@@ -10,6 +11,9 @@ import config
 # Required routes fail at startup instead of disappearing behind a healthy response.
 from controllers.auth_controller import auth_blueprint
 from controllers.setup_controller import setup_blueprint
+from controllers.account_controller import account_blueprint
+from controllers.maps_controller import maps_blueprint
+from services.permissions import resolve_session
 from controllers.pano_controller import create_pano_blueprint
 from controllers.ortho_controller import create_ortho_blueprint
 from controllers.vector import vector_bp
@@ -58,6 +62,12 @@ def create_app():
 
     cookie_samesite = os.getenv("COOKIE_SAMESITE", getattr(config, "COOKIE_SAMESITE", "Lax"))
 
+    @app.errorhandler(HTTPException)
+    def api_error(error):
+        if request.path.startswith('/api/'):
+            return jsonify(message=error.description), error.code
+        return error
+
     # Cookie and limit settings
     app.config.update(
         SESSION_COOKIE_DOMAIN=cookie_domain,
@@ -84,7 +94,7 @@ def create_app():
 
     from http_policies import register_http_policies
     from services.auth_service import decode_access_token
-    register_http_policies(app, decode_access_token, origin_allowed)
+    register_http_policies(app, decode_access_token, origin_allowed, resolve_session)
 
     # ---------------- CORS ----------------
     CORS(
@@ -93,7 +103,7 @@ def create_app():
         supports_credentials=True,
         expose_headers=["Content-Type", "Authorization"],
         allow_headers=["Content-Type", "Authorization", "X-Requested-With"],
-        methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     )
 
     @app.after_request
@@ -103,7 +113,7 @@ def create_app():
             response.headers["Access-Control-Allow-Origin"] = origin or "*"
             response.vary.add("Origin")
         response.headers["Access-Control-Allow-Credentials"] = "true"
-        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
         response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With"
 
         return response
@@ -115,6 +125,8 @@ def create_app():
     # ---------------- API REGISTRATION (Routing) ----------------
     app.register_blueprint(auth_blueprint, url_prefix="/api/auth")
     app.register_blueprint(setup_blueprint, url_prefix="/api/setup")
+    app.register_blueprint(account_blueprint, url_prefix="/api")
+    app.register_blueprint(maps_blueprint, url_prefix="/api")
     app.register_blueprint(vector_bp, url_prefix="/api")
     app.register_blueprint(create_pano_blueprint(), url_prefix="/api")
     app.register_blueprint(create_ortho_blueprint(), url_prefix="/api")
