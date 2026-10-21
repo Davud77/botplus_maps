@@ -1,4 +1,7 @@
 .setup-shell {
+  --color-text: #182a32;
+  --color-text-light: #6a7b80;
+  --font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   min-height:100vh;
   display:grid;
   grid-template-columns:minmax(380px,46%) 1fr;
@@ -12,6 +15,8 @@
 }
 
 .setup-intro {
+  --color-text: #e9f6ed;
+  --color-text-light: #afc8bf;
   background:#102e2b;
   color:#e9f6ed;
   padding:40px 54px 28px;
@@ -286,6 +291,7 @@
 }
 
 .setup-submit span {
+  color: inherit;
   font-size:20px;
 }
 
