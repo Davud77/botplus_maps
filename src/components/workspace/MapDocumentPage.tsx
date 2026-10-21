@@ -62,10 +62,12 @@ export default function MapDocumentPage() {
     } catch (e) { setError((e as Error).message); } finally { setPending(false); }
   }
   const publicUrl = document?.public_slug ? `${window.location.origin}/p/${document.public_slug}` : '';
-  return <main className="ws-shell ws-map-editor"><div className="ws-map-topbar"><Link className="ws-back" to="/">← Все карты</Link>
-    {document && <><div className="ws-map-name">{document.can_edit ? <input aria-label="Название карты" value={title} maxLength={120} onChange={e => setTitle(e.target.value)} /> : <strong>{title}</strong>}<small>{document.can_edit ? 'Редактор карты' : 'Режим просмотра'} · {document.published ? 'есть публикация' : 'внутренняя карта'}</small></div>
-      {document.can_edit && <div className="ws-actions"><button className="ws-secondary" onClick={() => setPublication(!publication)}>Публикация ↗</button><button className="ws-primary" disabled={pending || !title.trim()} onClick={save}>{pending ? 'Сохраняем…' : 'Сохранить карту'}</button></div>}</>}
-  </div>
+  const controls = document && <section className="ws-map-controls" aria-label="Настройки карты">
+    <div className="ws-map-control-meta"><Link className="ws-back" to="/">← Все карты</Link><small>{document.can_edit ? 'Редактор карты' : 'Просмотр'} · {document.published ? 'есть публикация' : 'внутренняя карта'}</small></div>
+    {document.can_edit ? <input aria-label="Название карты" value={title} maxLength={120} onChange={e => setTitle(e.target.value)} /> : <strong className="ws-map-control-title">{title}</strong>}
+    {document.can_edit && <div className="ws-actions"><button className="ws-secondary" aria-expanded={publication} onClick={() => setPublication(!publication)}>Публикация ↗</button><button className="ws-primary" disabled={pending || !title.trim()} onClick={save}>{pending ? 'Сохраняем…' : 'Сохранить карту'}</button></div>}
+  </section>;
+  return <main className="ws-shell ws-map-editor ws-map-editor-overlay">
     {(error || notice) && <div className={`ws-map-notice ws-notice ${error ? 'ws-error' : ''}`} role={error ? 'alert' : 'status'}>{error || notice}</div>}
     {document?.can_edit && publication && <section className="ws-publication ws-card" aria-label="Настройки публикации"><h2>Поделиться картой</h2><p>Сначала сохраните карту, затем опубликуйте её версию. По ссылке без входа будут доступны выбранные растровые и векторные слои, включая атрибуты объектов. Данные слоёв остаются актуальными.</p>
       <label htmlFor="document-description">Описание карты</label><textarea id="document-description" value={description} maxLength={1000} onChange={e => setDescription(e.target.value)} />
@@ -73,6 +75,6 @@ export default function MapDocumentPage() {
       <div className="ws-actions"><button className="ws-primary" onClick={() => publish(true)} disabled={pending}>{document.published ? 'Обновить публикацию' : 'Опубликовать сохранённую карту'}</button>{document.published && <button className="ws-secondary" onClick={() => publish(false)} disabled={pending}>Отключить</button>}<button className="ws-secondary" onClick={() => setPublication(false)}>Закрыть</button></div>
       <small>Слой панорам пока доступен только внутри пространства. Для публикации отключите его и сохраните карту.</small>
     </section>}
-    <div className="ws-map-stage">{ready && document ? <MapPage key={document.id} initialConfig={document.config} readOnly={!document.can_edit} onViewChange={onViewChange} onPanoramasChange={onPanoramasChange} /> : !error && <div className="ws-empty" role="status">Открываем карту…</div>}</div>
+    <div className="ws-map-stage">{ready && document ? <MapPage key={document.id} initialConfig={document.config} readOnly={!document.can_edit} documentControls={controls} onViewChange={onViewChange} onPanoramasChange={onPanoramasChange} /> : !error && <div className="ws-empty" role="status">Открываем карту…</div>}</div>
   </main>;
 }

@@ -62,9 +62,9 @@ function MapStateObserver({ mapRef, onViewChange, onZoomChange }: {
   return null;
 }
 
-interface MapPageProps { initialConfig?: MapConfig; readOnly?: boolean;
+interface MapPageProps { initialConfig?: MapConfig; readOnly?: boolean; documentControls?: React.ReactNode;
   onViewChange?: (view: MapConfig['view']) => void; onPanoramasChange?: (enabled: boolean) => void; }
-const MapPage: React.FC<MapPageProps> = ({ initialConfig, readOnly = false, onViewChange, onPanoramasChange }) => {
+const MapPage: React.FC<MapPageProps> = ({ initialConfig, readOnly = false, documentControls, onViewChange, onPanoramasChange }) => {
   // Global Stores
   const { activePanel, closeAll } = useUIStore();
   const { baseLayerUrl, baseDefinition } = useMapStore();
@@ -117,15 +117,6 @@ const MapPage: React.FC<MapPageProps> = ({ initialConfig, readOnly = false, onVi
       }, 300);
     }
 
-    // 2. Скрытие элемента .end-box в шапке
-    const endBox = document.querySelector('.end-box') as HTMLElement | null;
-    if (endBox) {
-      if (isPanoVisible) {
-        endBox.style.display = 'none'; // Скрываем
-      } else {
-        endBox.style.display = '';     // Возвращаем исходное состояние
-      }
-    }
   }, [isPanoVisible]);
 
   // --- Handlers ---
@@ -161,8 +152,10 @@ const MapPage: React.FC<MapPageProps> = ({ initialConfig, readOnly = false, onVi
     <div className="map-page-wrapper">
 
       {/* 1. HEADER */}
-      <div className="ui-overlay-layer" hidden={readOnly}>
+      <div className="ui-overlay-layer">
         <MapHeader
+          documentControls={documentControls}
+          readOnly={readOnly}
           onSearch={handleSearch}
           onTogglePano={() => setShowPanoLayer(!showPanoLayer)}
           isPanoLoading={isLoadingPano}
