@@ -1,6 +1,7 @@
 // src/App.tsx
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import SetupPage from './components/SetupPage';
 import Home from './components/Home';
 import MapPage from './components/maps/MapPage';
 import LoginPage from './components/LoginPage';
@@ -11,11 +12,17 @@ import { useAuth } from './hooks/useAuth';
 import './index.css';
 
 const App: React.FC = () => {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, setupRequired, startupError } = useAuth();
 
   if (isLoading) {
     return <div className="loading-screen">Проверка авторизации...</div>;
   }
+
+  if (startupError) return <main className="setup-error-screen"><h1>Сервер недоступен</h1><p>{startupError}</p><button onClick={() => window.location.reload()}>Повторить подключение</button></main>;
+  if (setupRequired) return <BrowserRouter><Routes>
+    <Route path="/setup" element={<SetupPage />} />
+    <Route path="*" element={<Navigate to="/setup" replace />} />
+  </Routes></BrowserRouter>;
 
   return (
     <BrowserRouter>

@@ -97,25 +97,27 @@ const VectorTileLayer: React.FC<VectorTileLayerProps> = ({ url, styleConfigs, ac
         const props = e.layer.properties;
         const layerName = e.layer.options.layerName; // Имя таблицы (слоя)
         
-        L.popup()
-          .setLatLng(e.latlng)
-          .setContent(`
-            <div class="vector-popup-container">
-              <div class="vector-popup-header">
-                <strong>Слой:</strong> ${layerName}
-              </div>
-              <table class="vector-popup-table">
-                ${Object.entries(props).map(([k, v]) => `
-                  <tr class="vector-popup-tr">
-                    <td class="vector-popup-key">${k}:</td>
-                    <td class="vector-popup-value">${v !== null && v !== undefined ? String(v) : ''}</td>
-                  </tr>
-                `).join('')}
-              </table>
-            </div>
-          `)
-          .openOn(map);
-          
+        const container = document.createElement('div');
+        container.className = 'vector-popup-container';
+        const header = document.createElement('div');
+        header.className = 'vector-popup-header';
+        header.textContent = `Слой: ${layerName ?? ''}`;
+        container.appendChild(header);
+        const table = document.createElement('table');
+        table.className = 'vector-popup-table';
+        Object.entries(props).forEach(([key, value]) => {
+          const row = table.insertRow();
+          row.className = 'vector-popup-tr';
+          const label = row.insertCell();
+          label.className = 'vector-popup-key';
+          label.textContent = `${key}:`;
+          const cell = row.insertCell();
+          cell.className = 'vector-popup-value';
+          cell.textContent = value == null ? '' : String(value);
+        });
+        container.appendChild(table);
+        L.popup().setLatLng(e.latlng).setContent(container).openOn(map);
+
         L.DomEvent.stop(e); 
     });
 
@@ -124,7 +126,7 @@ const VectorTileLayer: React.FC<VectorTileLayerProps> = ({ url, styleConfigs, ac
     return () => {
       map.removeLayer(layer);
     };
-  }, [map, url, active, styleConfigs]); // Пересоздаем слой при изменении конфигов
+  }, [map, url, active, styleConfigs, zIndex]); // Пересоздаем слой при изменении конфигов
 
   return null;
 };

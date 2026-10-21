@@ -21,7 +21,7 @@ export const OrthoPanel: React.FC<OrthoPanelProps> = ({ onClose, map }) => {
 
   useEffect(() => {
     fetchOrthos();
-  }, []);
+  }, [fetchOrthos]);
 
   // Отслеживание перемещения карты для обновления границ
   useEffect(() => {

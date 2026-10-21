@@ -15,9 +15,13 @@ const PanoramaViewer: React.FC<PanoramaViewerProps> = ({ markerId, isExpanded, o
   const viewerInstanceRef = useRef<any>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const onDataLoadRef = useRef(onDataLoad);
+  useEffect(() => { onDataLoadRef.current = onDataLoad; }, [onDataLoad]);
+
   // --- Viewer Initialization ---
   useEffect(() => {
     let objectUrl: string | null = null;
+    const controller = new AbortController();
     let isMounted = true; 
 
     const initializeViewer = async () => {
@@ -26,6 +30,7 @@ const PanoramaViewer: React.FC<PanoramaViewerProps> = ({ markerId, isExpanded, o
 
       // Cleanup previous viewer instance immediately
       if (viewerInstanceRef.current) {
+         viewerInstanceRef.current.destroy();
          viewerInstanceRef.current = null;
          if (viewerRef.current) viewerRef.current.innerHTML = '';
       }
@@ -33,7 +38,7 @@ const PanoramaViewer: React.FC<PanoramaViewerProps> = ({ markerId, isExpanded, o
       try {
         // [FIX] Correct API path with /api prefix
         const infoUrl = `/api/pano_info/${markerId}`;
-        const infoResponse = await fetch(infoUrl);
+        const infoResponse = await fetch(infoUrl, { signal: controller.signal });
         
         const contentType = infoResponse.headers.get("content-type");
         if (contentType && contentType.includes("text/html")) {
@@ -45,11 +50,12 @@ const PanoramaViewer: React.FC<PanoramaViewerProps> = ({ markerId, isExpanded, o
         }
         
         const data = await infoResponse.json();
+        if (!isMounted) return;
         
         if (isMounted) {
           // Отправляем данные наверх в MapPage
-          if (onDataLoad) {
-            onDataLoad({
+          if (onDataLoadRef.current) {
+            onDataLoadRef.current({
               title: data.filename || `Panorama ${markerId}`,
               date: data.timestamp || data.upload_date || 'No date',
               alt: data.altitude ? data.altitude.toFixed(1) : '0'
@@ -59,7 +65,7 @@ const PanoramaViewer: React.FC<PanoramaViewerProps> = ({ markerId, isExpanded, o
 
         // [FIX] Correct API path for download
         const imageUrl = `/api/pano_info/${markerId}/download`;
-        const imageResponse = await fetch(imageUrl);
+        const imageResponse = await fetch(imageUrl, { signal: controller.signal });
         
         if (!imageResponse.ok) {
             throw new Error(`Failed to load image: ${imageResponse.status}`);
@@ -113,6 +119,7 @@ const PanoramaViewer: React.FC<PanoramaViewerProps> = ({ markerId, isExpanded, o
         }
 
       } catch (err: any) {
+        if (err.name === 'AbortError') return;
         console.error('Error initializing panorama:', err);
         if (isMounted) setError(err.message || 'Error loading panorama');
       }
@@ -122,10 +129,12 @@ const PanoramaViewer: React.FC<PanoramaViewerProps> = ({ markerId, isExpanded, o
 
     return () => {
       isMounted = false;
+      controller.abort();
       if (objectUrl) {
         URL.revokeObjectURL(objectUrl);
       }
       if (viewerInstanceRef.current) {
+         viewerInstanceRef.current.destroy();
          viewerInstanceRef.current = null;
       }
     };

@@ -1,18 +1,7 @@
 // src/utils/api.ts
 
-// [HARD FIX] Определение адреса API
-// Мы проверяем адрес в браузере. Если это localhost, значит мы в разработке
-// и должны стучаться на порт бэкенда (или фронтенда, если работает прокси).
-// В данном случае стучимся на текущий хост (5580), чтобы сработал setupProxy.js
-
-const isLocalhost = 
-  typeof window !== 'undefined' && 
-  (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
-
-// Если localhost -> 'http://localhost:5580', иначе -> ''
-const API_BASE = isLocalhost ? 'http://localhost:5580' : '';
-
-console.log('API Base URL configured as:', API_BASE || '(relative path)');
+// Same-origin API works behind a reverse proxy and on arbitrary local ports.
+export const API_BASE = process.env.REACT_APP_API_BASE || "";
 
 /* -------------------- Общие типы -------------------- */
 export interface ApiOk {
@@ -247,9 +236,9 @@ export async function fetchOrthophotos(): Promise<OrthoItem[]> {
   // Добавляем полный путь к картинке в режиме разработки
   return items.map(item => ({
     ...item,
-    url: (isLocalhost && item.url.startsWith('/')) ? `${API_BASE}${item.url}` : item.url,
+    url: (API_BASE && item.url.startsWith('/')) ? `${API_BASE}${item.url}` : item.url,
     // Подстановка API_BASE для превью
-    preview_url: (isLocalhost && item.preview_url && item.preview_url.startsWith('/')) 
+    preview_url: (API_BASE && item.preview_url && item.preview_url.startsWith('/'))
                  ? `${API_BASE}${item.preview_url}` 
                  : item.preview_url
   }));

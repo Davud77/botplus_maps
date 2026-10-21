@@ -13,28 +13,31 @@ import logging
 import json
 
 # Use centralized Database class
-from database import Database
-from storage import MinioStorage
-import config
+try:
+    from ..database import Database
+    from ..storage import MinioStorage
+    from .. import config
+except ImportError:
+    from database import Database
+    from storage import MinioStorage
+    import config
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-pano_blueprint = Blueprint("pano", __name__)
 
 class PanoController:
     def __init__(self):
         # Use centralized Database class (connects via pgbouncer)
         self.db = Database()
         self.storage = MinioStorage()
-        
+
         # Подтягиваем имя бакета из конфигурации (.env)
         self.pano_bucket = getattr(config, 'MINIO_BUCKET_NAME', 'panoramas')
-        
+
         # Гарантируем, что таблица photos_4326 и индексы существуют!
         self._ensure_table()
-        
+
         # Ensure bucket exists
         if self.storage.client:
             try:
@@ -46,9 +49,10 @@ class PanoController:
 
     def _ensure_table(self):
         """Создает таблицу photos_4326 и необходимые индексы, если их нет"""
-        try:
-            cursor = self.db.get_cursor()
-            
+        with self.db.cursor(write=True) as cursor:
+            # Serialize transitional startup DDL across Gunicorn workers.
+            cursor.execute("SELECT pg_advisory_xact_lock(%s)", (self.db.LEGACY_SCHEMA_LOCK,))
+
             # 1. Создаем таблицу (если нет)
             query_table = """
                 CREATE TABLE IF NOT EXISTS public.photos_4326 (
@@ -70,29 +74,24 @@ class PanoController:
 
             # 2. Идемпотентное создание пространственного индекса
             query_gist_index = """
-                CREATE INDEX IF NOT EXISTS idx_photos_4326_geom_gist 
+                CREATE INDEX IF NOT EXISTS idx_photos_4326_geom_gist
                 ON public.photos_4326 USING GIST (geom);
             """
             cursor.execute(query_gist_index)
 
             # 3. Опциональное создание обычного индекса по ID для быстрой сортировки
             query_id_index = """
-                CREATE INDEX IF NOT EXISTS idx_photos_4326_id 
+                CREATE INDEX IF NOT EXISTS idx_photos_4326_id
                 ON public.photos_4326 (id DESC);
             """
             cursor.execute(query_id_index)
 
-            self.db.commit()
             logger.info("Table photos_4326 and indexes are ready.")
-        except Exception as e:
-            logger.warning(f"Could not initialize photos_4326 or indexes: {e}")
-            if self.db.connection:
-                self.db.connection.rollback()
 
     @staticmethod
-    def register_routes(blueprint):
-        controller = PanoController()
-        
+    def register_routes(blueprint, controller=None):
+        controller = controller if controller is not None else PanoController()
+
         blueprint.add_url_rule("/panoramas", view_func=controller.get_panoramas, methods=["GET"])
         blueprint.add_url_rule("/upload", view_func=controller.upload_pano_files, methods=["POST", "OPTIONS"])
         blueprint.add_url_rule("/pano_info/<int:pano_id>", view_func=controller.get_pano_info, methods=["GET"])
@@ -114,16 +113,15 @@ class PanoController:
             zoom = request.args.get('zoom', type=int)
             limit = request.args.get('limit', type=int, default=50000)
 
-            cursor = self.db.get_cursor()
             grid_size = None
-            
+
             # Строгая логика зумов:
             if zoom is not None and zoom <= 17:
                 grids = {
                     # Зум 0-10: Очень сильная кластеризация (~2000 км -> ~11 км). 1 кластер на город/регион.
                     0: 20.0, 1: 10.0, 2: 5.0, 3: 2.5, 4: 1.5,
                     5: 1.0, 6: 0.8, 7: 0.6, 8: 0.4, 9: 0.2, 10: 0.1,
-                    
+
                     # Зум 11-17: Умеренная кластеризация (~5 км -> ~50 метров). Несколько на улицу.
                     11: 0.05, 12: 0.025, 13: 0.012, 14: 0.006,
                     15: 0.003, 16: 0.0015, 17: 0.0005
@@ -141,10 +139,10 @@ class PanoController:
                             'count', sub.count
                         )), '[]'::json)
                         FROM (
-                            SELECT 
-                                MIN(id) as id, 
-                                ROUND(AVG(ST_Y(geom))::numeric, 6) AS lat, 
-                                ROUND(AVG(ST_X(geom))::numeric, 6) AS lng, 
+                            SELECT
+                                MIN(id) as id,
+                                ROUND(AVG(ST_Y(geom))::numeric, 6) AS lat,
+                                ROUND(AVG(ST_X(geom))::numeric, 6) AS lng,
                                 COUNT(*) as count
                             FROM public.photos_4326
                             WHERE geom && ST_MakeEnvelope(%s, %s, %s, %s, 4326)
@@ -163,9 +161,9 @@ class PanoController:
                             'count', 1
                         )), '[]'::json)
                         FROM (
-                            SELECT 
-                                id, 
-                                ROUND(ST_Y(geom)::numeric, 6) as lat, 
+                            SELECT
+                                id,
+                                ROUND(ST_Y(geom)::numeric, 6) as lat,
                                 ROUND(ST_X(geom)::numeric, 6) as lng
                             FROM public.photos_4326
                             WHERE geom && ST_MakeEnvelope(%s, %s, %s, %s, 4326)
@@ -178,9 +176,9 @@ class PanoController:
                 # Дефолтный ответ без BBOX
                 query = """
                     SELECT COALESCE(json_agg(json_build_object(
-                        'id', id, 
-                        'lat', ROUND(ST_Y(geom)::numeric, 6), 
-                        'lng', ROUND(ST_X(geom)::numeric, 6), 
+                        'id', id,
+                        'lat', ROUND(ST_Y(geom)::numeric, 6),
+                        'lng', ROUND(ST_X(geom)::numeric, 6),
                         'count', 1
                     )), '[]'::json)
                     FROM (
@@ -189,11 +187,10 @@ class PanoController:
                 """
                 params = (limit,)
 
-            cursor.execute(query, params)
-            
-            # Получаем готовый JSON от базы! Никаких циклов Python.
-            result = cursor.fetchone()[0]
-            
+            with self.db.cursor(dict_rows=False) as cursor:
+                cursor.execute(query, params)
+                result = cursor.fetchone()[0]
+
             # Возвращаем напрямую
             if isinstance(result, str):
                 return Response(result, mimetype='application/json')
@@ -205,17 +202,15 @@ class PanoController:
         except Exception as e:
             logger.error(f"Error getting panoramas: {e}")
             traceback.print_exc()
-            if self.db.connection:
-                self.db.connection.rollback()
             return jsonify({"error": str(e)}), 500
 
     @cross_origin()
     def get_pano_info(self, pano_id):
         try:
-            cursor = self.db.get_cursor()
             query = 'SELECT id, latitude, longitude, altitude, direction, filename, directory, "timestamp" FROM public.photos_4326 WHERE id = %s'
-            cursor.execute(query, (pano_id,))
-            row = cursor.fetchone()
+            with self.db.cursor() as cursor:
+                cursor.execute(query, (pano_id,))
+                row = cursor.fetchone()
             if row:
                 data = row if isinstance(row, dict) else {"id": row[0], "latitude": row[1], "longitude": row[2], "altitude": row[3], "direction": row[4], "filename": row[5], "directory": row[6], "timestamp": row[7]}
                 return jsonify({
@@ -225,15 +220,14 @@ class PanoController:
                 })
             return jsonify({"error": "Not found"}), 404
         except Exception as e:
-            if self.db.connection: self.db.connection.rollback()
             return jsonify({"error": str(e)}), 500
 
     @cross_origin()
     def download_pano_file(self, pano_id):
         try:
-            cursor = self.db.get_cursor()
-            cursor.execute("SELECT filename FROM public.photos_4326 WHERE id = %s", (pano_id,))
-            res = cursor.fetchone()
+            with self.db.cursor() as cursor:
+                cursor.execute("SELECT filename FROM public.photos_4326 WHERE id = %s", (pano_id,))
+                res = cursor.fetchone()
             if not res: return jsonify({"error": "Not found"}), 404
             filename = res['filename'] if isinstance(res, dict) else res[0]
             mime_type, _ = mimetypes.guess_type(filename)
@@ -282,7 +276,7 @@ class PanoController:
                     if lat is None or lon is None: raise ValueError("В файле нет GPS-координат (EXIF)")
                     timestamp_str = dt.strftime("%Y%m%d_%H%M%S") if dt else "nodate"
                     new_filename = f"pano_{timestamp_str}_{original_name}"
-                    file_path = f"{self.pano_bucket}/{new_filename}" 
+                    file_path = f"{self.pano_bucket}/{new_filename}"
                     save_stream = io.BytesIO(file_content)
                     self.storage.save_file(save_stream, new_filename, content_type=mime_type)
                     self._insert_pano_db(new_filename, file_path, lat, lon, alt, direction, dt)
@@ -299,21 +293,20 @@ class PanoController:
     @cross_origin()
     def delete_pano(self, pano_id):
         try:
-            cursor = self.db.get_cursor()
-            cursor.execute("SELECT filename FROM public.photos_4326 WHERE id = %s", (pano_id,))
-            res = cursor.fetchone()
-            if res:
-                filename = res['filename'] if isinstance(res, dict) else res[0]
-                cursor.execute("DELETE FROM public.photos_4326 WHERE id = %s", (pano_id,))
-                self.db.commit()
-                orig = self.storage.bucket_name
+            with self.db.cursor(write=True) as cursor:
+                cursor.execute("DELETE FROM public.photos_4326 WHERE id = %s RETURNING filename", (pano_id,))
+                res = cursor.fetchone()
+            if not res:
+                return jsonify({"error": "Not found"}), 404
+            # Object storage I/O happens only after the DB transaction is released.
+            original_bucket = self.storage.bucket_name
+            try:
                 self.storage.bucket_name = self.pano_bucket
-                self.storage.delete_file(filename)
-                self.storage.bucket_name = orig
-                return jsonify({"status": "deleted"})
-            return jsonify({"error": "Not found"}), 404
+                self.storage.delete_file(res["filename"])
+            finally:
+                self.storage.bucket_name = original_bucket
+            return jsonify({"status": "deleted"})
         except Exception as e:
-            if self.db.connection: self.db.connection.rollback()
             return jsonify({"error": str(e)}), 500
 
     @cross_origin()
@@ -321,11 +314,10 @@ class PanoController:
         return jsonify({"status": "error", "message": "Update not implemented"}), 501
 
     def _insert_pano_db(self, filename, path, lat, lon, alt, direction, timestamp):
-        cursor = self.db.get_cursor()
         query = 'INSERT INTO public.photos_4326 (geom, path, filename, directory, altitude, direction, rotation, longitude, latitude, "timestamp", "order") VALUES (ST_SetSRID(ST_MakePoint(%s, %s, %s), 4326), %s, %s, %s, %s, %s, 0, %s, %s, %s, 0)'
         values = (float(lon), float(lat), float(alt or 0), path, filename, self.pano_bucket, float(alt or 0), float(direction or 0), str(lon), str(lat), timestamp or datetime.now())
-        cursor.execute(query, values)
-        self.db.commit()
+        with self.db.cursor(write=True) as cursor:
+            cursor.execute(query, values)
 
     def _parse_exif_data(self, stream):
         try:
@@ -379,4 +371,7 @@ class PanoController:
         try: return float(value[0][0])/float(value[0][1]) + (float(value[1][0])/float(value[1][1]) / 60.0) + (float(value[2][0])/float(value[2][1]) / 3600.0)
         except: return 0.0
 
-PanoController.register_routes(pano_blueprint)
+def create_pano_blueprint(controller=None):
+    blueprint = Blueprint("pano", __name__)
+    PanoController.register_routes(blueprint, controller)
+    return blueprint

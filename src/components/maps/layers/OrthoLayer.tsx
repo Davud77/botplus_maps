@@ -36,6 +36,10 @@ export const OrthoTileLayer = () => {
             maxZoom={24}
             maxNativeZoom={21}
             opacity={1}
+            bounds={ortho.wgs84_bounds ? [
+              [ortho.wgs84_bounds.south, ortho.wgs84_bounds.west],
+              [ortho.wgs84_bounds.north, ortho.wgs84_bounds.east],
+            ] : undefined}
             // [FIX] Удалено свойство transparent, так как оно вызывает ошибку TS 
             // и не требуется для обычных тайловых слоев (XYZ) с PNG.
           />

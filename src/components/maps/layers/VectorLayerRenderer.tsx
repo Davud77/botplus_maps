@@ -16,7 +16,7 @@ export const VectorLayerRenderer = () => {
   const { activeVectorIds } = useVectorStore();
   
   // [ИЗМЕНЕНО] Хранилище КОНФИГУРАЦИЙ стилей: 
-  // { [tableName]: { type: 'single' | 'categorized', style?: ..., rules?: ... } }
+  // { [layerId]: { type: 'single' | 'categorized', style?: ..., rules?: ... } }
   const [styleConfigs, setStyleConfigs] = useState<Record<string, any>>({});
   
   // Используем Ref для отслеживания текущих запросов
@@ -36,7 +36,7 @@ export const VectorLayerRenderer = () => {
       const tableName = parts.slice(2).join('-'); 
 
       // Если конфиг уже есть или грузится — выходим
-      if (styleConfigs[tableName] || fetchingRef.current.has(layerId)) return;
+      if (styleConfigs[layerId] || fetchingRef.current.has(layerId)) return;
 
       fetchingRef.current.add(layerId);
 
@@ -49,7 +49,7 @@ export const VectorLayerRenderer = () => {
           // [ИЗМЕНЕНО] Сохраняем конфигурацию целиком, как прислал бэкенд
           setStyleConfigs((prev) => ({
             ...prev,
-            [tableName]: configData
+            [layerId]: configData
           }));
         } else {
           // [ИЗМЕНЕНО] Если стиля нет (404), генерируем дефолтный конфиг "single"
@@ -58,7 +58,7 @@ export const VectorLayerRenderer = () => {
           
           setStyleConfigs((prev) => ({
             ...prev,
-            [tableName]: {
+            [layerId]: {
               type: 'single', // Важно указать тип
               style: {
                 color,
@@ -77,7 +77,7 @@ export const VectorLayerRenderer = () => {
         fetchingRef.current.delete(layerId);
       }
     });
-  }, [activeVectorIds]); // Зависимость только от списка ID
+  }, [activeVectorIds, styleConfigs]);
 
   // 2. ГРУППИРОВКА СЛОЕВ ДЛЯ КОМБИНИРОВАННЫХ ТАЙЛОВ
   const groupedLayers = useMemo(() => {
@@ -101,49 +101,28 @@ export const VectorLayerRenderer = () => {
       groups[groupKey].push(tableName);
     });
 
+    Object.values(groups).forEach((tables) => tables.sort());
     return groups;
   }, [activeVectorIds]);
 
-  if (!activeVectorIds || activeVectorIds.size === 0) {
-    return null;
-  }
+  const renderGroups = useMemo(() => Object.entries(groupedLayers).map(([groupKey, tableNames]) => {
+    const [dbName, schema] = groupKey.split('/');
+    const layersParam = tableNames.join(',');
+    const configs: Record<string, any> = {};
+    tableNames.forEach((tableName) => {
+      configs[tableName] = styleConfigs[`${dbName}-${schema}-${tableName}`] || {
+        type: 'single', style: { weight: 1, color: '#888888', opacity: 0.5, fill: false },
+      };
+    });
+    return { key: `${groupKey}-${layersParam}`, configs,
+      url: `/api/vector/tiles/combined/${encodeURIComponent(dbName)}/{z}/{x}/{y}.pbf?layers=${encodeURIComponent(layersParam)}&schema=${encodeURIComponent(schema)}` };
+  }), [groupedLayers, styleConfigs]);
 
   return (
     <>
-      {Object.entries(groupedLayers).map(([groupKey, tableNames]) => {
-        const [dbName, schema] = groupKey.split('/');
-        
-        if (!tableNames.length) return null;
-
-        const layersParam = tableNames.join(',');
-        // URL для MVT тайлов
-        const tileUrl = `/api/vector/tiles/combined/${dbName}/{z}/{x}/{y}.pbf?layers=${layersParam}&schema=${schema}`;
-
-        // Сборка объекта конфигов для текущей группы
-        const currentGroupConfigs: Record<string, any> = {};
-        
-        tableNames.forEach((tableName) => {
-          // Если конфиг еще не загрузился, ставим временную "заглушку"
-          currentGroupConfigs[tableName] = styleConfigs[tableName] || {
-            type: 'single',
-            style: {
-              weight: 1,
-              color: '#888888',
-              opacity: 0.5,
-              fill: false
-            }
-          };
-        });
-
-        return (
-          <VectorTileLayer
-            key={`${groupKey}-${layersParam}`} 
-            url={tileUrl}
-            styleConfigs={currentGroupConfigs} // [ИЗМЕНЕНО] Передаем как styleConfigs
-            active={true}
-          />
-        );
-      })}
+      {renderGroups.map((group) => (
+        <VectorTileLayer key={group.key} url={group.url} styleConfigs={group.configs} active={true} />
+      ))}
     </>
   );
 };

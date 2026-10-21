@@ -1,5 +1,5 @@
 import React, { useState, FormEvent } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 
 const LoginPage: React.FC = () => {
@@ -48,6 +48,7 @@ const LoginPage: React.FC = () => {
               placeholder="Имя пользователя"
               id="login-name"
               name="username"
+              aria-label="Имя пользователя"
               autoComplete="username"
               required
               disabled={pending}
@@ -64,6 +65,7 @@ const LoginPage: React.FC = () => {
               placeholder="Пароль"
               id="login-pass"
               name="password"
+              aria-label="Пароль"
               autoComplete="current-password"
               required
               disabled={pending}
@@ -76,15 +78,7 @@ const LoginPage: React.FC = () => {
           <button type="submit" className="buttonlogin btn-primary btn-large btn-block" disabled={pending}>
             {pending ? 'Входим…' : 'Войти'}
           </button>
-          <a className="login-link" href="https://t.me/localdisk_d" target="_blank" rel="noreferrer">
-            Забыли пароль?
-          </a>
-          <p className="register-prompt">
-            Нет аккаунта?{' '}
-            <Link to="/register" className="register-link">
-              Регистрация
-            </Link>
-          </p>
+          <p className="register-prompt">Доступ и восстановление аккаунта — у администратора вашей установки.</p>
         </form>
       </div>
     </div>

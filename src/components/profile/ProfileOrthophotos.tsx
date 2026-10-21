@@ -1,5 +1,5 @@
 // src/components/profile/ProfileOrthophotos.tsx
-import React, { FC, useEffect, useState, useRef } from 'react';
+import React, { FC, useEffect, useState, useRef, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { 
   fetchOrthophotos, 
@@ -9,8 +9,7 @@ import {
   updateOrtho, 
   getTaskStatus,
   generateOrthoPreview,
-  OrthoItem,
-  TaskStartResponse
+  OrthoItem
 } from '../../utils/api';
 
 const NO_IMAGE_PLACEHOLDER = `data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='60' viewBox='0 0 100 60'%3E%3Crect width='100' height='60' fill='%23eeeeee'/%3E%3Ctext x='50' y='35' font-family='sans-serif' font-size='10' text-anchor='middle' fill='%23999999'%3ENo Preview%3C/text%3E%3C/svg%3E`;
@@ -44,14 +43,14 @@ const ProfileOrthophotos: FC = () => {
   const [showLogs, setShowLogs] = useState(true);
   const logsEndRef = useRef<HTMLDivElement>(null);
 
-  const addLog = (message: string, type: 'info' | 'success' | 'error' = 'info') => {
+  const addLog = useCallback((message: string, type: 'info' | 'success' | 'error' = 'info') => {
     setLogs(prev => [...prev, {
       id: Date.now() + Math.random(),
       time: new Date().toLocaleTimeString('ru-RU'),
       message,
       type
     }]);
-  };
+  }, []);
 
   useEffect(() => {
     if (showLogs && logsEndRef.current) {
@@ -78,7 +77,7 @@ const ProfileOrthophotos: FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const loadOrthos = async () => {
+  const loadOrthos = useCallback(async () => {
     setLoadingOrthos(true);
     setErrorOrthos('');
     setSelectedIds([]); 
@@ -112,11 +111,11 @@ const ProfileOrthophotos: FC = () => {
     } finally {
       setLoadingOrthos(false);
     }
-  };
+  }, [addLog]);
 
   useEffect(() => {
     loadOrthos();
-  }, []);
+  }, [loadOrthos]);
 
   const handleSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.checked) {

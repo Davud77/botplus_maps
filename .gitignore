@@ -30,3 +30,6 @@ public/assets/
 # App data
 uploads/
 data/
+
+# Local secrets
+.env.local

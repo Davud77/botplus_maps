@@ -2,42 +2,38 @@
 from flask import Blueprint, request, jsonify, make_response
 import psycopg2
 from psycopg2 import sql
-from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
-import os
 import math
 import xml.etree.ElementTree as ET
-import config  # [NEW] Импортируем конфигурацию для доступа к .env
+try:
+    from .. import config
+    from ..database import Database
+except ImportError:
+    import config
+    from database import Database
 
 vector_bp = Blueprint('vector', __name__)
 
 # --- ПОДКЛЮЧЕНИЕ К БД (ЧЕРЕЗ PGBOUNCER) ---
-def get_db_connection(dbname=None):
-    host = os.environ.get('DB_HOST', 'pgbouncer')
-    port = os.environ.get('DB_PORT', '6432')
-    user = os.environ.get('DB_USER', 'botplus_user')
-    password = os.environ.get('DB_PASSWORD', 'botplus_password')
-    
-    target_db = dbname if dbname else 'postgres'
+database = Database()
 
+
+def get_db_connection(dbname=None, *, autocommit=False):
+    conn = None
     try:
-        conn = psycopg2.connect(
-            host=host,
-            port=port,
-            user=user,
-            password=password,
-            dbname=target_db
-        )
+        conn = database.connect(dbname or 'postgres', dict_rows=False, autocommit=autocommit)
+        if not autocommit:
+            with conn.cursor() as cursor:
+                database.configure_transaction(cursor)
         return conn
-    except Exception as e:
-        print(f"!!! DB Connection Error to {target_db}: {e}")
+    except Exception:
+        Database.release(conn)
+        # Do not log a DSN or driver exception containing deployment credentials.
+        print("PostgreSQL connection failed for vector API")
         return None
 
+
 def release_db_connection(conn, dbname=None):
-    try:
-        if conn:
-            conn.close()
-    except:
-        pass
+    Database.release(conn)
 
 # --- Вспомогательная функция: Расчет границ тайла (Web Mercator) ---
 def tile_bounds(z, x, y):
@@ -56,15 +52,16 @@ def list_databases():
     try:
         conn = get_db_connection('postgres')
         if not conn: return jsonify({'error': 'Connection failed'}), 500
-            
+
         cur = conn.cursor()
         cur.execute("SELECT datname FROM pg_database WHERE datistemplate = false AND datname != 'postgres';")
         dbs = cur.fetchall()
-        
+
         # [UPDATED] Берем хост и порт из конфигурации (.env) вместо жестко заданных значений
-        host = getattr(config, "DB_HOST", "pgbouncer")
-        port = int(getattr(config, "DB_PORT", "6432"))
-        
+        connection_settings = conn.get_dsn_parameters()
+        host = connection_settings.get("host", "")
+        port = int(connection_settings.get("port") or 5432)
+
         results = [{'id': n, 'name': n, 'host': host, 'port': port, 'status': 'connected', 'type': 'internal'} for (n,) in dbs]
         cur.close()
         return jsonify(results)
@@ -84,20 +81,18 @@ def create_database():
     conn = None
     conn_new = None
     try:
-        conn = get_db_connection('postgres')
+        conn = get_db_connection('postgres', autocommit=True)
         if not conn: return jsonify({'error': 'Connection failed'}), 500
-        
-        conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
+
         cur = conn.cursor()
         cur.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(new_db_name)))
         cur.close()
         release_db_connection(conn, 'postgres')
-        conn = None 
-        
-        conn_new = get_db_connection(new_db_name)
+        conn = None
+
+        conn_new = get_db_connection(new_db_name, autocommit=True)
         if not conn_new: return jsonify({'error': 'Connection to new DB failed'}), 500
-        
-        conn_new.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
+
         cur_new = conn_new.cursor()
         cur_new.execute("CREATE EXTENSION IF NOT EXISTS postgis;")
         cur_new.close()
@@ -115,31 +110,26 @@ def list_layers(db_name):
     try:
         conn = get_db_connection(db_name)
         if not conn: return jsonify({'error': 'Connection failed'}), 500
-        
+
         cur = conn.cursor()
         try:
             cur.execute("""
-                SELECT f_table_schema, f_table_name, type, srid 
+                SELECT f_table_schema, f_table_name, type, srid
                 FROM geometry_columns;
             """)
             rows = cur.fetchall()
         except:
             conn.rollback()
-            return jsonify([]) 
-        
+            return jsonify([])
+
         layers = []
         for row in rows:
             schema, table, geom_type, srid = row
-            count = 0
-            try:
-                full_table_name = f'{schema}.{table}'
-                cur.execute("SELECT reltuples::bigint FROM pg_class WHERE oid = %s::regclass", (full_table_name,))
-                count_res = cur.fetchone()
-                count = count_res[0] if count_res else 0
-            except Exception as e:
-                conn.rollback()
-                count = 0
-            
+            full_table_name = sql.Identifier(schema, table).as_string(conn)
+            cur.execute("SELECT reltuples::bigint FROM pg_class WHERE oid = to_regclass(%s)", (full_table_name,))
+            count_res = cur.fetchone()
+            count = count_res[0] if count_res else 0
+
             layers.append({
                 'id': f"{schema}.{table}",
                 'schema': schema,
@@ -170,17 +160,17 @@ def create_layer():
     try:
         conn = get_db_connection(db_name)
         if not conn: return jsonify({'error': 'Connection failed'}), 500
-        
-        conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
+
         cur = conn.cursor()
-        
+
         cur.execute(sql.SQL("CREATE TABLE {}.{} (id SERIAL PRIMARY KEY, properties JSONB);").format(
             sql.Identifier(schema), sql.Identifier(table_name)
         ))
         cur.execute("SELECT AddGeometryColumn(%s, %s, 'geom', 4326, %s, 2);", (schema, table_name, geom_type.upper()))
         cur.execute(sql.SQL("CREATE INDEX ON {}.{} USING GIST (geom);").format(sql.Identifier(schema), sql.Identifier(table_name)))
-        
+
         cur.close()
+        conn.commit()
         return jsonify({'status': 'ok'})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -201,17 +191,17 @@ def get_layer_data(db_name, table_name):
     try:
         conn = get_db_connection(db_name)
         if not conn: return jsonify({'error': 'Connection failed'}), 500
-        
+
         cur = conn.cursor()
-        
+
         cur.execute("SELECT f_geometry_column, srid FROM geometry_columns WHERE f_table_schema=%s AND f_table_name=%s", (schema, table_name))
         res = cur.fetchone()
-        
+
         if res:
             geom_col, srid = res
         else:
-            geom_col, srid = 'geom', 4326 
-        
+            geom_col, srid = 'geom', 4326
+
         if srid == 4326:
             bbox_filter = "t.{} && ST_MakeEnvelope(%s, %s, %s, %s, 4326)"
         else:
@@ -222,19 +212,19 @@ def get_layer_data(db_name, table_name):
                 'type', 'Feature',
                 'geometry', ST_AsGeoJSON(
                     ST_SimplifyPreserveTopology(
-                        ST_Force2D(ST_MakeValid(t.{geom})), 
+                        ST_Force2D(ST_MakeValid(t.{geom})),
                         0.00001
                     )
                 )::json,
                 'properties', to_jsonb(t) - '{geom}'
             ) FROM {schema}.{table} AS t
         """
-        
+
         params = []
         if all([min_lng, min_lat, max_lng, max_lat]):
             query_str += " WHERE " + bbox_filter.format(geom_col)
             params = [min_lng, min_lat, max_lng, max_lat]
-        
+
         query_str += " LIMIT %s"
         params.append(limit)
 
@@ -243,10 +233,10 @@ def get_layer_data(db_name, table_name):
             schema=sql.Identifier(schema),
             table=sql.Identifier(table_name)
         )
-        
+
         cur.execute(formatted_sql, params)
         features = [row[0] for row in cur.fetchall()]
-        
+
         cur.close()
         return jsonify({"type": "FeatureCollection", "features": features})
     except Exception as e:
@@ -262,7 +252,7 @@ def get_vector_tile(db_name, schema, table_name, z, x, y):
     try:
         conn = get_db_connection(db_name)
         if not conn: return jsonify({'error': 'Connection failed'}), 500
-        
+
         cur = conn.cursor()
 
         cur.execute(
@@ -270,12 +260,12 @@ def get_vector_tile(db_name, schema, table_name, z, x, y):
             (schema, table_name)
         )
         res = cur.fetchone()
-        
+
         if not res:
             cur.execute("""
-                SELECT column_name 
-                FROM information_schema.columns 
-                WHERE table_schema = %s AND table_name = %s 
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = %s AND table_name = %s
                 AND udt_name = 'geometry'
             """, (schema, table_name))
             res_col = cur.fetchone()
@@ -288,11 +278,11 @@ def get_vector_tile(db_name, schema, table_name, z, x, y):
             if not srid or srid == 0: srid = 4326
 
         cur.execute("""
-            SELECT column_name 
-            FROM information_schema.columns 
+            SELECT column_name
+            FROM information_schema.columns
             WHERE table_schema = %s AND table_name = %s AND column_name != %s
         """, (schema, table_name, geom_col))
-        
+
         attr_columns = [row[0] for row in cur.fetchall()]
         attrs_select = sql.SQL(", {}").format(sql.SQL(', ').join(map(sql.Identifier, attr_columns))) if attr_columns else sql.SQL("")
 
@@ -303,14 +293,14 @@ def get_vector_tile(db_name, schema, table_name, z, x, y):
                 SELECT ST_MakeEnvelope(%s, %s, %s, %s, 3857) AS geom
             ),
             mvtgeom AS (
-                SELECT 
+                SELECT
                     ST_AsMVTGeom(
-                        ST_Transform(ST_Force2D(t.{geom_col}), 3857), 
+                        ST_Transform(ST_Force2D(t.{geom_col}), 3857),
                         bounds.geom
                     ) AS geom
                     {attrs}
                 FROM {schema}.{table} t, bounds
-                WHERE 
+                WHERE
                     t.{geom_col} && ST_Transform(bounds.geom, %s)
             )
             SELECT ST_AsMVT(mvtgeom.*, %s) FROM mvtgeom
@@ -344,7 +334,7 @@ def get_vector_tile(db_name, schema, table_name, z, x, y):
 def get_combined_tiles(db_name, z, x, y):
     layers_param = request.args.get('layers', '')
     schema = request.args.get('schema', 'public')
-    
+
     table_names = [t.strip() for t in layers_param.split(',') if t.strip()]
     if not table_names:
         return b'', 204
@@ -353,70 +343,70 @@ def get_combined_tiles(db_name, z, x, y):
     try:
         conn = get_db_connection(db_name)
         if not conn: return jsonify({'error': 'Connection failed'}), 500
-        
+
         cur = conn.cursor()
-        
+
         cur.execute("""
-            SELECT f_table_name, f_geometry_column, srid 
-            FROM geometry_columns 
+            SELECT f_table_name, f_geometry_column, srid
+            FROM geometry_columns
             WHERE f_table_schema = %s AND f_table_name = ANY(%s)
         """, (schema, table_names))
-        
+
         meta_rows = cur.fetchall()
         meta_dict = {
-            row[0]: {'col': row[1], 'srid': row[2] if row[2] > 0 else 4326} 
+            row[0]: {'col': row[1], 'srid': row[2] if row[2] > 0 else 4326}
             for row in meta_rows
         }
 
         cur.execute("""
-            SELECT table_name, column_name 
-            FROM information_schema.columns 
+            SELECT table_name, column_name
+            FROM information_schema.columns
             WHERE table_schema = %s AND table_name = ANY(%s)
         """, (schema, table_names))
-        
+
         attr_rows = cur.fetchall()
         attr_dict = {}
         for t_name, c_name in attr_rows:
             if t_name not in attr_dict:
                 attr_dict[t_name] = []
             attr_dict[t_name].append(c_name)
-        
+
         min_x, min_y, max_x, max_y = tile_bounds(z, x, y)
-        
+
         subqueries = []
         params = []
-        
+
         for tbl in table_names:
             if tbl not in meta_dict:
                 continue
-                
+
             geom_col = meta_dict[tbl]['col']
             srid = meta_dict[tbl]['srid']
-            
+
             all_cols = attr_dict.get(tbl, [])
             valid_cols = [c for c in all_cols if c != geom_col]
-            
+
             if valid_cols:
                 cols_select = sql.SQL(', ') + sql.SQL(', ').join(map(sql.Identifier, valid_cols))
             else:
                 cols_select = sql.SQL('')
-            
+
             sq = sql.SQL("""
                 COALESCE(
                     (
-                        SELECT ST_AsMVT(mvtgeom.*, {layer_name_literal}) 
+                        SELECT ST_AsMVT(mvtgeom.*, {layer_name_literal})
                         FROM (
-                            SELECT 
+                            SELECT
                                 ST_AsMVTGeom(
-                                    ST_Transform(ST_Force2D(t.{geom_col_id}), 3857), 
+                                    ST_Transform(ST_Force2D(t.{geom_col_id}), 3857),
                                     ST_MakeEnvelope(%s, %s, %s, %s, 3857)
                                 ) AS geom
                                 {cols_select}
                             FROM {schema_id}.{table_id} t
-                            WHERE 
+                            WHERE
                                 t.{geom_col_id} && ST_Transform(ST_MakeEnvelope(%s, %s, %s, %s, 3857), {srid_literal})
                         ) as mvtgeom
-                    ), 
+                    ),
                     ''::bytea
                 )
             """).format(
@@ -427,7 +417,7 @@ def get_combined_tiles(db_name, z, x, y):
                 srid_literal=sql.Literal(srid),
                 cols_select=cols_select
             )
-            
+
             subqueries.append(sq)
             params.extend([min_x, min_y, max_x, max_y, min_x, min_y, max_x, max_y])
 
@@ -435,10 +425,10 @@ def get_combined_tiles(db_name, z, x, y):
             return b'', 204
 
         final_query = sql.SQL("SELECT ") + sql.SQL(" || ").join(subqueries) + sql.SQL(" AS full_mvt")
-        
+
         cur.execute(final_query, params)
         row = cur.fetchone()
-        
+
         full_mvt = row[0] if row else None
         cur.close()
 
@@ -448,7 +438,7 @@ def get_combined_tiles(db_name, z, x, y):
         response = make_response(bytes(full_mvt))
         response.headers['Content-Type'] = 'application/vnd.mapbox-vector-tile'
         response.headers['Cache-Control'] = 'public, max-age=86400'
-        
+
         return response
 
     except Exception as e:
@@ -464,31 +454,31 @@ def get_layer_style(db_name, schema, table_name):
     try:
         conn = get_db_connection(db_name)
         if not conn: return jsonify({'error': 'Connection failed'}), 500
-        
+
         cur = conn.cursor()
-        
+
         # Получаем QML XML из БД
         cur.execute("""
-            SELECT styleqml FROM public.layer_styles 
+            SELECT styleqml FROM public.layer_styles
             WHERE LOWER(f_table_schema) = LOWER(%s) AND LOWER(f_table_name) = LOWER(%s)
             ORDER BY update_time DESC LIMIT 1
         """, (schema, table_name))
-        
+
         row = cur.fetchone()
-        
+
         # Вспомогательный парсер одного символа
         def extract_symbol_style(symbol_elem):
             if symbol_elem is None: return {'color': '#3388ff'}
-            
+
             props = {prop.get('k'): prop.get('v') for prop in symbol_elem.findall(".//prop")}
-            
+
             style = {
                 'weight': 1,
                 'fillOpacity': 0.4,
                 'fill': True,
                 'color': '#3388ff' # fallback
             }
-            
+
             # Цвет
             raw_color = props.get('color') or props.get('outline_color') or props.get('line_color')
             if raw_color:
@@ -499,13 +489,13 @@ def get_layer_style(db_name, schema, table_name):
                     style['fillColor'] = hex_color
                     if len(c) == 4:
                         style['fillOpacity'] = round(int(c[3]) / 255, 2)
-            
+
             # Толщина
             width = props.get('outline_width') or props.get('line_width') or props.get('width')
             if width:
                 try: style['weight'] = float(width)
                 except: pass
-                
+
             return style
 
         # Если стиля нет в БД — возвращаем дефолт
@@ -514,7 +504,7 @@ def get_layer_style(db_name, schema, table_name):
                 'type': 'single',
                 'style': {'color': '#3388ff', 'weight': 1, 'fillOpacity': 0.4}
             })
-            
+
         qml_content = str(row[0])
         root = ET.fromstring(qml_content)
         renderer = root.find("renderer-v2")
@@ -528,13 +518,13 @@ def get_layer_style(db_name, schema, table_name):
         if renderer_type == "categorizedSymbol":
             attr = renderer.get("attr") # Поле классификации
             categories = []
-            
+
             # Парсим каждую категорию
             for cat in renderer.findall("categories/category"):
                 value = cat.get("value")
                 # label = cat.get("label") # Можно добавить в будущем для легенды
                 symbol_name = cat.get("symbol")
-                
+
                 # Ищем определение символа по имени
                 symbol_node = renderer.find(f"symbols/symbol[@name='{symbol_name}']")
                 if symbol_node:
@@ -543,7 +533,7 @@ def get_layer_style(db_name, schema, table_name):
                         'value': value,
                         'style': style_obj
                     })
-            
+
             return jsonify({
                 'type': 'categorized',
                 'field': attr,
