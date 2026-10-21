@@ -12,3 +12,6 @@ server/uploads
 *.log
 .DS_Store
 pgbouncer_data
+
+# Local secrets
+.env.local

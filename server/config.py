@@ -43,10 +43,7 @@ SESSION_COOKIE_DOMAIN = os.getenv("SESSION_COOKIE_DOMAIN") or None
 SESSION_COOKIE_HTTPONLY = True
 
 # =======================================================
-# 3. АДМИНИСТРАТОР
-# =======================================================
-DEFAULT_ADMIN_USERNAME = os.getenv("DEFAULT_ADMIN_USERNAME", "admin")
-DEFAULT_ADMIN_PASSWORD = os.getenv("DEFAULT_ADMIN_PASSWORD", "change_me_please")
+# Первый администратор создаётся мастером /setup; стандартных аккаунтов нет.
 
 # =======================================================
 # 4. ФАЙЛОВАЯ СИСТЕМА И ПУТИ

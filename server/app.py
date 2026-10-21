@@ -6,13 +6,10 @@ from pathlib import Path
 import os
 import re
 import config
-import time
-import random
-from werkzeug.security import generate_password_hash
 
 # Required routes fail at startup instead of disappearing behind a healthy response.
-from repositories import user_repository
 from controllers.auth_controller import auth_blueprint
+from controllers.setup_controller import setup_blueprint
 from controllers.pano_controller import create_pano_blueprint
 from controllers.ortho_controller import create_ortho_blueprint
 from controllers.vector import vector_bp
@@ -44,42 +41,6 @@ def origin_allowed(origin: str | None) -> bool:
             if origin == o:
                 return True
     return False
-
-def ensure_default_admin():
-    """
-    Checks if the default admin user exists in the database.
-    If not, creates it using credentials from config/env.
-    """
-    # Small random delay based on PID to desynchronize workers
-    time.sleep((os.getpid() % 10) * 0.2 + random.uniform(0.1, 0.5))
-
-    # Читаем креды администратора из .env (с фоллбэком)
-    username = os.getenv("DEFAULT_ADMIN_USERNAME", getattr(config, "DEFAULT_ADMIN_USERNAME", "admin"))
-    password = os.getenv("DEFAULT_ADMIN_PASSWORD", getattr(config, "DEFAULT_ADMIN_PASSWORD", "change_me_please"))
-
-    print(f"[Worker {os.getpid()}] Startup: Checking for default admin user '{username}'...")
-
-    try:
-        existing_user = user_repository.get_user_by_username(username)
-
-        if existing_user:
-            print(f"[Worker {os.getpid()}] Startup: User '{username}' already exists. Skipping creation.")
-        else:
-            print(f"[Worker {os.getpid()}] Startup: User '{username}' not found. Creating...")
-            pw_hash = generate_password_hash(password)
-            new_id = user_repository.create_user(username, pw_hash)
-
-            if new_id:
-                print(f"[Worker {os.getpid()}] Startup: User '{username}' successfully created (ID: {new_id}).")
-            else:
-                check_again = user_repository.get_user_by_username(username)
-                if check_again:
-                     print(f"[Worker {os.getpid()}] Startup: User '{username}' was created by another worker.")
-                else:
-                     print(f"[Worker {os.getpid()}] Startup: Failed to create user '{username}'. Check DB connection.")
-
-    except Exception as e:
-        print(f"[Worker {os.getpid()}] Startup Warning: Could not verify/create admin. Error: {e}")
 
 def create_app():
     app = Flask(__name__, static_folder=None)
@@ -153,6 +114,7 @@ def create_app():
 
     # ---------------- API REGISTRATION (Routing) ----------------
     app.register_blueprint(auth_blueprint, url_prefix="/api/auth")
+    app.register_blueprint(setup_blueprint, url_prefix="/api/setup")
     app.register_blueprint(vector_bp, url_prefix="/api")
     app.register_blueprint(create_pano_blueprint(), url_prefix="/api")
     app.register_blueprint(create_ortho_blueprint(), url_prefix="/api")
@@ -214,11 +176,6 @@ def create_app():
                 "looked_in": [str(BUILD_DIR / "index.html"), str(PUBLIC_DIR / "index.html")],
             }, 500
         return send_from_directory(index_file.parent, index_file.name, conditional=True)
-
-    # --- INITIALIZATION CHECKS ---
-    with app.app_context():
-        # Only run admin ensure if not in a pure static context (optional, but safe)
-        ensure_default_admin()
 
     return app
 

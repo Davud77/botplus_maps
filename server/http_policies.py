@@ -3,7 +3,8 @@ from flask import g, jsonify, request
 
 
 def register_http_policies(app, decode_token, origin_allowed):
-    public_endpoints = {"/api/health", "/api/auth/login", "/api/auth/logout", "/api/auth/me"}
+    public_endpoints = {"/api/health", "/api/auth/login", "/api/auth/logout", "/api/auth/me",
+                        "/api/setup/status", "/api/setup/initialize"}
 
     @app.before_request
     def protect_api():

@@ -54,8 +54,10 @@ def login():
 
     try:
         data = request.get_json(silent=True) or {}
-        username = (data.get("username") or "").strip()
-        password = (data.get("password") or "").strip()
+        if not isinstance(data, dict) or not isinstance(data.get("username"), str) or not isinstance(data.get("password"), str):
+            return jsonify(status="error", message="Please provide username and password"), 400
+        username = data["username"].strip()
+        password = data["password"]
 
         if not username or not password:
             return jsonify({"status": "error", "message": "Please provide username and password"}), 400
@@ -71,8 +73,8 @@ def login():
         )
         resp = make_response(jsonify({"status": "ok"}), 200)
         return _set_token_cookie(resp, token)
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
+    except Exception:
+        return jsonify({"status": "error", "message": "Authentication service unavailable"}), 503
 
 
 @auth_blueprint.route("/logout", methods=["POST", "OPTIONS"])

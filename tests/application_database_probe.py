@@ -35,6 +35,10 @@ with TemporaryDirectory() as directory:
         app.config["TESTING"] = True
         client = app.test_client()
         assert client.get("/api/orthophotos").status_code == 401
+        setup = client.get("/api/setup/status")
+        if setup.get_json()["setup_required"]:
+            created = client.post("/api/setup/initialize", json={"username": "scope_probe_admin", "password": "isolated-probe-only"})
+            assert created.status_code == 201, created.get_data(as_text=True)
         login = client.post("/api/auth/login", json={"username": "scope_probe_admin", "password": "isolated-probe-only"})
         assert login.status_code == 200, login.get_data(as_text=True)
         for path in ["/api/auth/me", "/api/orthophotos", "/api/panoramas", "/api/vector/databases"]:

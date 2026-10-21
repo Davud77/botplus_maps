@@ -5,7 +5,7 @@ try:
     from .database import Database
 except ImportError:
     from database import Database
-from werkzeug.security import generate_password_hash
+
 
 def init_auth_db():
     print("Connecting to PostgreSQL to initialize all tables...")
@@ -14,6 +14,8 @@ def init_auth_db():
 
     try:
         with Database(dsn).cursor(write=True, dict_rows=False) as cur:
+
+            cur.execute("SELECT pg_advisory_xact_lock(941027001)")
 
             # 1. Создаем таблицу пользователей
             print("Creating table 'users'...")
@@ -25,6 +27,14 @@ def init_auth_db():
                     created_at TIMESTAMP DEFAULT NOW()
                 );
             """)
+
+            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS role VARCHAR(20) NOT NULL DEFAULT 'user'")
+
+            cur.execute("""CREATE TABLE IF NOT EXISTS app_installation (
+                id INTEGER PRIMARY KEY CHECK (id = 1), initialized_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )""")
+            cur.execute("""INSERT INTO app_installation (id) SELECT 1 WHERE EXISTS (SELECT 1 FROM users)
+                ON CONFLICT (id) DO NOTHING""")
 
             # 2. Создаем таблицу панорам (photos_4326)
             # ВАЖНО: Требует расширения PostGIS в базе данных
@@ -56,31 +66,7 @@ def init_auth_db():
                 );
             """)
 
-            # 4. Создаем дефолтного администратора
-            # Получаем данные из .env, если их нет — используем безопасные fallback-значения
-            admin_username = os.environ.get("DEFAULT_ADMIN_USERNAME", "admin")
-            admin_password = os.environ.get("DEFAULT_ADMIN_PASSWORD", "change_me_please")
-
-            cur.execute("SELECT id FROM users WHERE username = %s", (admin_username,))
-            if not cur.fetchone():
-                print(f"Creating user '{admin_username}'...")
-                pw_hash = generate_password_hash(admin_password)
-                cur.execute("INSERT INTO users (username, password) VALUES (%s, %s)", (admin_username, pw_hash))
-                print(f"User '{admin_username}' successfully created!")
-
-            # 5. Создаем дефолтного обычного пользователя
-            # Получаем данные из .env, если их нет — используем fallback-значения
-            user_username = os.environ.get("DEFAULT_USER_USERNAME", "user")
-            user_password = os.environ.get("DEFAULT_USER_PASSWORD", "password")
-
-            cur.execute("SELECT id FROM users WHERE username = %s", (user_username,))
-            if not cur.fetchone():
-                print(f"Creating user '{user_username}'...")
-                user_pw_hash = generate_password_hash(user_password)
-                cur.execute("INSERT INTO users (username, password) VALUES (%s, %s)", (user_username, user_pw_hash))
-                print(f"User '{user_username}' successfully created!")
-
-        print("All tables and default users initialized successfully!")
+        print("All tables initialized successfully; first account is configured in the browser.")
 
     except Exception as e:
         print("Database initialization failed")
