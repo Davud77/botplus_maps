@@ -1,6 +1,8 @@
 // src/components/UploadPano.tsx
 import React, { useState, useRef, ChangeEvent, KeyboardEvent, DragEvent } from 'react';
 import Header from './Header';
+import { API_BASE } from '../utils/api';
+import './workspace/Workspace.css';
 
 interface FileStatus {
   status: 'selected' | 'uploading' | 'success' | 'failed';
@@ -13,12 +15,7 @@ interface FileStatuses {
 
 type FilterType = 'all' | 'success' | 'failed' | 'selected';
 
-// [FIX] Исправление CORS и адреса API
-// В production (внутри Docker) используем относительный путь, чтобы запрос шел к "своему" бэкенду.
-// В development (локально npm start) можно указать полный путь к localhost:5580.
-const API_URL = process.env.NODE_ENV === 'development' 
-  ? 'http://localhost:5580' 
-  : '';
+const API_URL = API_BASE;
 
 const UploadPano: React.FC = () => {
   const [files, setFiles] = useState<File[]>([]);
@@ -33,14 +30,14 @@ const UploadPano: React.FC = () => {
 
   const onFileChange = (event: ChangeEvent<HTMLInputElement>) => {
     // [ИЗМЕНЕНО] Разрешаем и JPEG, и WebP
-    const newFiles = Array.from(event.target.files ?? []).filter((file): file is File => 
+    const newFiles = Array.from(event.target.files ?? []).filter((file): file is File =>
         file.type === "image/jpeg" || file.type === "image/webp"
     );
-    
+
     if (newFiles.length !== (event.target.files?.length ?? 0)) {
       alert('Можно загружать только файлы с расширением .jpg или .webp');
     }
-    
+
     setFiles(prevFiles => [...prevFiles, ...newFiles]);
     setFileStatuses(prevStatuses => {
       const newStatuses: FileStatuses = {};
@@ -83,6 +80,7 @@ const UploadPano: React.FC = () => {
     try {
       const response = await fetch(`${API_URL}/api/upload`, {
         method: 'POST',
+        credentials: 'include',
         body: formData,
       });
 
@@ -97,13 +95,13 @@ const UploadPano: React.FC = () => {
           [filename]: { status: 'success', log: 'Успешно загружен' }
         }));
       });
-      
+
       result.failed_uploads.forEach((filename: string, index: number) => {
         setFileStatuses(prevStatuses => ({
           ...prevStatuses,
-          [filename]: { 
-            status: 'failed', 
-            log: result.skipped_files ? result.skipped_files[index] : 'Ошибка при загрузке' 
+          [filename]: {
+            status: 'failed',
+            log: result.skipped_files ? result.skipped_files[index] : 'Ошибка при загрузке'
           }
         }));
       });
@@ -160,16 +158,16 @@ const UploadPano: React.FC = () => {
   const handleDrop = (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
     setIsDragging(false);
-    
+
     // [ИЗМЕНЕНО] Разрешаем JPEG и WebP при Drag & Drop
-    const newFiles = Array.from(event.dataTransfer.files).filter((file): file is File => 
+    const newFiles = Array.from(event.dataTransfer.files).filter((file): file is File =>
         file.type === "image/jpeg" || file.type === "image/webp"
     );
-    
+
     if (newFiles.length !== event.dataTransfer.files.length) {
       alert('Можно загружать только файлы с расширением .jpg или .webp');
     }
-    
+
     setFiles(prevFiles => [...prevFiles, ...newFiles]);
     setFileStatuses(prevStatuses => {
       const newStatuses: FileStatuses = {};
@@ -198,7 +196,7 @@ const UploadPano: React.FC = () => {
   };
 
   return (
-    <div className="contend">
+    <div className="ws-shell ws-upload-shell">
       <Header />
       <div className="centered-container">
         <div className="tag-container">

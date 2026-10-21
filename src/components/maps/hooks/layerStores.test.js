@@ -45,3 +45,41 @@ describe('layer activation stays independent of bulk data downloads', () => {
     expect(bounds.getNorth()).toBe(43);
   });
 });
+
+describe('map layer presentation', () => {
+  const { useLayerStyleStore } = require('./useLayerStyleStore');
+  beforeEach(() => useLayerStyleStore.setState({ layers: [] }));
+  test('reordering and opacity preserve membership and survive catalog synchronization', () => {
+    const store = useLayerStyleStore.getState();
+    store.sync(['vector:roads', 'ortho:7']);
+    store.update('ortho:7', { opacity: 0.35, visible: false });
+    store.move('ortho:7', -1);
+    store.sync(['vector:roads', 'ortho:7', 'ortho:8']);
+    expect(useLayerStyleStore.getState().layers).toEqual([
+      { key: 'ortho:8', visible: true, opacity: 1 },
+      { key: 'ortho:7', visible: false, opacity: 0.35 },
+      { key: 'vector:roads', visible: true, opacity: 1 },
+    ]);
+    store.sync(['ortho:7']);
+    expect(useLayerStyleStore.getState().layers).toEqual([{ key: 'ortho:7', visible: false, opacity: 0.35 }]);
+  });
+});
+
+test('drag reorder inserts a layer at the drop target and keeps its presentation', () => {
+  const { useLayerStyleStore } = require('./useLayerStyleStore');
+  useLayerStyleStore.setState({layers:[{key:'vector:roads',opacity:0.6,coordinate_system:'EPSG:32638'},{key:'ortho:7'},{key:'basemap'}]});
+  useLayerStyleStore.getState().reorder('basemap','vector:roads',false);
+  expect(useLayerStyleStore.getState().layers.map(item=>item.key)).toEqual(['basemap','vector:roads','ortho:7']);
+  useLayerStyleStore.getState().reorder('vector:roads','ortho:7',true);
+  expect(useLayerStyleStore.getState().layers[2]).toEqual({key:'vector:roads',opacity:0.6,coordinate_system:'EPSG:32638'});
+});
+test('new backgrounds start below data and remain reorderable after catalog sync', () => {
+  const { useLayerStyleStore } = require('./useLayerStyleStore');
+  useLayerStyleStore.setState({layers:[{key:'vector:roads',opacity:0.6}]});
+  const store=useLayerStyleStore.getState();
+  store.sync(['vector:roads','basemap']);
+  expect(useLayerStyleStore.getState().layers.map(item=>item.key)).toEqual(['vector:roads','basemap']);
+  store.reorder('basemap','vector:roads',false);
+  store.sync(['vector:roads','basemap']);
+  expect(useLayerStyleStore.getState().layers.map(item=>item.key)).toEqual(['basemap','vector:roads']);
+});

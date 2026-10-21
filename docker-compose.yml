@@ -140,8 +140,9 @@ services:
       # Адрес MinIO внутри сети
       - AWS_ENDPOINT_URL=http://${MINIO_ENDPOINT}
       
-      # Включаем режим без подписи (для публичного бакета)
-      - AWS_NO_SIGN_REQUEST=YES
+      # Подписанный доступ к закрытому бакету
+      - AWS_NO_SIGN_REQUEST=NO
+      - AWS_S3_ENDPOINT=${MINIO_ENDPOINT}
       
       # Принудительный Path Style для MinIO
       - AWS_S3_FORCE_PATH_STYLE=true

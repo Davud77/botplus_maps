@@ -28,7 +28,7 @@ export default function SetupPage() {
       const result = await response.json();
       if (response.status === 409) setClosed(true);
       if (!response.ok) throw new Error(result.message || 'Не удалось создать аккаунт.');
-      completeSetup(); navigate('/', { replace: true });
+      await completeSetup(); navigate('/', { replace: true });
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : 'Сервер недоступен. Повторите попытку.');
     } finally { setPending(false); }

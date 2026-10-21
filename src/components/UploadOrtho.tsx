@@ -1,12 +1,10 @@
 // src/components/UploadOrtho.tsx
 import React, { useState, useRef, useEffect, DragEvent } from 'react';
 import Header from './Header';
+import { API_BASE } from '../utils/api';
+import './workspace/Workspace.css';
 
-// Определение адреса API для разработки
-const isLocalhost = 
-  typeof window !== 'undefined' && 
-  (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
-const API_URL = isLocalhost ? 'http://localhost:5580' : '';
+const API_URL = API_BASE;
 
 interface FileItem {
   file: File;
@@ -25,7 +23,7 @@ const UploadOrtho: React.FC = () => {
   const [files, setFiles] = useState<FileItem[]>([]);
   const [globalLogs, setGlobalLogs] = useState<LogEntry[]>([]);
   const [isDragging, setIsDragging] = useState<boolean>(false);
-  
+
   const logRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -75,13 +73,13 @@ const UploadOrtho: React.FC = () => {
 
       const interval = setInterval(async () => {
         try {
-          const response = await fetch(`${API_URL}/api/tasks/${taskId}`);
-          
+          const response = await fetch(`${API_URL}/api/tasks/${taskId}`, { credentials: 'include' });
+
           if (!response.ok) {
               if (response.status === 404) throw new Error('404');
               throw new Error('Network error during polling');
           }
-          
+
           const statusData = await response.json();
           errorCount = 0; // Сбрасываем счетчик при успешном ответе
 
@@ -91,24 +89,24 @@ const UploadOrtho: React.FC = () => {
               // Вторые 50% прогресс-бара — это работа сервера
               const backendProgress = statusData.progress || 0;
               const totalProgress = Math.round(50 + (backendProgress / 2));
-              
-              return { 
-                ...item, 
-                status: 'processing', 
-                progress: totalProgress, 
-                message: statusData.message || 'Обработка...' 
+
+              return {
+                ...item,
+                status: 'processing',
+                progress: totalProgress,
+                message: statusData.message || 'Обработка...'
               };
             }));
           } else if (statusData.status === 'success') {
             clearInterval(interval);
-            setFiles(prev => prev.map((item, i) => 
+            setFiles(prev => prev.map((item, i) =>
               i === index ? { ...item, status: 'success', progress: 100, message: 'Готово' } : item
             ));
             addLog(`[${filename}] Успешно обработан!`, 'success');
             resolve();
           } else if (statusData.status === 'error') {
             clearInterval(interval);
-            setFiles(prev => prev.map((item, i) => 
+            setFiles(prev => prev.map((item, i) =>
               i === index ? { ...item, status: 'failed', message: 'Ошибка обработки' } : item
             ));
             addLog(`[ERROR] ${filename}: ${statusData.error}`, 'error');
@@ -117,18 +115,18 @@ const UploadOrtho: React.FC = () => {
         } catch (e: any) {
           console.error("Polling error", e);
           errorCount++;
-          
+
           // [NEW] Обрываем цикл при 404 или множестве ошибок сети
           if ((e.message && e.message.includes('404')) || errorCount > 10) {
              clearInterval(interval);
-             setFiles(prev => prev.map((item, i) => 
+             setFiles(prev => prev.map((item, i) =>
                i === index ? { ...item, status: 'failed', message: 'Сбой соединения с сервером' } : item
              ));
              addLog(`[ERROR] ${filename}: Задача прервана сервером (перезагрузка?)`, 'error');
              reject(new Error('Task lost on server'));
           }
         }
-      }, 1500); 
+      }, 1500);
     });
   };
 
@@ -146,11 +144,11 @@ const UploadOrtho: React.FC = () => {
           setFiles(prev => prev.map((item, i) => {
             if (i !== index) return item;
             // Делим прогресс: первые 50% — это передача файла
-            return { 
-              ...item, 
-              status: 'uploading', 
-              progress: Math.round(percentComplete / 2), 
-              message: `Передача: ${percentComplete}%` 
+            return {
+              ...item,
+              status: 'uploading',
+              progress: Math.round(percentComplete / 2),
+              message: `Передача: ${percentComplete}%`
             };
           }));
         }
@@ -160,22 +158,22 @@ const UploadOrtho: React.FC = () => {
         if (xhr.status >= 200 && xhr.status < 300) {
           try {
             const response = JSON.parse(xhr.responseText);
-            
+
             // Если сервер вернул task_id, запускаем опрос
             if (response.task_id) {
               addLog(`[${fileItem.file.name}] Файл загружен. Запущена обработка на сервере...`, 'info');
-              
-              setFiles(prev => prev.map((item, i) => 
+
+              setFiles(prev => prev.map((item, i) =>
                 i === index ? { ...item, status: 'processing', progress: 50, message: 'Ожидание сервера...' } : item
               ));
-              
+
               // Начинаем поллинг задачи
               pollUploadTask(response.task_id, index, fileItem.file.name)
                 .then(resolve)
                 .catch(reject);
             } else {
               // Фоллбэк, если бэкенд отработал моментально
-              setFiles(prev => prev.map((item, i) => 
+              setFiles(prev => prev.map((item, i) =>
                 i === index ? { ...item, status: 'success', progress: 100, message: 'Готово' } : item
               ));
               addLog(`[${fileItem.file.name}] Успешно обработан.`, 'success');
@@ -197,12 +195,12 @@ const UploadOrtho: React.FC = () => {
       };
 
       addLog(`[${fileItem.file.name}] Начало передачи...`, 'info');
-      setFiles(prev => prev.map((item, i) => 
+      setFiles(prev => prev.map((item, i) =>
         i === index ? { ...item, status: 'uploading', message: 'Подключение...' } : item
       ));
 
       xhr.open('POST', `${API_URL}/api/upload_ortho`);
-      // xhr.withCredentials = true; // Раскомментируй, если используются сессии/куки для авторизации при загрузке
+      xhr.withCredentials = true;
       xhr.send(formData);
     });
   };
@@ -218,13 +216,13 @@ const UploadOrtho: React.FC = () => {
       return;
     }
     addLog(`Запуск пакетной загрузки: ${indicesToUpload.length} файлов`, 'info');
-    
+
     // Запускаем файлы по очереди, чтобы не перегружать сеть и сервер
     for (const index of indicesToUpload) {
       try {
         await uploadSingleFile(index, files[index]);
       } catch (error: any) {
-        setFiles(prev => prev.map((item, i) => 
+        setFiles(prev => prev.map((item, i) =>
           i === index ? { ...item, status: 'failed', message: 'Ошибка' } : item
         ));
         addLog(`[ERROR] ${files[index].file.name}: ${error.message || 'Unknown error'}`, 'error');
@@ -238,12 +236,12 @@ const UploadOrtho: React.FC = () => {
   };
 
   return (
-    <div className="contend">
+    <div className="ws-shell ws-upload-shell">
       <Header />
       <div className="tag-container">
         <div className="mini">
           <div className={`mini_pano ${isDragging ? 'dragging' : ''}`}>
-            
+
             <div className="mini_header">
               <h3>Загрузка ортофотопланов (GeoTIFF)</h3>
               <div className="functions">
@@ -265,9 +263,9 @@ const UploadOrtho: React.FC = () => {
                    {isDragging ? 'Отпустите файлы здесь' : 'Перетащите .tif файлы или нажмите для выбора'}
                 </div>
               )}
-              
+
               {/* Скрытый инпут */}
-              <input 
+              <input
                 ref={fileInputRef}
                 type="file"
                 accept=".tif,.tiff"
@@ -279,7 +277,7 @@ const UploadOrtho: React.FC = () => {
               <div className="file-list">
                 {files.map((item, idx) => (
                   <div key={idx} className="thumbnail" onClick={(e) => e.stopPropagation()}>
-                    
+
                     {/* Показываем прогресс-бар и для загрузки по сети, и для фоновой обработки */}
                     {(item.status === 'uploading' || item.status === 'processing') && (
                        <div className="progress-line" style={{ width: `${item.progress}%` }} />
@@ -299,11 +297,11 @@ const UploadOrtho: React.FC = () => {
 
                     {/* Скрываем кнопку удаления во время активного процесса */}
                     {item.status !== 'uploading' && item.status !== 'processing' && (
-                        <button 
+                        <button
                             className="btn-remove"
-                            onClick={(e) => { 
-                                e.stopPropagation(); 
-                                handleRemoveFile(idx); 
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                handleRemoveFile(idx);
                             }}
                         >
                         &times;
@@ -316,7 +314,7 @@ const UploadOrtho: React.FC = () => {
           </div>
 
           <div className="log-terminal" ref={logRef}>
-            <div className="log-prompt">root@console: ~/upload_logs $</div>
+            <div className="log-prompt">Журнал обработки</div>
             {globalLogs.map((log, idx) => (
               <div key={idx} className="log-entry">
                 <span className="log-time">[{log.time}]</span>

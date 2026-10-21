@@ -48,7 +48,7 @@ def initialize():
             cursor.execute("INSERT INTO users (username, password, role) VALUES (%s, %s, 'admin') RETURNING id",
                            (username, password_hash))
             uid = cursor.fetchone()["id"]
-            cursor.execute("INSERT INTO app_installation (id) VALUES (1)")
+            cursor.execute("INSERT INTO app_installation (id,rbac_migrated) VALUES (1,TRUE)")
         token = create_access_token({"uid": uid, "u": username}, expires_in=config.ACCESS_TOKEN_EXPIRES)
         return _set_token_cookie(make_response(jsonify(status="ok"), 201), token)
     except Exception:

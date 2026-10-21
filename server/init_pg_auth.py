@@ -36,6 +36,29 @@ def init_auth_db():
             cur.execute("""INSERT INTO app_installation (id) SELECT 1 WHERE EXISTS (SELECT 1 FROM users)
                 ON CONFLICT (id) DO NOTHING""")
 
+            cur.execute("ALTER TABLE users ALTER COLUMN role SET DEFAULT 'viewer'")
+            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE")
+            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS session_version INTEGER NOT NULL DEFAULT 0")
+            cur.execute("ALTER TABLE app_installation ADD COLUMN IF NOT EXISTS rbac_migrated BOOLEAN NOT NULL DEFAULT FALSE")
+            cur.execute("SELECT rbac_migrated FROM app_installation WHERE id=1")
+            installation = cur.fetchone()
+            if installation and not installation[0]:
+                cur.execute("""UPDATE users SET role='admin' WHERE id=(SELECT min(id) FROM users)
+                    AND NOT EXISTS (SELECT 1 FROM users WHERE role='admin' AND is_active)""")
+                cur.execute("UPDATE users SET role='viewer' WHERE role NOT IN ('admin','editor','viewer')")
+                cur.execute("UPDATE app_installation SET rbac_migrated=TRUE WHERE id=1")
+            cur.execute("""CREATE TABLE IF NOT EXISTS maps (
+                id UUID PRIMARY KEY, owner_id INTEGER NOT NULL REFERENCES users(id),
+                title VARCHAR(120) NOT NULL, description VARCHAR(1000) NOT NULL DEFAULT '',
+                config JSONB NOT NULL, revision INTEGER NOT NULL DEFAULT 1,
+                public_slug VARCHAR(64) UNIQUE, published_snapshot JSONB,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )""")
+            cur.execute("CREATE INDEX IF NOT EXISTS maps_owner_idx ON maps(owner_id)")
+
+            from services.map_settings import initialize_catalogs
+            initialize_catalogs(cur)
+
             # 2. Создаем таблицу панорам (photos_4326)
             # ВАЖНО: Требует расширения PostGIS в базе данных
             print("Creating table 'public.photos_4326'...")

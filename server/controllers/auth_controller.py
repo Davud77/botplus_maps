@@ -6,6 +6,7 @@ import time
 
 from services.auth_service import create_access_token, decode_access_token
 from repositories.user_repository import get_user_by_username
+from services.permissions import resolve_session
 import config
 
 auth_blueprint = Blueprint("auth", __name__)
@@ -63,12 +64,12 @@ def login():
             return jsonify({"status": "error", "message": "Please provide username and password"}), 400
 
         user = get_user_by_username(username)
-        if not user or not check_password_hash(user["password"], password):
+        if not user or not user["is_active"] or not check_password_hash(user["password"], password):
             # Same response to protect against enumeration
             return jsonify({"status": "fail", "message": "Invalid credentials"}), 401
 
         token = create_access_token(
-            {"uid": user["id"], "u": user["username"]},
+            {"uid": user["id"], "u": user["username"], "ver": user["session_version"]},
             expires_in=config.ACCESS_TOKEN_EXPIRES,
         )
         resp = make_response(jsonify({"status": "ok"}), 200)
@@ -103,20 +104,13 @@ def me():
         return jsonify({"authenticated": False}), 200
 
     payload = decode_access_token(token)
-    if not payload:
-        return jsonify({"authenticated": False}), 200
-
-    return jsonify(
-        {
-            "authenticated": True,
-            "user": {
-                "id": payload.get("uid"),
-                "username": payload.get("u"),
-                "exp": payload.get("exp"),
-                "exp_unix": int(payload.get("exp", 0)),
-                "exp_human": time.strftime(
-                    "%Y-%m-%d %H:%M:%S", time.gmtime(payload.get("exp", 0))
-                ),
-            },
-        }
-    ), 200
+    try:
+        user = resolve_session(payload)
+    except Exception:
+        return jsonify(message="Сервис авторизации недоступен."), 503
+    if not user:
+        return jsonify(authenticated=False), 200
+    return jsonify(authenticated=True, user={
+        "id": user["id"], "username": user["username"], "role": user["role"],
+        "exp": payload["exp"], "theme": user["theme"],
+    }), 200

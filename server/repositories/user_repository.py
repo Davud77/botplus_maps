@@ -9,14 +9,14 @@ except ImportError:
 
 def get_user_by_username(username: str) -> Optional[Dict[str, Any]]:
     with Database().cursor() as cursor:
-        cursor.execute("SELECT id, username, password FROM users WHERE username = %s", (username,))
+        cursor.execute("SELECT id, username, password, role, is_active, session_version, theme FROM users WHERE username = %s", (username,))
         row = cursor.fetchone()
         return dict(row) if row else None
 
 
 def get_user_by_id(user_id: int) -> Optional[Dict[str, Any]]:
     with Database().cursor() as cursor:
-        cursor.execute("SELECT id, username, password FROM users WHERE id = %s", (user_id,))
+        cursor.execute("SELECT id, username, password, role, is_active, session_version, theme FROM users WHERE id = %s", (user_id,))
         row = cursor.fetchone()
         return dict(row) if row else None
 

@@ -368,7 +368,7 @@ class OrthoService:
         minio_endpoint = getattr(config, 'MINIO_ENDPOINT', "minio:9000")
         bucket_name = getattr(config, 'MINIO_ORTHO_BUCKET', "orthophotos")
 
-        s3_url = f"http://{minio_endpoint}/{bucket_name}/{ortho.filename}"
+        s3_url = f"s3://{bucket_name}/{ortho.filename}"
 
         try:
             resp = requests.get(

@@ -2,6 +2,7 @@
 import json
 import os
 from storage import LocalStorage, MinioStorage
+from minio.error import S3Error
 import config
 
 class StorageService:
@@ -21,19 +22,21 @@ class StorageService:
                     self.minio.client.make_bucket(self.bucket_name)
                     print(f"Bucket '{self.bucket_name}' created successfully.")
                 
-                # Устанавливаем политику Public Read
-                policy = {
+                # Remove only the anonymous policy installed by earlier BotPlus versions.
+                # User-managed policies are left for the storage administrator to review.
+                legacy_policy = {
                     "Version": "2012-10-17",
-                    "Statement": [
-                        {
-                            "Effect": "Allow",
-                            "Principal": {"AWS": ["*"]},
-                            "Action": ["s3:GetObject"],
-                            "Resource": [f"arn:aws:s3:::{self.bucket_name}/*"]
-                        }
-                    ]
+                    "Statement": [{"Effect": "Allow", "Principal": {"AWS": ["*"]},
+                        "Action": ["s3:GetObject"],
+                        "Resource": [f"arn:aws:s3:::{self.bucket_name}/*"]}]
                 }
-                self.minio.client.set_bucket_policy(self.bucket_name, json.dumps(policy))
+                try:
+                    policy = json.loads(self.minio.client.get_bucket_policy(self.bucket_name))
+                    if policy == legacy_policy:
+                        self.minio.client.delete_bucket_policy(self.bucket_name)
+                except S3Error as error:
+                    if error.code != 'NoSuchBucketPolicy':
+                        raise
             except Exception as e:
                 print(f"MinIO init warning: {e}")
 

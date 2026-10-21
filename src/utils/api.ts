@@ -179,22 +179,12 @@ async function apiDelete<T = any>(path: string): Promise<T> {
 }
 
 /* -------------------- Auth API -------------------- */
-export type MeResponse =
-  | { authenticated: false }
-  | {
-      authenticated: true;
-      user: {
-        id: number;
-        username: string;
-        exp: number;
-        exp_unix: number;
-        exp_human: string;
-      };
-    };
+export type MeResponse = { authenticated: false } | {
+  authenticated: true;
+  user: { id: number; username: string; role: 'admin' | 'editor' | 'viewer'; exp: number };
+};
 
-export async function authMe(): Promise<MeResponse> {
-  return apiGet<MeResponse>("/api/auth/me");
-}
+export async function authMe(): Promise<MeResponse> { return apiGet<MeResponse>("/api/auth/me"); }
 
 export async function authLogin(username: string, password: string): Promise<ApiResp> {
   return apiPost<ApiResp>("/api/auth/login", { username, password });
