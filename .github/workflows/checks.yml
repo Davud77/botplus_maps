@@ -35,7 +35,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: sudo apt-get update && sudo apt-get install -y python3-gdal python3-venv
-      - run: /usr/bin/python3 -m venv --system-site-packages /tmp/botplus-test
+      - run: /usr/bin/python3 -m venv /tmp/botplus-test
+      # Reuse only the matching native GDAL bindings, not Ubuntu's Python package
+      # namespace (which can shadow pip's zope packages used by gevent).
+      - run: >-
+          /tmp/botplus-test/bin/python -c
+          "import os, sysconfig; os.symlink('/usr/lib/python3/dist-packages/osgeo', os.path.join(sysconfig.get_path('purelib'), 'osgeo'))"
       - run: >-
           /tmp/botplus-test/bin/pip install Flask==3.1.2 flask-cors flask-compress requests Pillow piexif minio
           'psycopg2-binary>=2.9.10,<3' 'gevent>=24.2.1' psycogreen==1.0.2
