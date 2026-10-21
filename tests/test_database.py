@@ -96,4 +96,3 @@ class DatabaseLifecycleTests(unittest.TestCase):
         with patch.dict(os.environ, {"DB_STATEMENT_TIMEOUT_MS": "0"}):
             with self.assertRaises(ValueError):
                 Database("dbname=fixture")
-

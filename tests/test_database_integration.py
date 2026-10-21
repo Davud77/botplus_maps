@@ -153,4 +153,3 @@ class DatabaseIntegrationTests(unittest.TestCase):
                                 env=os.environ.copy(), capture_output=True, text=True, timeout=15)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("gevent isolation passed", result.stdout)
-

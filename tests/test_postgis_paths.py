@@ -219,4 +219,3 @@ class PostgisPathTests(unittest.TestCase):
         self.assertEqual(errors, [])
         self.assertEqual(self.orthos.get_all_orthos(), [])
         self.assert_released()
-
