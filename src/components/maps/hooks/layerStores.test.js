@@ -45,3 +45,22 @@ describe('layer activation stays independent of bulk data downloads', () => {
     expect(bounds.getNorth()).toBe(43);
   });
 });
+
+describe('map layer presentation', () => {
+  const { useLayerStyleStore } = require('./useLayerStyleStore');
+  beforeEach(() => useLayerStyleStore.setState({ layers: [] }));
+  test('reordering and opacity preserve membership and survive catalog synchronization', () => {
+    const store = useLayerStyleStore.getState();
+    store.sync(['vector:roads', 'ortho:7']);
+    store.update('ortho:7', { opacity: 0.35, visible: false });
+    store.move('ortho:7', -1);
+    store.sync(['vector:roads', 'ortho:7', 'ortho:8']);
+    expect(useLayerStyleStore.getState().layers).toEqual([
+      { key: 'ortho:8', visible: true, opacity: 1 },
+      { key: 'ortho:7', visible: false, opacity: 0.35 },
+      { key: 'vector:roads', visible: true, opacity: 1 },
+    ]);
+    store.sync(['ortho:7']);
+    expect(useLayerStyleStore.getState().layers).toEqual([{ key: 'ortho:7', visible: false, opacity: 0.35 }]);
+  });
+});

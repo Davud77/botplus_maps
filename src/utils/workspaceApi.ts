@@ -3,8 +3,12 @@ export type Role = 'admin' | 'editor' | 'viewer';
 export const roleNames: Record<Role, string> = { admin: 'Администратор', editor: 'Редактор', viewer: 'Наблюдатель' };
 export interface WorkspaceUser { id: number; username: string; role: Role; is_active: boolean; created_at: string; }
 export interface VectorSource { dbName: string; schema: string; tableName: string; }
+export interface LayerPresentation { key: string; visible?: boolean; opacity?: number; style?: { color?: string; weight?: number; fillOpacity?: number; radius?: number }; }
+export function legacyBasemap(id: string): string { return (baseLayers as Record<string,string>)[id] || ''; }
 export interface MapConfig {
-  view: { center: [number, number]; zoom: number }; base_layer: keyof typeof baseLayers;
+  view: { center: [number, number]; zoom: number }; base_layer: string;
+  coordinate_system?: string; base_layer_definition?: import('./mapSettings').Basemap | null;
+  layer_settings?: LayerPresentation[];
   orthophoto_ids: number[]; vector_layers: VectorSource[]; show_panoramas: boolean;
 }
 export interface MapDocument {

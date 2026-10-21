@@ -17,6 +17,8 @@ from database import Database
 from init_pg_auth import init_auth_db
 from services.auth_service import create_access_token, decode_access_token
 from services.permissions import resolve_session
+from services import map_settings
+from controllers import settings_controller
 from repositories import user_repository
 from controllers import account_controller as accounts, maps_controller as maps, vector
 from controllers.auth_controller import auth_blueprint
@@ -43,7 +45,7 @@ class WorkspaceIntegrationTests(unittest.TestCase):
             cur.execute('INSERT INTO orthophotos VALUES (1),(2)')
             cur.execute("CREATE TABLE roads (id SERIAL PRIMARY KEY, label TEXT, geom geometry(Point,4326))")
             cur.execute("INSERT INTO roads (label,geom) VALUES ('published object',ST_SetSRID(ST_MakePoint(47,43),4326))")
-        for module in [accounts, maps, user_repository]:
+        for module in [accounts, maps, user_repository, map_settings, settings_controller]:
             patcher = patch.object(module, 'Database', return_value=self.db)
             patcher.start(); self.addCleanup(patcher.stop)
         patcher = patch.object(vector, 'database', self.db)
@@ -54,6 +56,7 @@ class WorkspaceIntegrationTests(unittest.TestCase):
         def api_error(error):
             return jsonify(message=error.description), error.code
         register_http_policies(self.app, decode_access_token, lambda origin: False, resolve_session)
+        self.app.register_blueprint(settings_controller.settings_blueprint, url_prefix='/api')
         self.app.register_blueprint(accounts.account_blueprint, url_prefix='/api')
         self.app.register_blueprint(maps.maps_blueprint, url_prefix='/api')
         self.app.register_blueprint(auth_blueprint, url_prefix='/api/auth')
@@ -190,3 +193,42 @@ class WorkspaceIntegrationTests(unittest.TestCase):
         record = self.create_map(config={'show_panoramas':True})
         response = self.editor.post(f"/api/maps/{record['id']}/publication",json={'published':True,'revision':1})
         self.assertEqual(response.status_code,400)
+
+    def test_settings_permissions_custom_catalogs_and_defaults(self):
+        for client in [self.viewer,self.editor]:
+            self.assertEqual(client.get('/api/settings/map').status_code,200)
+            self.assertEqual(client.post('/api/settings/basemaps',json={}).status_code,403)
+            self.assertEqual(client.post('/api/settings/coordinate-systems',json={}).status_code,403)
+        self.assertEqual(self.viewer.patch('/api/account/preferences',json={'theme':'dark'}).status_code,200)
+        self.assertEqual(self.viewer.get('/api/auth/me').get_json()['user']['theme'],'dark')
+        self.assertEqual(self.viewer.patch('/api/account/preferences',json={'theme':'wrong'}).status_code,400)
+        crs=self.admin.post('/api/settings/coordinate-systems',json={'name':'Local UTM','definition':'+proj=utm +zone=38 +datum=WGS84 +units=m +no_defs'})
+        self.assertEqual(crs.status_code,201,crs.get_data(as_text=True))
+        code=crs.get_json()['coordinate_system']['id']
+        point=self.viewer.get('/api/settings/coordinates',query_string={'crs':code,'lat':43,'lng':45})
+        self.assertEqual(point.status_code,200)
+        self.assertAlmostEqual(point.get_json()['x'],500000,places=2)
+        for bad in ['https://bad.example/crs','+proj=utm +zone=38 +nadgrids=/etc/passwd','EPSG:9999999']:
+            self.assertEqual(self.admin.post('/api/settings/coordinate-systems',json={'name':'Bad','definition':bad}).status_code,400)
+        base=self.admin.post('/api/settings/basemaps',json={'name':'Local tiles','url':'http://localhost:8080/{z}/{x}/{y}.png','scheme':'tms','attribution':'<img onerror=alert(1)>'})
+        self.assertEqual(base.status_code,201,base.get_data(as_text=True))
+        base=base.get_json()['basemap']
+        self.assertNotIn('<',base['attribution'])
+        self.assertEqual(self.admin.patch('/api/settings/map/defaults',json={'basemap':base['id'],'coordinate_system':code}).status_code,200)
+        created=self.create_map()
+        self.assertEqual(created['config']['base_layer'],base['id'])
+        self.assertEqual(created['config']['coordinate_system'],code)
+        public=self.publish(created)
+        config=self.app.test_client().get('/api/public/maps/'+public['public_slug']).get_json()['map']['config']
+        self.assertEqual(config['base_layer_definition']['url'],base['url'])
+        for bad in ['javascript:alert(1)','https://host/{z}/{x}/{q}','https://host/{z}/{x}/{y}/{evil}','https://host/{z}/{x}/{y}/}','http://u:p@host/{z}/{x}/{y}']:
+            self.assertEqual(self.admin.post('/api/settings/basemaps',json={'name':'Bad','url':bad}).status_code,400)
+
+    def test_layer_presentation_survives_save_and_publication(self):
+        config={'orthophoto_ids':[1,2], 'layer_settings':[{'key':'ortho:2','visible':False,'opacity':0.3},{'key':'ortho:1','opacity':0.75}]}
+        created=self.create_map(config=config)
+        public=self.publish(created)
+        actual=self.app.test_client().get('/api/public/maps/'+public['public_slug']).get_json()['map']['config']
+        self.assertEqual(actual['layer_settings'],config['layer_settings'])
+        for bad in [[{'key':'ortho:3'}],[{'key':'ortho:1','opacity':2}],[{'key':'ortho:1','style':{'color':'red'}}],[{'key':'ortho:1','visible':'false'}],[{'key':'ortho:1'},{'key':'ortho:1'}]]:
+            self.assertEqual(self.editor.put('/api/maps/'+created['id'],json={'title':'Bad style','revision':public['revision'],'config':{**config,'layer_settings':bad}}).status_code,400)

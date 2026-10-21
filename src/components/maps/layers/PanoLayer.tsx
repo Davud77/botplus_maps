@@ -14,6 +14,7 @@ interface MarkerType {
 }
 
 interface PanoLayerProps {
+  pane?: string;
   selectedMarker?: string | null;
   onMarkerClick?: (marker: MarkerType) => void;
   togglePanoLayer?: (newMarkers: MarkerType[]) => void;
@@ -70,12 +71,13 @@ const createClusterIcon = (count: number) => {
 };
 
 const PanoLayer: React.FC<PanoLayerProps> = ({
-  selectedMarker = null,
+  selectedMarker = null, pane = 'overlayPane',
   onMarkerClick,
   togglePanoLayer,
 }) => {
   const [markers, setMarkers] = useState<MarkerType[]>([]);
   const map = useMap();
+  const renderer=useMemo(()=>L.canvas({pane}),[pane]);
 
   const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -177,7 +179,7 @@ const PanoLayer: React.FC<PanoLayerProps> = ({
         // 1. Если сервер вернул кластер (Зумы 0-17)
         if (marker.count > 1) {
           return (
-            <Marker
+            <Marker pane={pane}
               key={`cluster-${marker.id}-${marker.lat}-${marker.lng}`}
               position={[marker.lat, marker.lng]}
               icon={createClusterIcon(marker.count)}
@@ -195,7 +197,7 @@ const PanoLayer: React.FC<PanoLayerProps> = ({
         // 2. Если сервер вернул сырую точку (Зумы 18-23). 
         // CircleMarker uses the map Canvas renderer; dense datasets still need tile-based rendering.
         return (
-          <CircleMarker
+          <CircleMarker pane={pane} renderer={renderer}
             key={`raw-${marker.id}`}
             center={[marker.lat, marker.lng]}
             radius={6} // Размер точки в пикселях

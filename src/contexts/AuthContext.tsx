@@ -1,7 +1,7 @@
 import React, { createContext, useEffect, useState } from 'react';
 import { API_BASE, authLogin, authLogout, authMe } from '../utils/api';
 
-export interface SessionUser { id: number; username: string; role: 'admin' | 'editor' | 'viewer'; exp?: number; }
+export interface SessionUser { id: number; username: string; role: 'admin' | 'editor' | 'viewer'; theme?: 'light' | 'dark'; exp?: number; }
 export interface AuthContextType {
   isAuthenticated: boolean; isLoading: boolean; setupRequired: boolean; startupError: string;
   user: SessionUser | null;
@@ -36,6 +36,11 @@ export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
       } finally { setIsLoading(false); }
     })();
   }, []);
+  useEffect(() => {
+    const theme = user?.theme || localStorage.getItem('botplus-theme') || 'light';
+    document.documentElement.dataset.theme = theme;
+    localStorage.setItem('botplus-theme',theme);
+  }, [user?.theme]);
   const login = async (username: string, password: string) => {
     try { const result = await authLogin(username, password); return result.status === 'ok' && !!(await refreshUser()); }
     catch { return false; }

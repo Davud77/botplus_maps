@@ -56,6 +56,9 @@ def init_auth_db():
             )""")
             cur.execute("CREATE INDEX IF NOT EXISTS maps_owner_idx ON maps(owner_id)")
 
+            from services.map_settings import initialize_catalogs
+            initialize_catalogs(cur)
+
             # 2. Создаем таблицу панорам (photos_4326)
             # ВАЖНО: Требует расширения PostGIS в базе данных
             print("Creating table 'public.photos_4326'...")

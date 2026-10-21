@@ -13,9 +13,7 @@ export const MapHeader: React.FC<MapHeaderProps> = ({ onSearch, onTogglePano, is
     <header className="map-header">
       <div className="first-box">
         <div className="logo">
-          <a href="/">
-            <img src="/images/logowhite2.png" alt="Logo" className="logo-image" />
-          </a>
+          <a href="/" aria-label="BotPlus Maps — все карты">B+</a>
         </div>
         <div className="search-bar">
           <Search handleSearch={onSearch} />

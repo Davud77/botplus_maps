@@ -5,6 +5,7 @@ import { BasePanel } from './BasePanel';
 // Описываем структуру данных, которые приходят от открытой панорамы
 interface PanoPanelProps {
   onClose: () => void;
+  added: boolean; onAdd: ()=>void;
   panoDetails?: {
     title: string;
     date: string;
@@ -12,21 +13,21 @@ interface PanoPanelProps {
   } | null;
 }
 
-export const PanoPanel: React.FC<PanoPanelProps> = ({ onClose, panoDetails }) => {
+export const PanoPanel: React.FC<PanoPanelProps> = ({ onClose, panoDetails, added, onAdd }) => {
   return (
-    <BasePanel title="Панорамы" onClose={onClose}>
+    <BasePanel title="Панорамы" onClose={onClose}><p className="bp-muted">Точки загружаются по области карты с серверной кластеризацией.</p><button className="ws-primary" disabled={added} onClick={onAdd}>{added ? '✓ Уже на карте' : '+ Добавить панорамы'}</button>
       <div className="panel-content" style={{ padding: '15px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
         
         {panoDetails ? (
           // Если данные есть (панорама открыта) — показываем информацию о ней
           <>
-            <h3 style={{ margin: 0, fontSize: '14px', wordBreak: 'break-all', color: '#fff' }}>
+            <h3 style={{ margin: 0, fontSize: '14px', wordBreak: 'break-all', color: 'var(--color-text)' }}>
               {panoDetails.title}
             </h3>
-            <div style={{ color: '#aaa', fontSize: '12px' }}>
+            <div style={{ color: 'var(--color-text-light)', fontSize: '12px' }}>
               {panoDetails.date}
             </div>
-            <div style={{ color: '#ddd', fontSize: '13px', marginTop: '4px' }}>
+            <div style={{ color: 'var(--color-text)', fontSize: '13px', marginTop: '4px' }}>
               Alt: <strong>{panoDetails.alt} m</strong>
             </div>
           </>

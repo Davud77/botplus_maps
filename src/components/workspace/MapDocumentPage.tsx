@@ -4,8 +4,9 @@ import MapPage from '../maps/MapPage';
 import { useMapStore } from '../maps/hooks/useMapStore';
 import { useVectorStore } from '../maps/hooks/useVectorStore';
 import { useUIStore } from '../maps/hooks/useUIStore';
-import { MapDocument, MapConfig, baseLayers, workspaceRequest } from '../../utils/workspaceApi';
+import { MapDocument, MapConfig, legacyBasemap, workspaceRequest } from '../../utils/workspaceApi';
 import './Workspace.css';
+import { useLayerStyleStore } from '../maps/hooks/useLayerStyleStore';
 export default function MapDocumentPage() {
   const { mapId } = useParams();
   const [document, setDocument] = useState<MapDocument | null>(null);
@@ -27,9 +28,10 @@ export default function MapDocumentPage() {
     workspaceRequest<{ map: MapDocument }>(`/maps/${mapId}`).then(async ({ map }) => {
       await useMapStore.getState().fetchOrthos();
       if (!live) return;
-      useMapStore.setState({ selectedOrthoIds: map.config.orthophoto_ids, baseLayerUrl: baseLayers[map.config.base_layer] });
+      useMapStore.setState({ selectedOrthoIds: map.config.orthophoto_ids, baseLayerUrl: map.config.base_layer_definition?.url ?? legacyBasemap(map.config.base_layer), baseLayerId:map.config.base_layer, baseDefinition:map.config.base_layer_definition||null, coordinateSystem:map.config.coordinate_system||'EPSG:4326' });
       const sources = Object.fromEntries(map.config.vector_layers.map(layer => [`${layer.dbName}-${layer.schema}-${layer.tableName}`, layer]));
       useVectorStore.setState({ activeVectorIds: new Set(Object.keys(sources)), layerSources: sources });
+      useLayerStyleStore.setState({layers:(map.config.layer_settings||[]).map(item=>({...item,key:item.key.startsWith('vector:') ? `vector:${Object.keys(sources)[+item.key.slice(7)]}` : item.key}))});
       view.current = map.config.view; panoramas.current = map.config.show_panoramas;
       setDocument(map); setTitle(map.title); setDescription(map.description); setReady(true);
     }).catch(e => { if (live) setError(e.message); });
@@ -41,10 +43,11 @@ export default function MapDocumentPage() {
     try {
       const state = useMapStore.getState();
       const vectorState = useVectorStore.getState();
-      const base = Object.entries(baseLayers).find(([,url]) => url === state.baseLayerUrl);
-      if (!base) throw new Error('Эта подложка не поддерживает сохранение. Выберите другую.');
-      const config: MapConfig = { view: view.current, base_layer: base[0] as keyof typeof baseLayers,
-        orthophoto_ids: state.selectedOrthoIds, vector_layers: [...vectorState.activeVectorIds].map(id => vectorState.layerSources[id]), show_panoramas: panoramas.current };
+      const vectorIds=[...vectorState.activeVectorIds];
+      const config: MapConfig = { view: view.current, base_layer: state.baseLayerId,
+        coordinate_system:state.coordinateSystem,
+        layer_settings:useLayerStyleStore.getState().layers.map(item=>({...item,key:item.key.startsWith('vector:') ? `vector:${vectorIds.indexOf(item.key.slice(7))}` : item.key})),
+        orthophoto_ids: state.selectedOrthoIds, vector_layers: vectorIds.map(id => vectorState.layerSources[id]), show_panoramas: panoramas.current };
       if (config.vector_layers.some(item => !item)) throw new Error('Повторно выберите векторные слои перед сохранением.');
       const result = await workspaceRequest<{ map: MapDocument }>(`/maps/${mapId}`, 'PUT', { title, description, config, revision: document.revision });
       setDocument(result.map); setNotice('Карта сохранена. Публикацию можно обновить отдельно.');

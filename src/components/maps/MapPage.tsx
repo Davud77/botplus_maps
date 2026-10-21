@@ -1,4 +1,9 @@
+import { LayerPane } from './layers/LayerPane';
 // src/components/maps/MapPage.tsx
+import { useVectorStore } from './hooks/useVectorStore';
+import { useLayerStyleStore } from './hooks/useLayerStyleStore';
+import { ActiveLayersPanel } from './ui/panels/ActiveLayersPanel';
+import { CoordinateReadout } from './ui/CoordinateReadout';
 import { MapConfig } from '../../utils/workspaceApi';
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { MapContainer, TileLayer, useMap } from 'react-leaflet';
@@ -62,20 +67,23 @@ interface MapPageProps { initialConfig?: MapConfig; readOnly?: boolean;
 const MapPage: React.FC<MapPageProps> = ({ initialConfig, readOnly = false, onViewChange, onPanoramasChange }) => {
   // Global Stores
   const { activePanel, closeAll } = useUIStore();
-  const { baseLayerUrl } = useMapStore();
+  const { baseLayerUrl, baseDefinition } = useMapStore();
+  const selectedOrthoIds=useMapStore(s=>s.selectedOrthoIds);
+  const activeVectorIds=useVectorStore(s=>s.activeVectorIds);
+  const presentations=useLayerStyleStore(s=>s.layers);
 
   // Local State (Map & View)
   const mapCenter: [number, number] = initialConfig?.view.center || [43, 47];
-  
+
   // Для отладки: храним текущий зум
   const [currentZoom, setCurrentZoom] = useState<number>(5);
-  
+
   // Pano State
   const [showPanoLayer, setShowPanoLayer] = useState(initialConfig?.show_panoramas || false);
   const isLoadingPano = false;
   const [selectedMarker, setSelectedMarker] = useState<string | null>(null);
   const [isPanoVisible, setIsPanoVisible] = useState(false);
-  
+
   // Состояние для метаданных панорамы
   const [panoDetails, setPanoDetails] = useState<{ title: string; date: string; alt: string } | null>(null);
 
@@ -86,12 +94,9 @@ const MapPage: React.FC<MapPageProps> = ({ initialConfig, readOnly = false, onVi
   // Ref для контейнера панорамы, чтобы управлять Fullscreen
   const panoContainerRef = useRef<HTMLDivElement | null>(null);
 
-  // Синхронизация: если открыта панель панорам, включаем слой на карте автоматически
   useEffect(() => {
-    if (activePanel === 'pano') {
-      setShowPanoLayer(true);
-    }
-  }, [activePanel]);
+    useLayerStyleStore.getState().sync([...[...activeVectorIds].map(id=>`vector:${id}`),...selectedOrthoIds.map(id=>`ortho:${id}`),...(showPanoLayer?['panoramas']:[])]);
+  }, [selectedOrthoIds,activeVectorIds,showPanoLayer]);
 
   useEffect(() => { onPanoramasChange?.(showPanoLayer); }, [showPanoLayer, onPanoramasChange]);
 
@@ -100,7 +105,7 @@ const MapPage: React.FC<MapPageProps> = ({ initialConfig, readOnly = false, onVi
     // 1. Управление классами контейнера карты
     if (mapRef.current) {
       const mapContainerHtmlElement = mapRef.current.getContainer();
-      
+
       if (isPanoVisible) {
         mapContainerHtmlElement.classList.add('minimap-mode', 'main-map-container-pano');
       } else {
@@ -154,10 +159,10 @@ const MapPage: React.FC<MapPageProps> = ({ initialConfig, readOnly = false, onVi
 
   return (
     <div className="map-page-wrapper">
-      
+
       {/* 1. HEADER */}
       <div className="ui-overlay-layer" hidden={readOnly}>
-        <MapHeader 
+        <MapHeader
           onSearch={handleSearch}
           onTogglePano={() => setShowPanoLayer(!showPanoLayer)}
           isPanoLoading={isLoadingPano}
@@ -166,14 +171,15 @@ const MapPage: React.FC<MapPageProps> = ({ initialConfig, readOnly = false, onVi
 
       {/* 2. SIDE PANELS */}
       <div className="ui-overlay-layer" hidden={readOnly}>
+        {activePanel === 'activeLayers' && <ActiveLayersPanel onClose={closeAll} onRemovePanos={()=>setShowPanoLayer(false)} />}
         {activePanel === 'vector' && <VectorPanel onClose={closeAll} />}
         {activePanel === 'baseLayers' && <BaseLayersPanel onClose={closeAll} />}
         {activePanel === 'ortho' && <OrthoPanel onClose={closeAll} map={mapRef.current} />}
-        
+
         {activePanel === 'pano' && (
-          <PanoPanel 
-            onClose={closeAll} 
-            panoDetails={isPanoVisible ? panoDetails : null} 
+          <PanoPanel
+            onClose={closeAll}
+            panoDetails={isPanoVisible ? panoDetails : null} added={showPanoLayer} onAdd={()=>setShowPanoLayer(true)}
           />
         )}
       </div>
@@ -181,24 +187,24 @@ const MapPage: React.FC<MapPageProps> = ({ initialConfig, readOnly = false, onVi
       {/* 3. PANORAMA VIEWER */}
       {selectedMarker && isPanoVisible && (
         <div ref={panoContainerRef} className="panorama-viewer-container">
-          <PanoramaViewer 
-            markerId={selectedMarker} 
-            isExpanded={true} 
+          <PanoramaViewer
+            markerId={selectedMarker}
+            isExpanded={true}
             onDataLoad={(data) => setPanoDetails(data)}
           />
-          
+
           <div className="pano-controls-overlay">
             {/* Кнопка Fullscreen с картинкой */}
-            <button 
+            <button
               onClick={toggleFullscreen}
               className="layers-button pano-fullscreen-btn"
               title="На весь экран"
             >
               <img src="/images/svg/fullscreen-icon.svg" alt="На весь экран" width="24" height="24" />
             </button>
-            
+
             {/* Кнопка Закрыть с картинкой */}
-            <button 
+            <button
               onClick={() => {
                 setIsPanoVisible(false);
                 setPanoDetails(null);
@@ -213,24 +219,25 @@ const MapPage: React.FC<MapPageProps> = ({ initialConfig, readOnly = false, onVi
       )}
 
       {/* 4. MAP CONTAINER */}
-      <MapContainer 
-        center={mapCenter} 
+      <MapContainer
+        center={mapCenter}
         zoom={initialConfig?.view.zoom ?? 5}
-        className="main-map-container" 
-        zoomControl={false} 
+        className="main-map-container"
+        zoomControl={false}
         maxZoom={23}
         preferCanvas={true} // Use Canvas instead of one SVG node per point.
       >
         <MapStateObserver mapRef={mapRef} onViewChange={onViewChange} onZoomChange={setCurrentZoom} />
-        <>{baseLayerUrl && <TileLayer url={baseLayerUrl} maxZoom={23} attribution="© OpenStreetMap contributors · CARTO / provider" />}</>
+        <>{baseLayerUrl && <TileLayer key={baseLayerUrl} url={baseLayerUrl} maxZoom={24} maxNativeZoom={baseDefinition?.max_zoom??22} tms={baseDefinition?.scheme==='tms'} attribution={baseDefinition?.attribution||''} />}</>
         <CustomZoomControl />
+        <CoordinateReadout />
 
         {/* --- Layers --- */}
         <VectorLayerRenderer />
         <OrthoTileLayer />
 
-        {showPanoLayer && (
-          <PanoLayer selectedMarker={selectedMarker} onMarkerClick={handleMarkerClick} />
+        {showPanoLayer && presentations.find(item=>item.key==='panoramas')?.visible!==false && (
+          <LayerPane name="panoramas-overlay" style={{zIndex:400+presentations.length-Math.max(0,presentations.findIndex(item=>item.key==='panoramas')),opacity:presentations.find(item=>item.key==='panoramas')?.opacity??1}}><PanoLayer pane="panoramas-overlay" selectedMarker={selectedMarker} onMarkerClick={handleMarkerClick} /></LayerPane>
         )}
 
         {/* --- Events --- */}
@@ -245,7 +252,7 @@ const MapPage: React.FC<MapPageProps> = ({ initialConfig, readOnly = false, onVi
       <div className="debug-zoom-panel">
         Zoom: {currentZoom}
       </div>
-      
+
     </div>
   );
 };

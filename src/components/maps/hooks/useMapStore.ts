@@ -11,6 +11,9 @@ interface MapState {
 
   // --- Base Layers ---
   baseLayerUrl: string;
+  baseLayerId: string;
+  baseDefinition: import('../../../utils/mapSettings').Basemap | null;
+  coordinateSystem: string;
   setBaseLayer: (url: string) => void;
 
   // --- Orthophotos ---
@@ -31,7 +34,7 @@ interface MapState {
 
 export const useMapStore = create<MapState>((set, get) => ({
   mapInstance: null,
-  baseLayerUrl: '',
+  baseLayerUrl: '', baseLayerId: 'none', baseDefinition: null, coordinateSystem: 'EPSG:4326',
   
   orthoImages: [],
   selectedOrthoIds: [],

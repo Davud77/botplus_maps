@@ -112,5 +112,5 @@ def me():
         return jsonify(authenticated=False), 200
     return jsonify(authenticated=True, user={
         "id": user["id"], "username": user["username"], "role": user["role"],
-        "exp": payload["exp"],
+        "exp": payload["exp"], "theme": user["theme"],
     }), 200

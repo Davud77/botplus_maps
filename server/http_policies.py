@@ -28,7 +28,7 @@ def register_http_policies(app, decode_token, origin_allowed, resolve_user=None)
             return jsonify(message="Войдите в аккаунт повторно."), 401
         g.current_user = user
         g.current_user_id = user["id"]
-        if request.method not in {"GET", "HEAD"} and user['role'] == 'viewer' and request.path != '/api/account/password':
+        if request.method not in {"GET", "HEAD"} and user['role'] == 'viewer' and request.path not in {'/api/account/password','/api/account/preferences'}:
             return jsonify(message="У наблюдателя нет прав на изменение данных."), 403
         if (request.path.startswith('/api/users') or request.path == '/api/vector/create_db') and user['role'] != 'admin':
             return jsonify(message="Доступно только администратору."), 403

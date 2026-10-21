@@ -26,12 +26,13 @@ const Search: React.FC<SearchProps> = ({ handleSearch, isExpanded, setIsExpanded
     <div className="search-container" style={{ display: isExpanded ? 'block' : 'flex' }}>
       <input
         type="text"
+        aria-label="Поиск по координатам"
         value={searchInput}
         onChange={handleSearchChange}
         placeholder="Поиск по координатам"
         className="search-input"
       />
-      <button onClick={handleButtonClick} className="search-button">
+      <button aria-label="Найти координаты" onClick={handleButtonClick} className="search-button">
         <svg
           xmlns="http://www.w3.org/2000/svg"
           height="24px"

@@ -36,9 +36,10 @@ interface VectorTileLayerProps {
   styleConfigs: Record<string, LayerStyleConfig>; 
   active: boolean;
   zIndex?: number;
+  pane?: string;
 }
 
-const VectorTileLayer: React.FC<VectorTileLayerProps> = ({ url, styleConfigs, active, zIndex }) => {
+const VectorTileLayer: React.FC<VectorTileLayerProps> = ({ url, styleConfigs, active, zIndex, pane }) => {
   const map = useMap();
 
   useEffect(() => {
@@ -86,6 +87,7 @@ const VectorTileLayer: React.FC<VectorTileLayerProps> = ({ url, styleConfigs, ac
         return f.properties.id || f.id || 0;
       },
 
+      pane: pane || 'overlayPane',
       zIndex: zIndex || 1
     };
 
@@ -126,7 +128,7 @@ const VectorTileLayer: React.FC<VectorTileLayerProps> = ({ url, styleConfigs, ac
     return () => {
       map.removeLayer(layer);
     };
-  }, [map, url, active, styleConfigs, zIndex]); // Пересоздаем слой при изменении конфигов
+  }, [map, url, active, styleConfigs, zIndex, pane]); // Пересоздаем слой при изменении конфигов
 
   return null;
 };

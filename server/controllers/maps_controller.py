@@ -1,6 +1,8 @@
 """Persistent map documents and revocable, read-only published snapshots."""
 from copy import deepcopy
 import math
+import re
+from services import map_settings
 import secrets
 from uuid import uuid4
 from flask import Blueprint, jsonify, request, g, abort, current_app, make_response
@@ -11,7 +13,8 @@ from services.permissions import can_edit_map
 
 maps_blueprint = Blueprint('maps', __name__)
 DEFAULT_CONFIG = {'view': {'center': [43, 47], 'zoom': 5}, 'base_layer': 'none',
-                  'orthophoto_ids': [], 'vector_layers': [], 'show_panoramas': False}
+                  'orthophoto_ids': [], 'vector_layers': [], 'show_panoramas': False,
+                  'coordinate_system': 'EPSG:4326', 'base_layer_definition': None, 'layer_settings': []}
 
 
 def body():
@@ -36,8 +39,15 @@ def validate_config(value):
             or not -85.051129 <= center[0] <= 85.051129 or not -180 <= center[1] <= 180
             or not numeric(zoom) or not 0 <= zoom <= 23):
         abort(400, description='Недопустимые координаты или масштаб.')
-    if not isinstance(config['base_layer'], str) or config['base_layer'] not in {'light', 'dark', 'osm', 'none', 'google_hybrid', 'google_satellite', 'google_maps', 'esri_satellite', 'esri_streets', 'esri_topo', 'voyager', 'positron', 'topo', 'cycle', 'wikimedia'} or type(config['show_panoramas']) is not bool:
+    if not isinstance(config['base_layer'], str) or type(config['show_panoramas']) is not bool:
         abort(400, description='Неверная подложка карты.')
+    definition = map_settings.basemap(config['base_layer'])
+    legacy = {'light','dark','osm','none','google_hybrid','google_satellite','google_maps','esri_satellite','esri_streets','esri_topo','voyager','positron','topo','cycle','wikimedia'}
+    if not definition and config['base_layer'] not in legacy:
+        abort(400, description='Подложка не найдена.')
+    config['base_layer_definition'] = definition
+    if not isinstance(config['coordinate_system'], str): abort(400)
+    map_settings.coordinate_system(config['coordinate_system'])
     orthos, vectors = config['orthophoto_ids'], config['vector_layers']
     if not isinstance(orthos, list) or len(orthos) > 128 or any(type(i) is not int or i <= 0 for i in orthos) or len(set(orthos)) != len(orthos):
         abort(400, description='Выберите не более 128 ортофотопланов.')
@@ -62,6 +72,22 @@ def validate_config(value):
                     abort(400, description='Векторный слой больше не существует.')
     except DatabaseError:
         abort(400, description='Не удалось проверить подключение векторного слоя.')
+    allowed = {f'ortho:{i}' for i in orthos} | {f'vector:{i}' for i in range(len(vectors))}
+    if config['show_panoramas']: allowed.add('panoramas')
+    presentations = config['layer_settings']
+    if not isinstance(presentations,list) or len(presentations)>257: abort(400)
+    seen = set()
+    for item in presentations:
+        if not isinstance(item,dict) or set(item)-{'key','visible','opacity','style'}: abort(400)
+        key=item.get('key')
+        if not isinstance(key,str) or key not in allowed or key in seen: abort(400,description='Неверный список слоёв карты.')
+        seen.add(key)
+        if type(item.get('visible',True)) is not bool or not numeric(item.get('opacity',1)) or not 0<=item.get('opacity',1)<=1: abort(400)
+        style=item.get('style',{})
+        if not isinstance(style,dict) or set(style)-{'color','weight','fillOpacity','radius'}: abort(400)
+        if 'color' in style and (not isinstance(style['color'],str) or not re.fullmatch(r'#[0-9a-fA-F]{6}',style['color'])): abort(400)
+        for name,maximum in [('weight',20),('fillOpacity',1),('radius',30)]:
+            if name in style and (not numeric(style[name]) or not 0<=style[name]<=maximum): abort(400)
     return config
 
 
@@ -124,7 +150,8 @@ def list_maps():
 def create_map():
     data = body()
     title, description = title_and_description(data)
-    config = validate_config(data.get('config', {}))
+    defaults = map_settings.settings()['defaults']
+    config = validate_config(data.get('config', {'base_layer': defaults['basemap'], 'coordinate_system': defaults['coordinate_system']}))
     with Database().cursor(write=True) as cursor:
         cursor.execute('INSERT INTO maps (id,owner_id,title,description,config) VALUES (%s,%s,%s,%s,%s) RETURNING *',
                        (str(uuid4()), g.current_user_id, title, description, Json(config)))
