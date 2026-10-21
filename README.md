@@ -38,7 +38,7 @@
 
 ## Быстрый локальный запуск
 
-Нужны Git, Docker Engine с Compose v2 или Docker Desktop. Образы PostGIS и TiTiler в этом профиле используют `linux/amd64`; на Apple Silicon потребуется включённая эмуляция Docker Desktop. При первом запуске Docker скачивает образы и зависимости; полностью автономная установка пока не подготовлена.
+Нужны Git, Python 3, Docker Engine с Compose v2 или Docker Desktop. Образы PostGIS и TiTiler в этом профиле используют `linux/amd64`; на Apple Silicon потребуется включённая эмуляция Docker Desktop. При первом запуске Docker скачивает образы и зависимости; полностью автономная установка пока не подготовлена.
 
 ```bash
 git clone https://github.com/Davud77/botplus_maps.git
