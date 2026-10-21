@@ -58,6 +58,8 @@ def init_auth_db():
 
             from services.map_settings import initialize_catalogs
             initialize_catalogs(cur)
+            from import_jobs import initialize
+            initialize(cur)
 
             # 2. Создаем таблицу панорам (photos_4326)
             # ВАЖНО: Требует расширения PostGIS в базе данных

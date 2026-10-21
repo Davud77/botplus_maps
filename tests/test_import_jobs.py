@@ -1,0 +1,186 @@
+"""Native GDAL + isolated PostGIS checks for durable, non-destructive imports."""
+from concurrent.futures import ThreadPoolExecutor
+from io import BytesIO
+import json
+import os
+from pathlib import Path
+import tempfile
+import unittest
+from unittest.mock import patch
+
+import test_workspace_integration as workspace_tests
+import import_jobs as jobs
+import job_worker
+from controllers import import_controller
+from managers.ortho_manager import OrthoManager
+
+
+@unittest.skipUnless(os.environ.get('TEST_POSTGIS')=='1','requires isolated PostGIS database')
+class ImportIntegrationTests(unittest.TestCase):
+    cleanup_schema=workspace_tests.WorkspaceIntegrationTests.cleanup_schema
+    client=workspace_tests.WorkspaceIntegrationTests.client
+
+    def setUp(self):
+        workspace_tests.WorkspaceIntegrationTests.setUp(self)
+        self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
+        self.folder=Path(self.temp.name)
+        env={'LOCAL_SOURCE_ROOTS':json.dumps({'local':str(self.folder/'sources')}),
+             'IMPORT_PRODUCTS_DIR':str(self.folder/'products'),'IMPORT_STAGING_DIR':str(self.folder/'staging')}
+        (self.folder/'sources').mkdir()
+        patcher=patch.dict(os.environ,env);patcher.start();self.addCleanup(patcher.stop)
+        for module in [jobs,import_controller]:
+            patcher=patch.object(module,'Database',return_value=self.db);patcher.start();self.addCleanup(patcher.stop)
+        with self.db.cursor(write=True) as cur: cur.execute('DROP TABLE orthophotos')
+        OrthoManager(self.db)
+        self.app.register_blueprint(import_controller.imports_blueprint,url_prefix='/api')
+        from osgeo import gdal,osr
+        self.gdal=gdal
+        self.original=self.folder/'sources'/'plain.tif'
+        ds=gdal.GetDriverByName('GTiff').Create(str(self.original),64,64,1,gdal.GDT_Byte)
+        ds.SetGeoTransform([47,0.0001,0,43,0,-0.0001]);srs=osr.SpatialReference();srs.ImportFromEPSG(4326);ds.SetProjection(srs.ExportToWkt());ds.GetRasterBand(1).Fill(128);ds=None
+        self.cog=self.folder/'sources'/'ready.tif'
+        ds=gdal.Translate(str(self.cog),str(self.original),format='COG');ds=None
+        job_worker.STOP.clear()
+
+    def enqueue(self,path='ready.tif',client=None,**kwargs):
+        response=(client or self.editor).post('/api/imports/jobs',json={'root_id':'local','key':path,**kwargs})
+        self.assertEqual(response.status_code,202,response.get_data(as_text=True))
+        return response.get_json()['job']
+
+    def test_role_ownership_path_and_idempotency_boundaries(self):
+        self.assertEqual(self.viewer.get('/api/imports/sources').status_code,403)
+        self.assertEqual(self.viewer.post('/api/imports/jobs',json={}).status_code,403)
+        sources=self.editor.get('/api/imports/sources').get_json()
+        self.assertEqual(sources['sources'],[{'id':'local','name':'local'}])
+        self.assertNotIn(str(self.folder),json.dumps(sources))
+        job=self.enqueue(idempotency_key='one')
+        self.assertEqual(self.enqueue(idempotency_key='one')['id'],job['id'])
+        self.assertEqual(self.other.get('/api/imports/jobs/'+job['id']).status_code,404)
+        self.assertEqual(self.admin.get('/api/imports/jobs/'+job['id']).status_code,200)
+        (self.folder/'sources'/'escape.tif').symlink_to(self.folder/'outside.tif')
+        (self.folder/'outside.tif').write_bytes(b'outside')
+        for path in ['../outside.tif','escape.tif',str(self.cog),'missing.tif','ready.txt']:
+            self.assertEqual(self.editor.post('/api/imports/jobs',json={'root_id':'local','key':path}).status_code,400)
+        self.assertEqual(self.editor.post('/api/imports/jobs',json={'root_id':'__uploads','key':'anything.tif'}).status_code,400)
+        self.assertEqual(self.editor.post('/api/imports/jobs',json={'root_id':'local','key':'plain.tif','idempotency_key':'one'}).status_code,400)
+
+    def test_ready_cog_is_registered_without_copy_and_duplicate_result(self):
+        before=self.cog.read_bytes();stat=jobs.fingerprint(self.cog)
+        job=self.enqueue();claimed=jobs.claim(self.db);result=job_worker.execute(claimed,self.db)
+        self.assertTrue(result['no_copy']);self.assertEqual(self.cog.read_bytes(),before)
+        self.assertEqual(jobs.fingerprint(self.cog),stat)
+        asset=jobs.asset_record(result['ortho_id'],self.db)
+        self.assertEqual(jobs.asset_path(asset),self.cog)
+        self.assertFalse(jobs.products_root().exists())
+        second=self.enqueue(client=self.other)
+        other_result=job_worker.execute(jobs.claim(self.db),self.db)
+        self.assertEqual(other_result['ortho_id'],result['ortho_id'])
+        self.assertEqual(self.editor.get('/api/imports/jobs/'+job['id']).get_json()['job']['status'],'succeeded')
+        with self.db.cursor() as cur:
+            cur.execute('SELECT count(*) AS n FROM orthophotos');self.assertEqual(cur.fetchone()['n'],1)
+
+    def test_plain_geotiff_creates_cog_preserving_original_and_detects_changes(self):
+        before=self.original.read_bytes();self.enqueue('plain.tif')
+        result=job_worker.execute(jobs.claim(self.db),self.db)
+        self.assertIsNotNone(result);self.assertFalse(result['no_copy'])
+        self.assertEqual(self.original.read_bytes(),before)
+        asset=jobs.asset_record(result['ortho_id'],self.db);product=jobs.asset_path(asset)
+        self.assertNotEqual(product,self.original)
+        ds=self.gdal.Open(str(product));self.assertEqual(ds.GetMetadata('IMAGE_STRUCTURE')['LAYOUT'],'COG');ds=None
+        self.original.write_bytes(before+b'changed')
+        with self.assertRaisesRegex(ValueError,'изменён'):jobs.asset_path(asset)
+
+    def test_cancel_retry_and_changed_source_do_not_publish(self):
+        job=self.enqueue()
+        self.assertEqual(self.editor.post('/api/imports/jobs/'+job['id']+'/cancel',json={}).status_code,200)
+        self.assertIsNone(jobs.claim(self.db))
+        self.assertEqual(self.editor.post('/api/imports/jobs/'+job['id']+'/retry',json={}).status_code,200)
+        claimed=jobs.claim(self.db)
+        self.assertEqual(self.editor.post('/api/imports/jobs/'+job['id']+'/cancel',json={}).status_code,200)
+        self.assertIsNone(job_worker.execute(claimed,self.db))
+        self.assertEqual(self.editor.get('/api/imports/jobs/'+job['id']).get_json()['job']['status'],'cancelled')
+        self.assertTrue(self.cog.is_file())
+        self.editor.post('/api/imports/jobs/'+job['id']+'/retry',json={})
+        claimed=jobs.claim(self.db);self.cog.write_bytes(self.cog.read_bytes()+b'changed')
+        self.assertIsNone(job_worker.execute(claimed,self.db))
+        with self.db.cursor() as cur:
+            cur.execute('SELECT count(*) AS n FROM orthophotos');self.assertEqual(cur.fetchone()['n'],0)
+
+    def test_expired_lease_is_reclaimed_and_old_worker_cannot_publish(self):
+        job=self.enqueue();old=jobs.claim(self.db)
+        with self.db.cursor(write=True) as cur:cur.execute("UPDATE import_jobs SET lease_until=NOW()-INTERVAL '1 second' WHERE id=%s",(job['id'],))
+        current=jobs.claim(self.db)
+        self.assertEqual(current['attempts'],2);self.assertNotEqual(old['lease_token'],current['lease_token'])
+        self.assertIsNone(job_worker.execute(old,self.db))
+        result=job_worker.execute(current,self.db);self.assertIsNotNone(result)
+        with self.db.cursor() as cur:
+            cur.execute('SELECT count(*) AS n FROM orthophotos');self.assertEqual(cur.fetchone()['n'],1)
+
+    def test_parallel_claims_and_graceful_stop(self):
+        self.enqueue();self.enqueue('plain.tif')
+        with ThreadPoolExecutor(max_workers=2) as pool:claims=list(pool.map(lambda _:jobs.claim(self.db),range(2)))
+        self.assertEqual(len({str(job['id']) for job in claims}),2)
+        job_worker.STOP.set()
+        try:self.assertIsNone(job_worker.execute(claims[0],self.db))
+        finally:job_worker.STOP.clear()
+        with self.db.cursor() as cur:
+            cur.execute('SELECT status,attempts FROM import_jobs WHERE id=%s',(str(claims[0]['id']),));row=cur.fetchone()
+            self.assertEqual(row['status'],'queued');self.assertEqual(row['attempts'],0)
+
+    def test_web_upload_uses_same_queue_and_rejects_invalid_data(self):
+        response=self.editor.post('/api/imports/uploads',data={'file':(BytesIO(self.cog.read_bytes()),'uploaded.tif')},content_type='multipart/form-data')
+        self.assertEqual(response.status_code,202,response.get_data(as_text=True))
+        self.assertIsNotNone(job_worker.execute(jobs.claim(self.db),self.db))
+        response=self.editor.post('/api/imports/uploads',data={'file':(BytesIO(b'not a raster'),'fake.tif')},content_type='multipart/form-data')
+        self.assertEqual(response.status_code,202)
+        self.assertIsNone(job_worker.execute(jobs.claim(self.db),self.db))
+        self.assertEqual(self.editor.get('/api/imports/jobs/'+response.get_json()['job']['id']).get_json()['job']['status'],'failed')
+        self.assertEqual(self.editor.post('/api/imports/uploads',data={'file':(BytesIO(b'x'),'bad.zip')}).status_code,400)
+
+    def test_unregister_keeps_source_and_allows_fresh_registration(self):
+        from controllers.ortho_controller import OrthoController
+        controller=object.__new__(OrthoController);controller.db=self.db;controller.ortho_manager=OrthoManager(self.db,ensure_schema=False)
+        self.app.add_url_rule('/api/unregister/<int:ortho_id>',view_func=controller.delete_ortho,methods=['DELETE'])
+        self.enqueue();result=job_worker.execute(jobs.claim(self.db),self.db)
+        self.assertEqual(self.editor.delete('/api/unregister/'+str(result['ortho_id'])).status_code,200)
+        self.assertTrue(self.cog.is_file());self.assertIsNone(jobs.asset_record(result['ortho_id'],self.db))
+        fresh=self.enqueue();self.assertEqual(fresh['status'],'queued')
+        self.assertIsNotNone(job_worker.execute(jobs.claim(self.db),self.db))
+
+    def test_legacy_web_uploader_uses_durable_queue_and_compatible_status(self):
+        from controllers.ortho_controller import OrthoController
+        controller=object.__new__(OrthoController);controller.db=self.db
+        self.app.add_url_rule('/api/upload_ortho',view_func=controller.upload_ortho,methods=['POST'])
+        self.app.add_url_rule('/api/tasks/<task_id>',view_func=controller.get_task_status)
+        response=self.editor.post('/api/upload_ortho',data={'files':(BytesIO(self.cog.read_bytes()),'old-form.tif')},content_type='multipart/form-data')
+        self.assertEqual(response.status_code,202,response.get_data(as_text=True))
+        identifier=response.get_json()['task_id']
+        self.assertEqual(self.editor.get('/api/tasks/'+identifier).get_json()['status'],'pending')
+        self.assertEqual(self.other.get('/api/tasks/'+identifier).status_code,404)
+        self.assertIsNotNone(job_worker.execute(jobs.claim(self.db),self.db))
+        self.assertEqual(self.editor.get('/api/tasks/'+identifier).get_json()['status'],'success')
+
+    def test_tile_gateway_requests_png_for_local_assets_and_rejects_stale_sources(self):
+        self.enqueue();result=job_worker.execute(jobs.claim(self.db),self.db)
+        from services.ortho_service import OrthoService
+        from werkzeug.exceptions import Conflict
+        service=object.__new__(OrthoService);service.db=self.db;service.manager=OrthoManager(self.db,ensure_schema=False)
+        with patch('services.ortho_service.requests.get') as request:
+            request.return_value.status_code=200;request.return_value.content=b'PNG-fixture'
+            self.assertEqual(service.proxy_tile(result['ortho_id'],0,0,0),b'PNG-fixture')
+            self.assertTrue(request.call_args.args[0].endswith('/0/0/0.png'))
+            self.assertEqual(request.call_args.kwargs['params']['url'],str(self.cog))
+            self.cog.write_bytes(self.cog.read_bytes()+b'changed')
+            request.reset_mock()
+            with self.app.test_request_context(),self.assertRaises(Conflict):service.proxy_tile(result['ortho_id'],0,0,0)
+            request.assert_not_called()
+
+    def test_custom_source_crs_override_creates_derivative_without_rewriting_original(self):
+        response=self.admin.post('/api/settings/coordinate-systems',json={'name':'Local geographic','definition':'+proj=longlat +datum=WGS84 +no_defs'})
+        self.assertEqual(response.status_code,201)
+        before=self.cog.read_bytes()
+        self.enqueue(source_crs_id=response.get_json()['coordinate_system']['id'])
+        result=job_worker.execute(jobs.claim(self.db),self.db)
+        self.assertIsNotNone(result);self.assertFalse(result['no_copy'])
+        self.assertEqual(self.cog.read_bytes(),before)
+        self.assertNotEqual(jobs.asset_path(jobs.asset_record(result['ortho_id'],self.db)),self.cog)

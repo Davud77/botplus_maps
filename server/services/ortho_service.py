@@ -368,11 +368,15 @@ class OrthoService:
         minio_endpoint = getattr(config, 'MINIO_ENDPOINT', "minio:9000")
         bucket_name = getattr(config, 'MINIO_ORTHO_BUCKET', "orthophotos")
 
-        s3_url = f"s3://{bucket_name}/{ortho.filename}"
+        import import_jobs
+        from flask import abort
+        asset=import_jobs.asset_record(ortho_id,self.db)
+        try: s3_url=str(import_jobs.asset_path(asset)) if asset else f"s3://{bucket_name}/{ortho.filename}"
+        except (ValueError,OSError): abort(409,description='Источник изменён или недоступен. Проверьте импорт и подключённый диск.')
 
         try:
             resp = requests.get(
-                f"{titiler_host}/cog/tiles/WebMercatorQuad/{z}/{x}/{y}",
+                f"{titiler_host}/cog/tiles/WebMercatorQuad/{z}/{x}/{y}.png",
                 params={"url": s3_url, "rescale": "0,255"},
                 timeout=10
             )

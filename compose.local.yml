@@ -32,9 +32,10 @@ services:
       timeout: 5s
       retries: 30
   app:
+    image: botplus-local-app
     restart: unless-stopped
     build: .
-    environment:
+    environment: &app_environment
       PYTHONPATH: /app/server
       APP_ENV: local
       APP_PORT: 5000
@@ -54,11 +55,17 @@ services:
       ORTHO_FOLDER: /app/server/uploads/orthos
       TEMP_FOLDER: /app/data/temp/orthos
       TASKS_FOLDER: /app/data/tasks
+      LOCAL_SOURCE_ROOTS: '{"local":"/sources/local"}'
+      IMPORT_STAGING_DIR: /app/data/import-staging
+      IMPORT_PRODUCTS_DIR: /app/data/import-products
+      PROJ_NETWORK: 'OFF'
+      GDAL_DISABLE_READDIR_ON_OPEN: EMPTY_DIR
     ports:
       - '127.0.0.1:${APP_PORT:-5580}:5000'
     volumes:
       - local_uploads:/app/server/uploads
       - local_work:/app/data
+      - ${LOCAL_SOURCE_DIR:-./data/sources}:/sources/local:ro
     depends_on:
       db:
         condition: service_healthy
@@ -69,6 +76,21 @@ services:
       interval: 15s
       timeout: 5s
       retries: 10
+  worker:
+    image: botplus-local-app
+    restart: unless-stopped
+    command: [python, server/job_worker.py]
+    mem_limit: ${IMPORT_WORKER_MEMORY:-1g}
+    cpus: ${IMPORT_WORKER_CPUS:-2.0}
+    environment: *app_environment
+    stop_grace_period: 30s
+    volumes:
+      - local_work:/app/data
+      - local_uploads:/app/server/uploads
+      - ${LOCAL_SOURCE_DIR:-./data/sources}:/sources/local:ro
+    depends_on:
+      app:
+        condition: service_healthy
   titiler:
     restart: unless-stopped
     image: ghcr.io/developmentseed/titiler:0.18.5
@@ -82,6 +104,9 @@ services:
       AWS_VIRTUAL_HOSTING: 'FALSE'
       AWS_HTTPS: 'FALSE'
       GDAL_DISABLE_READDIR_ON_OPEN: EMPTY_DIR
+    volumes:
+      - local_work:/app/data:ro
+      - ${LOCAL_SOURCE_DIR:-./data/sources}:/sources/local:ro
     depends_on:
       minio:
         condition: service_healthy

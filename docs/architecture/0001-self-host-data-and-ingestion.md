@@ -27,7 +27,7 @@
 - Неоптимизированный raster требует производной и scratch; точный budget устанавливается recipe/preflight и проверяется перед стартом.
 - NAS не делает чтение бесплатным: latency/IOPS/read amplification входят в тесты.
 - Нет одновременной реализации двух разных import pipelines для CLI и web.
-- Пока это ADR, не обещание, что legacy MinIO-only app уже умеет no-copy. Текущий CLI реализует только metadata preflight.
+- Пока это ADR, не обещание, что legacy MinIO-only app уже умеет no-copy. Первый проход реализации теперь включает HTTP CLI, no-copy локального COG, подготовку GeoTIFF отдельным worker и PostgreSQL jobs. Полные dataset versions, outbox/reconciliation и GC пока не реализованы.
 
 ## Отвергнутые варианты
 

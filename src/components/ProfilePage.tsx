@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import Header from './Header';
 import MapPreferences from './profile/MapPreferences';
+import ImportJobs from './profile/ImportJobs';
 import { useAuth } from '../hooks/useAuth';
 import { Role, roleNames, WorkspaceUser, workspaceRequest } from '../utils/workspaceApi';
 import ProfileVector from './profile/ProfileVector';
@@ -55,7 +56,7 @@ export default function ProfilePage() {
       if (id === user?.id) { const me = await refreshUser(); if (me?.role !== 'admin') setTab('account'); }
     } catch (e) { setNotice({ text: (e as Error).message, error: true }); } finally { setPending(false); }
   }
-  const tabs = [['account','Аккаунт'],['security','Безопасность'],['appearance','Оформление'],['crs','Системы координат'],['basemaps','Подложки'],...(user?.role === 'admin' ? [['users','Пользователи']] : []),['ortho','Ортофотопланы'],['panoramas','Панорамы'],['vector','Векторные данные']];
+  const tabs = [['account','Аккаунт'],['security','Безопасность'],['appearance','Оформление'],['crs','Системы координат'],['basemaps','Подложки'],...(user?.role === 'admin' ? [['users','Пользователи']] : []),...(user?.role!=='viewer' ? [['imports','Импорт и задания']] : []),['ortho','Ортофотопланы'],['panoramas','Панорамы'],['vector','Векторные данные']];
   return <div className="ws-shell"><Header /><main className="ws-main">
     <div className="ws-eyebrow">ЛИЧНОЕ ПРОСТРАНСТВО</div><div className="ws-page-heading"><div><h1>Данные и настройки</h1><p>Управляйте своим аккаунтом, доступом команды и геоданными.</p></div></div>
     <div className="ws-profile-layout"><aside className="ws-sidebar"><div className="ws-person"><span className="ws-avatar large">{user?.username.slice(0,2).toUpperCase()}</span><strong>{user?.username}</strong><span>{user && roleNames[user.role]}</span></div>
@@ -63,6 +64,7 @@ export default function ProfilePage() {
       <button className="ws-logout" onClick={() => logout()}>Выйти из аккаунта ↗</button>
     </aside><section className="ws-profile-content">
       {notice && <div className={`ws-notice ${notice.error ? 'ws-error' : ''}`} role={notice.error ? 'alert' : 'status'}>{notice.text}</div>}
+      {tab==='imports' && user?.role!=='viewer' && <ImportJobs />}
       {['appearance','crs','basemaps'].includes(tab) && <MapPreferences key={tab} section={tab} />}
       {tab === 'account' && <><section className="ws-card"><div className="ws-section-kicker">АККАУНТ</div><h2>Личная информация</h2><p>Ваш аккаунт в этой установке BotPlus Maps.</p><dl className="ws-details"><div><dt>Логин</dt><dd>{user?.username}</dd></div><div><dt>Роль</dt><dd>{user && roleNames[user.role]}</dd></div><div><dt>Размещение</dt><dd>Собственная инфраструктура</dd></div></dl></section><section className="ws-card ws-accent-card"><h2>Всё начинается с карты</h2><p>Объединяйте слои в проекты и публикуйте только то, чем хотите поделиться.</p><a href="/">Перейти к картам →</a></section></>}
       {tab === 'security' && <section className="ws-card"><div className="ws-section-kicker">БЕЗОПАСНОСТЬ</div><h2>Сменить пароль</h2><p>После смены пароля остальные сеансы вашего аккаунта завершатся.</p><form className="ws-form-narrow" onSubmit={changePassword}>

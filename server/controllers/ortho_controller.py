@@ -1,5 +1,6 @@
 # server/controllers/ortho_controller.py
-from flask import Blueprint, jsonify, request, make_response
+from flask import Blueprint, jsonify, request, make_response, send_file, abort
+import import_jobs
 from managers.ortho_manager import OrthoManager
 from database import Database
 from services.task_service import TaskService
@@ -55,44 +56,18 @@ class OrthoController:
         return jsonify(self.ortho_service.get_all()), 200
 
     def upload_ortho(self):
-        files = request.files.getlist("files")
-        if not files:
-            return jsonify({"error": "Нет файлов"}), 400
+        # Compatibility endpoint: web uploads now use the durable worker too.
+        from controllers.import_controller import upload
+        return upload(field_name='files')
 
-        # Берем первый файл (фронтенд отправляет их по одному через uploadSingleFile)
-        file = files[0]
-        try:
-            filename = ortho_upload_key(file.filename)
-        except ValueError as exc:
-            return jsonify({"error": str(exc)}), 400
+    def local_asset(self, ortho_id):
+        return import_jobs.asset_record(ortho_id,self.db)
 
-        # Убедимся, что временная директория существует
-        os.makedirs(self.ortho_service.temp_dir, exist_ok=True)
-
-        # Сохраняем файл во временную папку СРАЗУ (пока живо HTTP-соединение)
-        # Это предотвращает потерю стрима данных, если клиент закроет вкладку раньше времени
-        input_path = os.path.join(self.ortho_service.temp_dir, filename)
-
-        # Безопасное потоковое сохранение на диск
-        CHUNK_SIZE = 8192 * 1024  # Читаем чанками по 8MB
-        with open(input_path, 'wb') as f:
-            while True:
-                chunk = file.stream.read(CHUNK_SIZE)
-                if not chunk:
-                    break
-                f.write(chunk)
-
-        # Файл на диске сервера. Теперь клиент может закрывать вкладку.
-        # Запускаем фоновый процесс (в независимом потоке)
-        task_id = self.ortho_service.start_upload_process(input_path, filename)
-
-        return jsonify({
-            "message": "Файл успешно загружен на сервер и поставлен в очередь обработки",
-            "task_id": task_id,
-            "status": "started"
-        }), 202
+    def require_legacy(self,ortho_id):
+        if self.local_asset(ortho_id): abort(409,description='Локальный слой уже подготовлен импортом. Для другой подготовки создайте новое задание; оригинал не меняется.')
 
     def process_ortho_cog(self, ortho_id):
+        self.require_legacy(ortho_id)
         # 1. Проверяем состояние файла перед запуском
         ortho = self.ortho_manager.get_ortho_by_id(ortho_id)
         if not ortho:
@@ -109,6 +84,7 @@ class OrthoController:
         return jsonify({"task_id": task_id, "status": "started"}), 202
 
     def reproject_ortho(self, ortho_id):
+        self.require_legacy(ortho_id)
         # 1. Проверяем проекцию файла перед запуском
         ortho = self.ortho_manager.get_ortho_by_id(ortho_id)
         if not ortho:
@@ -144,10 +120,16 @@ class OrthoController:
         ortho = self.ortho_manager.get_ortho_by_id(ortho_id)
         if not ortho:
             return jsonify({"error": "Not found"}), 404
+        asset=self.local_asset(ortho_id)
+        if asset:
+            try: path=import_jobs.asset_path(asset)
+            except (ValueError,OSError): abort(409,description='Источник изменён или недоступен.')
+            return send_file(path,as_attachment=True,download_name=ortho.filename)
         return self.storage_service.send_file(ortho.filename)
 
     # [NEW] Хендлеры для превью
     def generate_preview(self, ortho_id):
+        self.require_legacy(ortho_id)
         task_id = self.ortho_service.start_preview_process(ortho_id)
         if not task_id:
             return jsonify({"error": "Ortho not found or failed to start"}), 404
@@ -171,6 +153,12 @@ class OrthoController:
         if not ortho:
             return jsonify({"error": "Not found"}), 404
 
+        if self.local_asset(ortho_id):
+            with self.db.cursor(write=True) as cur:
+                cur.execute('DELETE FROM import_assets WHERE ortho_id=%s',(ortho_id,))
+                cur.execute('DELETE FROM orthophotos WHERE id=%s',(ortho_id,))
+            return jsonify(status='success',message='Регистрация удалена; исходный файл сохранён.'),200
+
         # [UPDATED] Удаляем также и файл превью, если он есть
         self.storage_service.delete_file(ortho.filename)
         if getattr(ortho, 'preview_filename', None):
@@ -190,6 +178,19 @@ class OrthoController:
         return response
 
     def get_task_status(self, task_id):
+        from uuid import UUID
+        from flask import g
+        try:
+            identifier=str(UUID(task_id))
+        except ValueError:
+            identifier=None
+        if identifier:
+            with self.db.cursor() as cur:
+                cur.execute('SELECT * FROM import_jobs WHERE id=%s',(identifier,))
+                row=cur.fetchone()
+            if row:
+                if row['owner_id']!=g.current_user_id and g.current_user['role']!='admin': abort(404)
+                return jsonify(status={'queued':'pending','running':'processing','succeeded':'success','failed':'error','cancelled':'error'}[row['status']],progress=row['progress'],message=row['message'],error=row['error'] or row['message']),200
         state = self.task_service.get_state(task_id)
         if not state:
             return jsonify({"status": "not_found"}), 404

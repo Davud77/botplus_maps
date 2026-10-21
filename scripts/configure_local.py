@@ -6,7 +6,9 @@ import secrets
 
 
 def main():
-    target = Path(__file__).resolve().parents[1] / '.env.local'
+    project = Path(__file__).resolve().parents[1]
+    (project / 'data' / 'sources').mkdir(parents=True, exist_ok=True)
+    target = project / '.env.local'
     content = '\n'.join([
         '# Local-only configuration. Do not commit or share this file.',
         'COMPOSE_PROJECT_NAME=botplus-local',
