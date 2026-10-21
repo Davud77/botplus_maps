@@ -251,3 +251,15 @@
 .ws-map-stage .search-container .search-button {background:var(--color-surface);color:var(--color-text);border-radius:7px;}
 .ws-map-stage .search-button svg {fill:currentColor;}
 .ws-map-stage .search-input {background:var(--color-surface);color:var(--color-text);}
+.ws-upload-shell>.tag-container,.ws-upload-shell>.centered-container {width:min(1320px,92%);margin:36px auto;padding:0;}
+.ws-upload-shell .tag-container {gap:24px;}
+.ws-upload-shell :is(.mini_pano,.mini_log) {background:var(--color-surface);color:var(--color-text);border:1px solid var(--color-border);border-radius:12px;min-height:320px;}
+.ws-upload-shell :is(.mini_header,.file-list,.thumbnail,.tags-input-container,.input-tags) {background:var(--color-surface);color:var(--color-text);border-color:var(--color-border);}
+.ws-upload-shell .mini_header {padding:18px 20px;gap:12px;flex-wrap:wrap;}
+.ws-upload-shell .mini_header h3 {font-size:17px;font-weight:600;color:var(--color-text);}
+.ws-upload-shell :is(.primary-button,.secondary-button,.button_white,.button) {border-radius:7px;padding:10px 14px;font-size:12px;}
+.ws-upload-shell :is(.primary-button,.button) {background:#20664e;color:white;border:1px solid #20664e;}
+.ws-upload-shell :is(.secondary-button,.button_white) {background:var(--color-surface-alt);color:var(--color-text);border:1px solid var(--color-border);}
+.ws-upload-shell .drag-drop-container {border-color:var(--color-border);border-radius:8px;color:var(--color-text-light);}
+.ws-upload-shell .log-terminal {background:var(--color-surface-alt);color:var(--color-text);border:1px solid var(--color-border);border-radius:12px;}
+.ws-upload-shell .log-prompt {font:600 12px/1.7 inherit;color:var(--color-text-light);border-bottom:1px solid var(--color-border);}
