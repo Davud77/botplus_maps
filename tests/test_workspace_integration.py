@@ -232,3 +232,25 @@ class WorkspaceIntegrationTests(unittest.TestCase):
         self.assertEqual(actual['layer_settings'],config['layer_settings'])
         for bad in [[{'key':'ortho:3'}],[{'key':'ortho:1','opacity':2}],[{'key':'ortho:1','style':{'color':'red'}}],[{'key':'ortho:1','visible':'false'}],[{'key':'ortho:1'},{'key':'ortho:1'}]]:
             self.assertEqual(self.editor.put('/api/maps/'+created['id'],json={'title':'Bad style','revision':public['revision'],'config':{**config,'layer_settings':bad}}).status_code,400)
+
+    def test_basemap_order_visibility_and_per_layer_coordinates_are_persisted(self):
+        db_name=extensions.parse_dsn(self.dsn)['dbname']
+        config={'base_layer':'google_maps','orthophoto_ids':[1],
+                'vector_layers':[{'dbName':db_name,'schema':self.schema,'tableName':'roads'}],
+                'layer_settings':[{'key':'vector:0','coordinate_system':'EPSG:32638'},
+                                  {'key':'basemap','visible':False,'opacity':0.45,'coordinate_system':'EPSG:3857'},
+                                  {'key':'ortho:1','coordinate_system':'EPSG:4326'}]}
+        record=self.publish(self.create_map(config=config))
+        anonymous=self.app.test_client()
+        base='/api/public/maps/'+record['public_slug']
+        published=anonymous.get(base).get_json()['map']['config']
+        self.assertEqual(published['layer_settings'],config['layer_settings'])
+        self.assertNotIn('dbName',anonymous.get(base).get_data(as_text=True))
+        coordinates=anonymous.get(base+'/coordinates/vector:0',query_string={'lat':43,'lng':45})
+        self.assertEqual(coordinates.status_code,200)
+        self.assertAlmostEqual(coordinates.get_json()['x'],500000,places=2)
+        self.assertEqual(anonymous.get(base+'/coordinates/vector:1?lat=43&lng=45').status_code,404)
+        self.assertEqual(anonymous.get(base+'/coordinates/ortho:2?lat=43&lng=45').status_code,404)
+        for layer in [{'key':'basemap','coordinate_system':'EPSG:9999999'}, {'key':'basemap','coordinate_system':None}]:
+            self.assertEqual(self.editor.post('/api/maps',json={'title':'Invalid CRS','config':{**config,'layer_settings':[layer]}}).status_code,400)
+        self.assertEqual(self.editor.post('/api/maps',json={'title':'Missing background','config':{'base_layer':'none','layer_settings':[{'key':'basemap'}]}}).status_code,400)

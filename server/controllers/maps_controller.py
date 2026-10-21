@@ -74,14 +74,18 @@ def validate_config(value):
         abort(400, description='Не удалось проверить подключение векторного слоя.')
     allowed = {f'ortho:{i}' for i in orthos} | {f'vector:{i}' for i in range(len(vectors))}
     if config['show_panoramas']: allowed.add('panoramas')
+    if config['base_layer'] != 'none': allowed.add('basemap')
     presentations = config['layer_settings']
-    if not isinstance(presentations,list) or len(presentations)>257: abort(400)
+    if not isinstance(presentations,list) or len(presentations)>258: abort(400)
     seen = set()
     for item in presentations:
-        if not isinstance(item,dict) or set(item)-{'key','visible','opacity','style'}: abort(400)
+        if not isinstance(item,dict) or set(item)-{'key','visible','opacity','style','coordinate_system'}: abort(400)
         key=item.get('key')
         if not isinstance(key,str) or key not in allowed or key in seen: abort(400,description='Неверный список слоёв карты.')
         seen.add(key)
+        if 'coordinate_system' in item:
+            if not isinstance(item['coordinate_system'],str): abort(400)
+            map_settings.coordinate_system(item['coordinate_system'])
         if type(item.get('visible',True)) is not bool or not numeric(item.get('opacity',1)) or not 0<=item.get('opacity',1)<=1: abort(400)
         style=item.get('style',{})
         if not isinstance(style,dict) or set(style)-{'color','weight','fillOpacity','radius'}: abort(400)
@@ -243,3 +247,14 @@ def public_vector(slug, index, z, x, y):
     if response.status_code >= 500:
         return jsonify(message='Векторный слой временно недоступен.'), 502
     return response
+
+
+@maps_blueprint.get('/public/maps/<slug>/coordinates/<layer_key>')
+def public_coordinates(slug, layer_key):
+    config=publication(slug)['config']
+    allowed={f'ortho:{i}' for i in config['orthophoto_ids']} | {f'vector:{i}' for i in range(len(config['vector_layers']))}
+    if config['base_layer'] != 'none': allowed.add('basemap')
+    if layer_key not in allowed: abort(404)
+    item=next((item for item in config.get('layer_settings',[]) if item['key']==layer_key),{})
+    from controllers.settings_controller import coordinate_response
+    return coordinate_response(item.get('coordinate_system','EPSG:3857' if layer_key=='basemap' else 'EPSG:4326'))

@@ -69,7 +69,10 @@ def preferences():
 
 @settings_blueprint.get('/settings/coordinates')
 def transform_coordinates():
-    code=request.args.get('crs','EPSG:4326')
+    return coordinate_response(request.args.get('crs','EPSG:4326'))
+
+
+def coordinate_response(code):
     try:
         lat=float(request.args['lat']); lng=float(request.args['lng'])
         if not all(math.isfinite(v) for v in [lat,lng]) or not -85.051129<=lat<=85.051129 or not -180<=lng<=180: raise ValueError()

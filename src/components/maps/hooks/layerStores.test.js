@@ -64,3 +64,22 @@ describe('map layer presentation', () => {
     expect(useLayerStyleStore.getState().layers).toEqual([{ key: 'ortho:7', visible: false, opacity: 0.35 }]);
   });
 });
+
+test('drag reorder inserts a layer at the drop target and keeps its presentation', () => {
+  const { useLayerStyleStore } = require('./useLayerStyleStore');
+  useLayerStyleStore.setState({layers:[{key:'vector:roads',opacity:0.6,coordinate_system:'EPSG:32638'},{key:'ortho:7'},{key:'basemap'}]});
+  useLayerStyleStore.getState().reorder('basemap','vector:roads',false);
+  expect(useLayerStyleStore.getState().layers.map(item=>item.key)).toEqual(['basemap','vector:roads','ortho:7']);
+  useLayerStyleStore.getState().reorder('vector:roads','ortho:7',true);
+  expect(useLayerStyleStore.getState().layers[2]).toEqual({key:'vector:roads',opacity:0.6,coordinate_system:'EPSG:32638'});
+});
+test('new backgrounds start below data and remain reorderable after catalog sync', () => {
+  const { useLayerStyleStore } = require('./useLayerStyleStore');
+  useLayerStyleStore.setState({layers:[{key:'vector:roads',opacity:0.6}]});
+  const store=useLayerStyleStore.getState();
+  store.sync(['vector:roads','basemap']);
+  expect(useLayerStyleStore.getState().layers.map(item=>item.key)).toEqual(['vector:roads','basemap']);
+  store.reorder('basemap','vector:roads',false);
+  store.sync(['vector:roads','basemap']);
+  expect(useLayerStyleStore.getState().layers.map(item=>item.key)).toEqual(['basemap','vector:roads']);
+});

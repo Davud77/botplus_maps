@@ -291,3 +291,18 @@
   .ws-map-editor-overlay .ws-publication {left:12px;right:auto;top:calc(var(--map-toolbar-height, 250px) + 24px);max-height:calc(100dvh - var(--map-toolbar-height, 250px) - 40px);}
   .ws-map-editor-overlay .ws-map-notice {top:auto;bottom:54px;right:12px;max-height:100px;overflow:auto;}
 }
+.bp-sortable-layers {display:flex;flex-direction:column;gap:8px;}
+.bp-sortable-layer {position:relative;display:flex;align-items:center;gap:8px;padding:12px 9px;border:1px solid var(--color-border);border-radius:9px;background:var(--color-surface);cursor:grab;user-select:none;touch-action:none;}
+.bp-sortable-layer:active {cursor:grabbing;}
+.bp-sortable-layer.is-dragging {opacity:.45;}
+.bp-sortable-layer.drop-before::before,.bp-sortable-layer.drop-after::after {content:'';position:absolute;left:0;right:0;height:3px;background:var(--color-primary);border-radius:3px;}
+.bp-sortable-layer.drop-before::before {top:-6px;}
+.bp-sortable-layer.drop-after::after {bottom:-6px;}
+.ws-shell .bp-drag-handle {background:transparent;color:var(--color-text-light);border:0;padding:0;width:16px;flex-shrink:0;cursor:grab;font-size:21px;}
+.bp-sortable-name {flex:1;min-width:0;overflow:hidden;}
+.bp-sortable-name strong {display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;}
+.bp-sortable-name small {font-size:10px;margin-top:3px;}
+.ws-shell .bp-sortable-layer .bp-icon-button {width:28px;height:28px;font-size:17px;}
+.bp-layer-settings {padding-top:12px;}
+.bp-layer-settings .bp-layer-settings-name {font-size:14px;color:var(--color-text);overflow-wrap:anywhere;margin:10px 0 18px;}
+.bp-layer-coordinates {display:block;padding:12px;border:1px solid var(--color-border);border-radius:7px;background:var(--color-surface-alt);font:11px/1.8 monospace;overflow-wrap:anywhere;}

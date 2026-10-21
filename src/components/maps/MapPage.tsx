@@ -96,8 +96,8 @@ const MapPage: React.FC<MapPageProps> = ({ initialConfig, readOnly = false, docu
   const panoContainerRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    useLayerStyleStore.getState().sync([...[...activeVectorIds].map(id=>`vector:${id}`),...selectedOrthoIds.map(id=>`ortho:${id}`),...(showPanoLayer?['panoramas']:[])]);
-  }, [selectedOrthoIds,activeVectorIds,showPanoLayer]);
+    useLayerStyleStore.getState().sync([...[...activeVectorIds].map(id=>`vector:${id}`),...selectedOrthoIds.map(id=>`ortho:${id}`),...(showPanoLayer?['panoramas']:[]),...(baseLayerUrl?['basemap']:[])]);
+  }, [selectedOrthoIds,activeVectorIds,showPanoLayer,baseLayerUrl]);
 
   useEffect(() => { onPanoramasChange?.(showPanoLayer); }, [showPanoLayer, onPanoramasChange]);
 
@@ -225,7 +225,7 @@ const MapPage: React.FC<MapPageProps> = ({ initialConfig, readOnly = false, docu
         preferCanvas={true} // Use Canvas instead of one SVG node per point.
       >
         <MapStateObserver mapRef={mapRef} onViewChange={onViewChange} onZoomChange={setCurrentZoom} />
-        <>{baseLayerUrl && <TileLayer key={baseLayerUrl} url={baseLayerUrl} maxZoom={24} maxNativeZoom={baseDefinition?.max_zoom??22} tms={baseDefinition?.scheme==='tms'} attribution={baseDefinition?.attribution||''} />}</>
+        {baseLayerUrl && presentations.find(item=>item.key==='basemap')?.visible!==false && <LayerPane name="basemap-overlay" style={{zIndex:400+presentations.length-Math.max(0,presentations.findIndex(item=>item.key==='basemap')),opacity:presentations.find(item=>item.key==='basemap')?.opacity??1}}><TileLayer key={baseLayerUrl} url={baseLayerUrl} maxZoom={24} maxNativeZoom={baseDefinition?.max_zoom??22} tms={baseDefinition?.scheme==='tms'} attribution={baseDefinition?.attribution||''} /></LayerPane>}
         <CustomZoomControl />
         <CoordinateReadout />
 

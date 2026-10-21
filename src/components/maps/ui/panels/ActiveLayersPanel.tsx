@@ -1,18 +1,75 @@
-import React from 'react';
+import React, { useRef, useState } from 'react';
 import { BasePanel } from './BasePanel';
+import { LayerSettings } from './LayerSettings';
 import { useLayerStyleStore } from '../../hooks/useLayerStyleStore';
 import { useMapStore } from '../../hooks/useMapStore';
 import { useVectorStore } from '../../hooks/useVectorStore';
 export function ActiveLayersPanel({onClose,onRemovePanos}: {onClose:()=>void;onRemovePanos:()=>void}) {
-  const {layers,update,move}=useLayerStyleStore(); const {orthoImages}=useMapStore(); const {layerSources}=useVectorStore();
-  return <BasePanel title="Слои на карте" onClose={onClose}><p className="bp-muted">Верхний слой отображается поверх остальных. Изменения сохраняются кнопкой «Сохранить карту».</p>{!layers.length && <p>Добавьте данные через «Векторные слои», «Ортофотопланы» или «Панорамы».</p>}{layers.map((item,index) => {
-    const ortho=item.key.startsWith('ortho:'); const pano=item.key==='panoramas'; const id=+item.key.slice(6); const vectorId=item.key.slice(7);
-    const name=ortho ? orthoImages.find(o=>o.id===id)?.filename || `Ортофото ${id}` : pano ? 'Панорамы' : layerSources[vectorId]?.tableName || vectorId;
-    const style=item.style || {};
-    return <section className="bp-layer-card" key={item.key}><div className="bp-layer-heading"><label><input type="checkbox" checked={item.visible!==false} onChange={e=>update(item.key,{visible:e.target.checked})} aria-label={`Видимость ${name}`} /><strong>{name}</strong></label><button title={`Удалить ${name} с карты`} className="bp-icon-button" onClick={()=> {if(ortho) useMapStore.setState(s=>({selectedOrthoIds:s.selectedOrthoIds.filter(v=>v!==id)})); else if(pano) onRemovePanos(); else useVectorStore.setState(s=>({activeVectorIds:new Set([...s.activeVectorIds].filter(v=>v!==vectorId))}));}}>×</button></div>
-      <div className="bp-layer-meta"><small>{ortho ? 'Ортофотоплан' : pano ? 'Панорамы' : 'Векторный слой'}</small><button className="bp-icon-button" aria-label={`Поднять ${name}`} disabled={index===0} onClick={()=>move(item.key,-1)}>↑</button><button className="bp-icon-button" aria-label={`Опустить ${name}`} disabled={index===layers.length-1} onClick={()=>move(item.key,1)}>↓</button></div>
-      <label className="bp-slider">Прозрачность <output>{Math.round((1-(item.opacity??1))*100)}%</output><input aria-label={`Прозрачность ${name}`} type="range" min="0" max="100" value={Math.round((1-(item.opacity??1))*100)} onChange={e=>update(item.key,{opacity:1-+e.target.value/100})} /></label>
-      {!ortho && !pano && <details><summary>Стиль слоя</summary><div className="bp-style-grid"><label>Цвет<input aria-label={`Цвет ${name}`} type="color" value={style.color||'#20664e'} onChange={e=>update(item.key,{style:{...style,color:e.target.value}})} /></label><label>Толщина<input type="number" aria-label={`Толщина ${name}`} min="0" max="20" step="0.5" value={style.weight??2} onChange={e=>update(item.key,{style:{...style,weight:+e.target.value}})} /></label><label>Заливка<input type="range" aria-label={`Заливка ${name}`} min="0" max="1" step="0.05" value={style.fillOpacity??0.25} onChange={e=>update(item.key,{style:{...style,fillOpacity:+e.target.value}})} /></label><label>Радиус точек<input type="number" min="0" max="30" value={style.radius??5} onChange={e=>update(item.key,{style:{...style,radius:+e.target.value}})} /></label></div><button className="ws-secondary" onClick={()=>update(item.key,{style:{}})}>Стиль источника</button></details>}
-    </section>;
-  })}</BasePanel>;
+  const {layers,update,move,reorder}=useLayerStyleStore();
+  const {orthoImages,baseDefinition,baseLayerId}=useMapStore();
+  const {layerSources}=useVectorStore();
+  const [editing,setEditing]=useState<string|null>(null);
+  const dragging=useRef<{key:string;x:number;y:number;started:boolean}|null>(null);
+  const dropRef=useRef<{key:string;after:boolean}|null>(null);
+  const [dragKey,setDragKey]=useState<string|null>(null);
+  const [drop,setDrop]=useState<{key:string;after:boolean}|null>(null);
+  const info=(key:string)=>{
+    if(key==='basemap')return {kind:'basemap' as const,name:baseDefinition?.name || baseLayerId};
+    if(key==='panoramas')return {kind:'panoramas' as const,name:'Панорамы'};
+    if(key.startsWith('ortho:'))return {kind:'ortho' as const,name:orthoImages.find(o=>o.id===+key.slice(6))?.filename || `Ортофото ${key.slice(6)}`};
+    return {kind:'vector' as const,name:layerSources[key.slice(7)]?.tableName || key.slice(7)};
+  };
+  const selected=layers.find(item=>item.key===editing);
+  const finishDrag=()=>{dragging.current=null;dropRef.current=null;setDragKey(null);setDrop(null);};
+  function pointerMove(event:React.PointerEvent<HTMLDivElement>) {
+    const source=dragging.current;
+    if(!source)return;
+    if(!source.started && Math.hypot(event.clientX-source.x,event.clientY-source.y)<5)return;
+    source.started=true;setDragKey(source.key);
+    const row=document.elementFromPoint(event.clientX,event.clientY)?.closest<HTMLElement>('[data-layer-key]');
+    const target=row?.dataset.layerKey;
+    const next=row && target && target!==source.key ? {key:target,after:event.clientY>row.getBoundingClientRect().top+row.getBoundingClientRect().height/2} : null;
+    dropRef.current=next;setDrop(next);
+    const scroll=event.currentTarget.closest<HTMLElement>('.panel-content');
+    if(scroll){const rect=scroll.getBoundingClientRect();if(event.clientY>rect.bottom-30)scroll.scrollTop+=12;else if(event.clientY<rect.top+30)scroll.scrollTop-=12;}
+  }
+  function remove(key:string) {
+    if(key==='basemap') useMapStore.setState({baseLayerId:'none',baseLayerUrl:'',baseDefinition:null});
+    else if(key==='panoramas') onRemovePanos();
+    else if(key.startsWith('ortho:')) useMapStore.setState(s=>({selectedOrthoIds:s.selectedOrthoIds.filter(id=>id!==+key.slice(6))}));
+    else useVectorStore.setState(s=>({activeVectorIds:new Set([...s.activeVectorIds].filter(id=>id!==key.slice(7)))}));
+  }
+  return <BasePanel title={selected?'Настройки слоя':'Слои на карте'} onClose={onClose}>
+    {selected ? <LayerSettings layer={selected} {...info(selected.key)} onBack={()=>setEditing(null)} /> : <>
+      <p className="bp-muted">Перетащите слой вверх или вниз за название или маркер слева. Верхний слой перекрывает нижние.</p>
+      {!layers.length && <p>Добавьте данные или выберите подложку.</p>}
+      <div className="bp-sortable-layers" role="list" aria-label="Порядок слоёв карты">
+        {layers.map(item=>{
+          const {name,kind}=info(item.key);
+          return <div key={item.key} role="listitem" data-layer-key={item.key}
+            className={`bp-sortable-layer ${dragKey===item.key?'is-dragging':''} ${drop?.key===item.key ? (drop.after?'drop-after':'drop-before'):''}`}
+            onPointerDown={event=>{
+              if(event.button!==0)return;
+              const control=(event.target as HTMLElement).closest('input,button,select,a');
+              if(control && !control.classList.contains('bp-drag-handle'))return;
+              event.preventDefault();event.currentTarget.setPointerCapture(event.pointerId);
+              dragging.current={key:item.key,x:event.clientX,y:event.clientY,started:false};
+            }}
+            onPointerMove={pointerMove}
+            onPointerUp={event=>{
+              if(dragging.current?.started && dropRef.current)reorder(dragging.current.key,dropRef.current.key,dropRef.current.after);
+              if(event.currentTarget.hasPointerCapture(event.pointerId))event.currentTarget.releasePointerCapture(event.pointerId);
+              finishDrag();
+            }}
+            onPointerCancel={finishDrag} onLostPointerCapture={finishDrag}>
+            <button className="bp-drag-handle" aria-label={`Переместить ${name}`} title="Перетащить; с клавиатуры — стрелки вверх/вниз" onKeyDown={event=>{if(event.key==='ArrowUp'||event.key==='ArrowDown'){event.preventDefault();move(item.key,event.key==='ArrowUp'?-1:1);}}}>⠿</button>
+            <input type="checkbox" checked={item.visible!==false} aria-label={`Видимость ${name}`} onChange={event=>update(item.key,{visible:event.target.checked})} />
+            <span className="bp-sortable-name" title={name}><strong>{name}</strong><small>{kind==='basemap'?'Подложка':kind==='ortho'?'Ортофотоплан':kind==='panoramas'?'Панорамы':'Векторный слой'}</small></span>
+            <button className="bp-icon-button" aria-label={`Настройки ${name}`} title="Настройки слоя" onClick={()=>setEditing(item.key)}>⚙</button>
+            <button className="bp-icon-button" aria-label={`Удалить ${name} с карты`} title="Удалить с карты" onClick={()=>remove(item.key)}>×</button>
+          </div>;
+        })}
+      </div>
+    </>}
+  </BasePanel>;
 }

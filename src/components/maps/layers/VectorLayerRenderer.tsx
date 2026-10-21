@@ -12,7 +12,7 @@ function StyledVector({source,presentation,pane}: {source:VectorSource;presentat
     const custom=presentation.style; const overridden=custom && Object.keys(custom).length>0;
     return {[source.tableName]: overridden ? {type:'single' as const,style:{...sourceStyle.style,...custom,fill:true,fillColor:custom.color || sourceStyle.style?.color || '#20664e'}} : sourceStyle};
   },[presentation.style,sourceStyle,source.tableName]);
-  return <VectorTileLayer url={`/api/vector/tiles/${path}/{z}/{x}/{y}.pbf`} styleConfigs={configs} pane={pane} active />;
+  return <VectorTileLayer url={`/api/vector/tiles/${path}/{z}/{x}/{y}.pbf`} styleConfigs={configs} pane={pane} coordinateUrl={`/settings/coordinates?crs=${encodeURIComponent(presentation.coordinate_system||'EPSG:4326')}`} active />;
 }
 export const VectorLayerRenderer = () => {
   const {activeVectorIds,layerSources}=useVectorStore(); const {layers}=useLayerStyleStore();

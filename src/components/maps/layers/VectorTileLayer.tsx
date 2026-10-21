@@ -1,4 +1,5 @@
-import React, { useEffect } from 'react';
+import { workspaceRequest } from '../../../utils/workspaceApi';
+import React, { useEffect, useRef } from 'react';
 import { useMap } from 'react-leaflet';
 import L from 'leaflet';
 // Импортируем библиотеку (убедитесь, что она установлена: npm install leaflet.vectorgrid)
@@ -37,10 +38,13 @@ interface VectorTileLayerProps {
   active: boolean;
   zIndex?: number;
   pane?: string;
+  coordinateUrl?: string;
 }
 
-const VectorTileLayer: React.FC<VectorTileLayerProps> = ({ url, styleConfigs, active, zIndex, pane }) => {
+const VectorTileLayer: React.FC<VectorTileLayerProps> = ({ url, styleConfigs, active, zIndex, pane, coordinateUrl }) => {
   const map = useMap();
+  const coordinateUrlRef=useRef(coordinateUrl);
+  useEffect(()=>{coordinateUrlRef.current=coordinateUrl;},[coordinateUrl]);
 
   useEffect(() => {
     if (!active) return;
@@ -118,6 +122,18 @@ const VectorTileLayer: React.FC<VectorTileLayerProps> = ({ url, styleConfigs, ac
           cell.textContent = value == null ? '' : String(value);
         });
         container.appendChild(table);
+        const currentCoordinateUrl=coordinateUrlRef.current;
+        if(currentCoordinateUrl) {
+          const coordinates=document.createElement('p');
+          coordinates.className='vector-popup-coordinates';
+          coordinates.textContent='Пересчитываем координаты…';
+          container.appendChild(coordinates);
+          const point=e.latlng.wrap();
+          workspaceRequest<{x:number;y:number;unit:string;name:string}>(`${currentCoordinateUrl}${currentCoordinateUrl.includes('?')?'&':'?'}lat=${point.lat}&lng=${point.lng}`).then(value=>{
+            const decimals=value.unit==='°'?6:2;
+            coordinates.textContent=`${value.name} · X ${value.x.toFixed(decimals)} · Y ${value.y.toFixed(decimals)} ${value.unit}`;
+          }).catch(()=>{coordinates.textContent='Координаты в выбранной СК недоступны.';});
+        }
         L.popup().setLatLng(e.latlng).setContent(container).openOn(map);
 
         L.DomEvent.stop(e); 
