@@ -19,9 +19,9 @@ test('page selection moves exactly selected IDs and uses reversible trash',async
  await waitFor(()=>expect(workspaceRequest).toHaveBeenCalledWith('/media/bulk','POST',{ids:[1],action:'trash'}));
  expect(workspaceRequest.mock.calls.some(([,method])=>method==='DELETE')).toBe(false);
 });
-test('map uses the folder filter and a bounded marker endpoint without external basemap',async()=>{
- render(<ProfilePanoramas/>);await screen.findByLabelText('Выбрать страницу');fireEvent.change(screen.getByLabelText('Папка каталога'),{target:{value:'7'}});fireEvent.click(screen.getByRole('button',{name:'Карта',exact:true}));
- expect(screen.getByTestId('markers')).toHaveTextContent('/api/media/markers?folder=7');
+test('map uses a bounded marker endpoint without removed filters',async()=>{
+ render(<ProfilePanoramas/>);await screen.findByLabelText('Выбрать страницу');expect(screen.queryByLabelText('Поиск панорам')).toBeNull();expect(screen.queryByText('Управление папками')).toBeNull();fireEvent.click(screen.getByRole('button',{name:'Карта',exact:true}));
+ expect(screen.getByTestId('markers')).toHaveTextContent('/api/media/markers?trash=0');
 });
 test('viewer has no bulk modification controls',async()=>{
  mockRole='viewer';render(<ProfilePanoramas/>);await screen.findByText('one.jpg');expect(screen.queryByRole('button',{name:'В корзину'})).toBeNull();expect(screen.queryByLabelText('Выбрать страницу')).toBeNull();

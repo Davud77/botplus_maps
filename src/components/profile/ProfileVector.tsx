@@ -1,223 +1,58 @@
-import React, { FC, useEffect, useState } from 'react';
-import { 
-  fetchVectorDbs, 
-  fetchVectorLayers, 
-  createVectorDb, 
-  createVectorLayer,
-  VectorDbItem,
-  VectorLayerItem
-} from '../../utils/api'; 
+import React, { FC, useCallback, useEffect, useState } from 'react';
+import { fetchVectorDbs, fetchVectorLayers, createVectorDb, createVectorLayer, VectorDbItem } from '../../utils/api';
+import { useAuth } from '../../hooks/useAuth';
 
 const ProfileVector: FC = () => {
-  const [vectorDbs, setVectorDbs] = useState<VectorDbItem[]>([]);
-  const [loadingVector, setLoadingVector] = useState(false);
-  const [errorVector, setErrorVector] = useState('');
-
-  // Состояние для формы создания нового слоя
-  const [creatingLayerInDb, setCreatingLayerInDb] = useState<string | null>(null);
-  const [newLayerName, setNewLayerName] = useState('');
-  const [newLayerType, setNewLayerType] = useState('POINT');
-
-  const loadVectorData = async () => {
-    setLoadingVector(true);
-    setErrorVector('');
+  const { user } = useAuth();
+  const editable = user?.role !== 'viewer';
+  const [databases, setDatabases] = useState<VectorDbItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const [showDatabaseForm, setShowDatabaseForm] = useState(false);
+  const [databaseName, setDatabaseName] = useState('');
+  const [layerDatabase, setLayerDatabase] = useState<string | null>(null);
+  const [layerName, setLayerName] = useState('');
+  const [geometry, setGeometry] = useState('POINT');
+  const load = useCallback(async () => {
+    setLoading(true);
     try {
       const dbs = await fetchVectorDbs();
-      dbs.sort((a, b) => a.name.localeCompare(b.name));
-
-      const dbsWithLayers = await Promise.all(dbs.map(async (db) => {
-        try {
-          const layers = await fetchVectorLayers(db.name);
-          return { ...db, layers: layers };
-        } catch (err) {
-          console.warn(`Could not load layers for ${db.name}`, err);
-          return { ...db, layers: [] };
-        }
+      const rows = await Promise.all(dbs.map(async db => {
+        try { return { ...db, layers: await fetchVectorLayers(db.name) }; }
+        catch { return { ...db, layers: [], status: 'error' as const }; }
       }));
-
-      setVectorDbs(dbsWithLayers);
-    } catch (error) {
-      if (error instanceof Error) {
-        setErrorVector(error.message);
-      } else {
-        setErrorVector('Ошибка соединения с сервером PostGIS');
-      }
-    } finally {
-      setLoadingVector(false);
-    }
-  };
-
-  useEffect(() => {
-    loadVectorData();
+      setDatabases(rows.sort((a,b) => a.name.localeCompare(b.name)));
+    } catch (e) { setError((e as Error).message); }
+    finally { setLoading(false); }
   }, []);
-
-  const handleCreateVectorDB = async () => {
-    const dbName = prompt('Введите название новой базы данных (латиница, без пробелов):');
-    if (!dbName) return;
-
-    try {
-      setLoadingVector(true);
-      await createVectorDb(dbName);
-      alert(`База данных "${dbName}" успешно создана!`);
-      await loadVectorData(); 
-    } catch (error) {
-      alert(error instanceof Error ? error.message : 'Ошибка при создании БД');
-      setLoadingVector(false);
-    }
-  };
-
-  const handleConnectVectorDB = async () => {
-    alert('Подключение внешних (удаленных) PostGIS баз будет реализовано позже.');
-  };
-
-  const handleCreateLayer = async (dbName: string) => {
-    if (!newLayerName) {
-      alert('Введите имя таблицы');
-      return;
-    }
-    try {
-      await createVectorLayer(dbName, newLayerName, newLayerType);
-      alert('Слой успешно создан!');
-      setCreatingLayerInDb(null);
-      setNewLayerName('');
-      setNewLayerType('POINT');
-      await loadVectorData();
-    } catch (error) {
-      alert(error instanceof Error ? error.message : 'Ошибка создания слоя');
-    }
-  };
-
-  const getGeometryBadgeClass = (geometryType: string) => {
-    if (geometryType.includes('POLYGON')) return 'bg-polygon';
-    if (geometryType.includes('LINE')) return 'bg-line';
-    return 'bg-point';
-  };
-
-  return (
-    <div className="table-container profile-vector-container">
-      <div className="table-header profile-vector-header">
-        <h3>Управление PostGIS (Local Docker)</h3>
-        <div className="header-buttons">
-          <button className="primary-button" onClick={handleCreateVectorDB}>
-            + Создать БД
-          </button>
-          <button className="primary-button blue-btn" onClick={handleConnectVectorDB}>
-            &#128279; Подключить БД
-          </button>
-        </div>
-      </div>
-
-      {loadingVector && <div className="status-message">Загрузка данных PostGIS...</div>}
-      {errorVector && <div className="status-message error-message">{errorVector}</div>}
-
-      {!loadingVector && !errorVector && vectorDbs.length === 0 && (
-        <div className="empty-state">Нет доступных баз данных</div>
-      )}
-
-      {!loadingVector && !errorVector && vectorDbs.map((db) => {
-        const layersBySchema: { [key: string]: VectorLayerItem[] } = {};
-        if (db.layers) {
-          db.layers.forEach(layer => {
-            const schema = layer.schema || 'public';
-            if (!layersBySchema[schema]) layersBySchema[schema] = [];
-            layersBySchema[schema].push(layer);
-          });
-        }
-        const sortedSchemas = Object.keys(layersBySchema).sort();
-
-        return (
-          <div key={db.id} className="section db-section">
-            <div className="db-header">
-              <div>
-                <h4 className="db-title">🗄️ {db.name}</h4>
-                <small className="db-subtitle">
-                  Internal PostGIS • Status: <span className="status-active">Active</span>
-                </small>
-              </div>
-              
-              {creatingLayerInDb !== db.name && (
-                <div className="db-actions">
-                  <button className="primary-button small-btn" onClick={() => setCreatingLayerInDb(db.name)}>
-                    + Новый слой
-                  </button>
-                  <button className="danger-button small-btn" onClick={() => alert('Отключение БД не реализовано')}>
-                    Отключить
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {creatingLayerInDb === db.name && (
-              <div className="create-layer-form">
-                <h5>Создание новой таблицы (Слоя) в public</h5>
-                <div className="form-controls">
-                  <input 
-                    type="text" 
-                    placeholder="Имя таблицы (англ)" 
-                    value={newLayerName} 
-                    onChange={(e) => setNewLayerName(e.target.value)} 
-                    className="form-input" 
-                  />
-                  <select 
-                    value={newLayerType} 
-                    onChange={(e) => setNewLayerType(e.target.value)} 
-                    className="form-select"
-                  >
-                    <option value="POINT">Точки (POINT)</option>
-                    <option value="LINESTRING">Линии (LINESTRING)</option>
-                    <option value="POLYGON">Полигоны (POLYGON)</option>
-                  </select>
-                  <button className="success-button" onClick={() => handleCreateLayer(db.name)}>Создать</button>
-                  <button className="danger-button" onClick={() => { setCreatingLayerInDb(null); setNewLayerName(''); }}>Отмена</button>
-                </div>
-              </div>
-            )}
-
-            {sortedSchemas.length === 0 && (
-              <div className="empty-db-message">База пуста</div>
-            )}
-
-            {sortedSchemas.map(schemaName => {
-              const sortedLayers = layersBySchema[schemaName].sort((a, b) => a.tableName.localeCompare(b.tableName));
-              return (
-                <div key={schemaName} className="schema-section">
-                  <div className="schema-header">
-                    Схема: {schemaName}
-                  </div>
-                  <table className="data-table schema-table">
-                    <thead>
-                      <tr>
-                        <th>Таблица</th>
-                        <th>Тип геометрии</th>
-                        <th>SRID</th>
-                        <th>Объектов</th>
-                        <th>Действия</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {sortedLayers.map((layer) => (
-                        <tr key={layer.id}>
-                          <td><b>{layer.tableName}</b></td>
-                          <td>
-                            <span className={`geometry-badge ${getGeometryBadgeClass(layer.geometryType)}`}>
-                              {layer.geometryType}
-                            </span>
-                          </td>
-                          <td>{layer.srid}</td>
-                          <td>{layer.featureCount}</td>
-                          <td><button className="icon-button" title="Просмотр">👁️</button></td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              );
-            })}
-          </div>
-        );
-      })}
-    </div>
-  );
+  useEffect(() => { load(); }, [load]);
+  async function createDatabase(event: React.FormEvent) {
+    event.preventDefault(); setPending(true); setError(''); setNotice('');
+    try { await createVectorDb(databaseName); setShowDatabaseForm(false); setDatabaseName(''); setNotice('База данных создана.'); await load(); }
+    catch (e) { setError((e as Error).message); }
+    finally { setPending(false); }
+  }
+  async function createLayer(event: React.FormEvent) {
+    event.preventDefault(); if (!layerDatabase) return;
+    setPending(true); setError(''); setNotice('');
+    try { await createVectorLayer(layerDatabase, layerName, geometry); setLayerDatabase(null); setLayerName(''); setNotice('Слой создан.'); await load(); }
+    catch (e) { setError((e as Error).message); }
+    finally { setPending(false); }
+  }
+  return <div className="ws-postgis">
+    <div className="ws-page-heading"><div><div className="ws-section-kicker">ВЕКТОРНЫЕ ДАННЫЕ</div><h2>PostGIS</h2><p>Базы данных, схемы и пространственные слои.</p></div>
+      <div className="ws-postgis-actions"><button className="ws-secondary" disabled={loading || pending} onClick={() => { setError(''); load(); }}>Обновить</button>{user?.role === 'admin' && <button className="ws-primary" disabled={pending} onClick={() => setShowDatabaseForm(value => !value)}>Создать базу</button>}</div></div>
+    {error && <p role="alert" className="ws-notice ws-error">{error}</p>}{notice && <p role="status" className="ws-notice">{notice}</p>}
+    {showDatabaseForm && user?.role === 'admin' && <form className="ws-postgis-form" onSubmit={createDatabase}><div><label htmlFor="postgis-db-name">Название базы</label><input id="postgis-db-name" value={databaseName} maxLength={63} required pattern="[a-zA-Z][a-zA-Z0-9]*" placeholder="Например, survey2026" disabled={pending} onChange={e => setDatabaseName(e.target.value)} /><small>Латинские буквы и цифры, первая — буква.</small></div><button className="ws-primary" disabled={pending}>Создать</button><button type="button" className="ws-secondary" disabled={pending} onClick={() => setShowDatabaseForm(false)}>Отмена</button></form>}
+    {loading ? <p role="status">Загрузка PostGIS…</p> : !databases.length ? <div className="ws-postgis-empty">Доступных баз данных пока нет.</div> : databases.map(db => {
+      const schemas = Array.from(new Set((db.layers || []).map(layer => layer.schema || 'public'))).sort();
+      return <article className="ws-postgis-database" key={db.id}><div className="ws-postgis-heading"><div><h3>{db.name}</h3><p>{db.type === 'internal' ? 'Локальная база' : 'Внешняя база'} · {(db.layers || []).length} слоёв</p></div><span className={`ws-badge ${db.status === 'connected' ? 'green' : ''}`}>{db.status === 'connected' ? 'Подключена' : 'Недоступна'}</span>{editable && db.status === 'connected' && <button className="ws-secondary" disabled={pending} onClick={() => { setLayerDatabase(db.name); setLayerName(''); setGeometry('POINT'); }}>Создать слой</button>}</div>
+        {layerDatabase === db.name && <form className="ws-postgis-form" onSubmit={createLayer}><div><label htmlFor="postgis-layer-name">Название таблицы</label><input id="postgis-layer-name" required maxLength={63} pattern="[a-zA-Z_][a-zA-Z0-9_]*" value={layerName} placeholder="Например, survey_points" disabled={pending} onChange={e => setLayerName(e.target.value)} /><small>Схема public · проекция EPSG:4326</small></div><div><label htmlFor="postgis-geometry">Геометрия</label><select id="postgis-geometry" value={geometry} disabled={pending} onChange={e => setGeometry(e.target.value)}><option value="POINT">Точки</option><option value="LINESTRING">Линии</option><option value="POLYGON">Полигоны</option></select></div><button className="ws-primary" disabled={pending}>Создать</button><button type="button" className="ws-secondary" disabled={pending} onClick={() => setLayerDatabase(null)}>Отмена</button></form>}
+        {db.status === 'error' ? <p role="status">Не удалось прочитать слои. Проверьте подключение и обновите список.</p> : !schemas.length ? <p className="ws-postgis-empty">Пространственных слоёв пока нет.</p> : schemas.map(schema => <section className="ws-postgis-schema" key={schema}><div className="ws-postgis-schema-title"><span>Схема</span><strong>{schema}</strong></div><div className="ws-postgis-table"><table><thead><tr><th>Таблица</th><th>Геометрия</th><th>Проекция</th><th>Объектов</th></tr></thead><tbody>{(db.layers || []).filter(layer => (layer.schema || 'public') === schema).sort((a,b) => a.tableName.localeCompare(b.tableName)).map(layer => <tr key={layer.id}><td><strong>{layer.tableName}</strong></td><td><span className="ws-badge">{layer.geometryType}</span></td><td>{layer.srid ? `EPSG:${layer.srid}` : 'Не задана'}</td><td>{layer.featureCount == null ? '—' : layer.featureCount.toLocaleString('ru-RU')}</td></tr>)}</tbody></table></div></section>)}
+      </article>;
+    })}
+  </div>;
 };
-
 export default ProfileVector;

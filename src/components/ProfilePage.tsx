@@ -64,16 +64,17 @@ export default function ProfilePage() {
     { title: 'Личное', items: [['account','Аккаунт'],['security','Безопасность'],['appearance','Оформление']] },
     ...(user?.role === 'admin' ? [{ title: 'Команда', items: [['users','Пользователи']] }] : []),
     { title: 'Настройки карт', items: [['crs','Проекции'],['basemaps','Подложки']] },
-    { title: 'Геоданные', items: [...(user?.role !== 'viewer' ? [['imports','Импорт'],['tasks','Задания']] : []),['ortho','Ортофотопланы'],['panoramas','Панорамы'],['vector','Векторные данные']] },
+    { title: 'Геоданные', items: [...(user?.role !== 'viewer' ? [['imports','Импорт'],['tasks','Задания']] : []),['ortho','Ортофотопланы'],['panoramas','Панорамы'],['vector','PostGIS'],['kml','KML'],['photos','Фото']] },
   ];
   return <div className="ws-shell"><Header /><main className="ws-main">
     <div className="ws-eyebrow">ЛИЧНОЕ ПРОСТРАНСТВО</div><div className="ws-page-heading"><div><h1>Данные и настройки</h1><p>Управляйте своим аккаунтом, доступом команды и геоданными.</p></div></div>
     <div className="ws-profile-layout"><aside className="ws-sidebar"><div className="ws-person"><span className="ws-avatar large">{user?.username.slice(0,2).toUpperCase()}</span><strong>{user?.username}</strong><span>{user && roleNames[user.role]}</span></div>
-      <nav aria-label="Разделы профиля">{groups.map(group => <div className="ws-nav-group" key={group.title} role="group" aria-label={group.title}><h2 className="ws-nav-group-title">{group.title}</h2>{group.items.map(([key,label]) => <button key={key} className={tab === key ? 'active' : ''} aria-current={tab === key ? 'page' : undefined} onClick={() => { setTab(key); setNotice(null); }}>{label}<span aria-hidden="true">›</span></button>)}</div>)}</nav>
+      <nav aria-label="Разделы профиля">{groups.map(group => <div className="ws-nav-group" key={group.title} role="group" aria-label={group.title}><h2 className="ws-nav-group-title">{group.title}</h2>{group.items.map(([key,label]) => <button key={key} className={tab === key ? 'active' : ''} aria-current={tab === key ? 'page' : undefined} onClick={() => { setTab(key); setNotice(null); }}>{label}{['kml','photos'].includes(key)&&<small className="ws-beta">Бета</small>}<span aria-hidden="true">›</span></button>)}</div>)}</nav>
       <button className="ws-logout" onClick={() => logout()}>Выйти из аккаунта ↗</button>
     </aside><section className="ws-profile-content">
       {notice && <div className={`ws-notice ${notice.error ? 'ws-error' : ''}`} role={notice.error ? 'alert' : 'status'}>{notice.text}</div>}
       {tab==='imports' && user?.role!=='viewer' && <ImportJobs key={params.toString()} />}
+      {['kml','photos'].includes(tab) && <section className="ws-card ws-beta-empty"><div className="ws-section-kicker">ГЕОДАННЫЕ · БЕТА</div><h2>{tab==='kml'?'KML':'Фото'}</h2><p>Раздел в разработке.</p></section>}
       {tab==='tasks' && user?.role!=='viewer' && <TasksPanel />}
       {['appearance','crs','basemaps'].includes(tab) && <MapPreferences key={tab} section={tab} />}
       {tab === 'account' && <><section className="ws-card"><div className="ws-section-kicker">АККАУНТ</div><h2>Личная информация</h2><p>Ваш аккаунт в этой установке BotPlus Maps.</p><dl className="ws-details"><div><dt>Логин</dt><dd>{user?.username}</dd></div><div><dt>Роль</dt><dd>{user && roleNames[user.role]}</dd></div><div><dt>Размещение</dt><dd>Собственная инфраструктура</dd></div></dl></section><section className="ws-card ws-accent-card"><h2>Всё начинается с карты</h2><p>Объединяйте слои в проекты и публикуйте только то, чем хотите поделиться.</p><a href="/">Перейти к картам →</a></section></>}

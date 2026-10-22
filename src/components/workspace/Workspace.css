@@ -14,7 +14,7 @@
   min-height: 100vh;
   font-family: var(--font-family);
 }
-.ws-header { --color-text-light: #60736e; --font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; height: 78px; padding: 0 4%; display: flex; align-items: center; gap: 42px; background: var(--color-surface); border-bottom: 1px solid #e2e8e4; }
+.ws-header { --color-text-light: #60736e; --font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; height: 78px; padding: 0 4%; display: flex; align-items: center; gap: 42px; background: var(--color-surface); border-bottom: 1px solid var(--color-border); }
 .ws-brand { display: flex; align-items: center; gap: 11px; color: var(--color-text); font-size: 19px; font-weight: 650; white-space: nowrap; letter-spacing: -.6px; }
 .ws-brand>span { display: grid; place-items: center; height: 36px; width: 36px; border-radius: 9px; background: #d9efde; color: var(--color-text); letter-spacing: -2px; padding-right: 2px; }
 .ws-header nav { display: flex; align-self: stretch; align-items: stretch; gap: 26px; }
@@ -40,12 +40,12 @@
 .ws-shell textarea { min-height: 88px; resize: vertical; }
 .ws-shell label { display: block; color: var(--color-text); font-size: 12px; font-weight: 600; margin: 20px 0 8px; }
 .ws-shell small { display: block; color: #72867c; font-size: 11px; margin-top: 7px; line-height: 1.7; }
-.ws-toolbar { display: flex; align-items: center; gap: 20px; justify-content: space-between; padding: 18px 0; border-top: 1px solid #e0e8e2; margin-bottom: 12px; }
+.ws-toolbar { display: flex; align-items: center; gap: 20px; justify-content: space-between; padding: 18px 0; border-top: 1px solid var(--color-border); margin-bottom: 12px; }
 .ws-tabs { display: flex; gap: 5px; }
 .ws-tabs>button { color: #73847a; background: transparent; padding: 10px 15px; font-size: 12px; border-radius: 6px; }
 .ws-tabs>button.active { background: #e1ede4; color: #255b40; font-weight: 600; }
 .ws-shell .ws-search { max-width: 310px; background: var(--color-surface); }
-.ws-card { border-radius: 12px; background: var(--color-surface); border: 1px solid #e0e8e2; padding: 28px; margin-bottom: 22px; }
+.ws-card { border-radius: 12px; background: var(--color-surface); border: 1px solid var(--color-border); padding: 28px; margin-bottom: 22px; }
 .ws-card h2 { font-size: 20px; font-weight: 600; letter-spacing: -.5px; margin: 0 0 10px; }
 .ws-card>p { font-size: 13px; line-height: 1.8; }
 .ws-create { max-width: 680px; }
@@ -59,7 +59,7 @@
 .ws-empty p { font-size: 14px; margin-bottom: 24px; line-height: 1.8; }
 .ws-empty-symbol { width: 64px; height: 64px; margin: auto; border-radius: 16px; background: #e2eee4; color: #518366; display: grid; place-items: center; font-size: 40px; }
 .ws-map-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 24px; }
-.ws-map-card { background: var(--color-surface); border: 1px solid #dce6df; border-radius: 12px; overflow: hidden; transition: box-shadow .2s,transform .2s; }
+.ws-map-card { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 12px; overflow: hidden; transition: box-shadow .2s,transform .2s; }
 .ws-map-card:hover { box-shadow: 0 8px 24px #214c3410; transform: translateY(-2px); }
 .ws-map-cover { display: block; height: 170px; position: relative; background: #e8eee5; overflow: hidden; }
 .ws-map-art { position: absolute; inset: 0; background-image: linear-gradient(30deg,transparent 46%,#c8d9c6 47%,#c8d9c6 49%,transparent 50%),linear-gradient(120deg,transparent 44%,#f8faf4 45%,#f8faf4 47%,transparent 48%); background-size: 130px 110px,180px 140px; }
@@ -75,23 +75,23 @@
 .ws-map-info h2 a { color: var(--color-text); }
 .ws-map-info>p { font-size: 12px; line-height: 1.8; min-height: 42px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .ws-map-meta { display: flex; justify-content: space-between; margin: 22px 0 16px; font-size: 11px; color: #84948b; }
-.ws-map-links { display: flex; justify-content: space-between; border-top: 1px solid #e8eee9; padding-top: 15px; gap: 8px; }
+.ws-map-links { display: flex; justify-content: space-between; border-top: 1px solid var(--color-border); padding-top: 15px; gap: 8px; }
 .ws-map-links a,.ws-link { color: #286246; font-size: 12px; font-weight: 550; }
 .ws-footer { display: flex; justify-content: space-between; color: #85968c; font-size: 10px; padding: 32px 0 8px; }
 .ws-pagination { display: flex; align-items: center; gap: 12px; margin-top: 24px; font-size: 12px; }
 .ws-pagination>span { margin-right: auto; }
 .ws-profile-layout { display: grid; grid-template-columns: 230px minmax(0,1fr); gap: 32px; align-items: start; }
-.ws-sidebar { background: var(--color-surface); border: 1px solid #e0e8e2; border-radius: 12px; overflow: hidden; }
-.ws-person { display: flex; flex-direction: column; align-items: center; padding: 30px 18px 26px; gap: 10px; border-bottom: 1px solid #e8eee9; }
+.ws-sidebar { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 12px; overflow: hidden; }
+.ws-person { display: flex; flex-direction: column; align-items: center; padding: 30px 18px 26px; gap: 10px; border-bottom: 1px solid var(--color-border); }
 .ws-person strong { font-size: 15px; overflow-wrap: anywhere; }
 .ws-person>span:last-child { font-size: 11px; }
 .ws-sidebar nav { display: flex; flex-direction: column; padding: 12px; gap: 4px; }
 .ws-sidebar nav button { display: flex; justify-content: space-between; font-size: 12px; text-align: left; padding: 12px; background: transparent; color: #6d8276; border-radius: 7px; }
 .ws-sidebar nav button.active { background: #e9f2eb; color: #285e40; font-weight: 600; }
-.ws-sidebar .ws-logout { border-top: 1px solid #edf1ee; border-radius: 0; width: 100%; background: var(--color-surface); color: #7c8c82; font-size: 11px; text-align: left; padding: 20px 24px; }
+.ws-sidebar .ws-logout { border-top: 1px solid var(--color-border); border-radius: 0; width: 100%; background: var(--color-surface); color: #7c8c82; font-size: 11px; text-align: left; padding: 20px 24px; }
 .ws-profile-content { min-width: 0; }
 .ws-details { margin-top: 28px; }
-.ws-details>div { display: grid; grid-template-columns: 170px 1fr; border-top: 1px solid #edf1ee; padding: 18px 0; font-size: 13px; }
+.ws-details>div { display: grid; grid-template-columns: 170px 1fr; border-top: 1px solid var(--color-border); padding: 18px 0; font-size: 13px; }
 .ws-details dt { color: #829187; }
 .ws-details dd { color: var(--color-text); }
 .ws-accent-card { background: #edf4ed; border-color: #dbe7d9; }
@@ -100,12 +100,12 @@
 .ws-form-narrow>.ws-primary { margin-top: 26px; }
 .ws-user-form { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0 16px; align-items: end; }
 .ws-user-form>.ws-primary { margin-top: 20px; justify-self: start; }
-.ws-user-row { display: grid; grid-template-columns: 36px minmax(90px,1fr) 165px 105px; align-items: center; gap: 14px; padding: 18px 0; border-top: 1px solid #edf1ee; }
+.ws-user-row { display: grid; grid-template-columns: 36px minmax(90px,1fr) 165px 105px; align-items: center; gap: 14px; padding: 18px 0; border-top: 1px solid var(--color-border); }
 .ws-user-row strong { font-size: 13px; overflow-wrap: anywhere; }
 .ws-user-row small { margin-top: 2px; }
 .ws-legacy { --color-primary: #20664e; overflow-x: auto; }
 .ws-map-editor { height: 100dvh; min-height: 0; display: flex; flex-direction: column; position: relative; overflow: hidden; }
-.ws-map-topbar { min-height: 80px; display: flex; align-items: center; gap: 25px; padding: 14px 24px; background: var(--color-surface); border-bottom: 1px solid #dce6df; z-index: 1400; flex-shrink: 0; }
+.ws-map-topbar { min-height: 80px; display: flex; align-items: center; gap: 25px; padding: 14px 24px; background: var(--color-surface); border-bottom: 1px solid var(--color-border); z-index: 1400; flex-shrink: 0; }
 .ws-back { font-size: 12px; white-space: nowrap; }
 .ws-map-name { flex: 1; min-width: 0; }
 .ws-map-name>strong { display: block; font-size: 16px; color: var(--color-text); overflow-wrap: anywhere; }
@@ -358,3 +358,32 @@
 .ws-system-logs {max-height:480px;overflow:auto;margin-top:18px;padding:12px;border:1px solid var(--color-border,#dce6df);border-radius:10px;font:11px/1.6 ui-monospace,monospace;overflow-wrap:anywhere;white-space:pre-wrap;}
 .ws-system-logs div {padding:5px 0;border-bottom:1px solid var(--color-border,#dce6df);}
 .ws-system-logs time {color:var(--color-text-light);}
+
+.ws-sidebar nav .ws-beta {margin:0 0 0 auto;padding:2px 6px;border:1px solid var(--color-border);border-radius:5px;font-size:9px;color:var(--color-text-light);}
+.ws-sidebar nav button:has(.ws-beta) {gap:8px;}
+.ws-beta-empty {min-height:210px;}
+.ws-media-toolbar {display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:24px;}
+.ws-media-toolbar .ws-tabs {margin:0;}
+.ws-operation-tabs {margin:22px 0 28px;}
+.ws-postgis .ws-page-heading {margin-bottom:24px;}
+.ws-postgis .ws-page-heading p,.ws-postgis-heading p {margin:6px 0 0;font-size:13px;color:var(--color-text-light);}
+.ws-postgis-actions {display:flex;gap:10px;flex-wrap:wrap;}
+.ws-postgis-database {margin-top:20px;padding:22px;border:1px solid var(--color-border);border-radius:12px;background:var(--color-surface);}
+.ws-postgis-heading {display:flex;align-items:center;gap:16px;flex-wrap:wrap;}
+.ws-postgis-heading>div {flex:1;min-width:160px;}
+.ws-postgis-heading h3 {margin:0;font-size:17px;overflow-wrap:anywhere;}
+.ws-postgis-form {display:flex;align-items:flex-end;flex-wrap:wrap;gap:14px;margin:20px 0;padding:20px;background:var(--color-surface-alt);border:1px solid var(--color-border);border-radius:10px;}
+.ws-postgis-form>div {flex:1;min-width:180px;}
+.ws-postgis-form label {display:block;margin-bottom:8px;font-size:12px;}
+.ws-postgis-form input,.ws-postgis-form select {width:100%;box-sizing:border-box;}
+.ws-postgis-form small {display:block;margin-top:6px;color:var(--color-text-light);font-size:11px;}
+.ws-postgis-schema {margin-top:24px;}
+.ws-postgis-schema-title {display:flex;gap:10px;align-items:center;margin-bottom:12px;font-size:12px;}
+.ws-postgis-schema-title>span {color:var(--color-text-light);}
+.ws-postgis-table {overflow:auto;}
+.ws-postgis-table table {width:100%;border-collapse:collapse;text-align:left;font-size:12px;}
+.ws-postgis-table th {color:var(--color-text-light);font-weight:500;}
+.ws-postgis-table th,.ws-postgis-table td {padding:13px 10px;border-bottom:1px solid var(--color-border);white-space:nowrap;}
+.ws-postgis-table tr:last-child td {border-bottom:0;}
+.ws-postgis-empty {padding:22px 0;color:var(--color-text-light);font-size:13px;}
+@media(max-width:720px) {.ws-media-toolbar {gap:12px;flex-wrap:wrap;}.ws-postgis .ws-page-heading {align-items:flex-start;flex-direction:column;}.ws-postgis-database {padding:16px;}}
