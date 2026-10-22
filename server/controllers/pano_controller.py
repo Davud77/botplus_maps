@@ -14,6 +14,7 @@ from datetime import datetime
 import traceback
 import logging
 import json
+from services.media_metadata import read_media_metadata, display_name
 
 # Use centralized Database class
 try:
@@ -204,7 +205,12 @@ class PanoController:
                 row = cursor.fetchone()
             if row:
                 data = row if isinstance(row, dict) else {"id": row[0], "latitude": row[1], "longitude": row[2], "altitude": row[3], "direction": row[4], "filename": row[5], "directory": row[6], "timestamp": row[7]}
+                try:
+                    metadata = read_media_metadata(self.storage.get_local_file_path(data['filename']))
+                except OSError:
+                    metadata = {}
                 return jsonify({
+                    **metadata, "display_name": display_name(data["filename"]),
                     "id": data["id"], "latitude": float(data["latitude"]) if data["latitude"] else 0, "longitude": float(data["longitude"]) if data["longitude"] else 0,
                     "altitude": float(data["altitude"]) if data["altitude"] else 0, "direction": float(data["direction"]) if data["direction"] else 0,
                     "filename": data["filename"], "directory": data["directory"], "timestamp": data["timestamp"].isoformat() if data["timestamp"] else None

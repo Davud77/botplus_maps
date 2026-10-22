@@ -42,6 +42,9 @@ class StorageProbe:
     def assert_released(self):
         assert all(c.closed for c in self.database.connections), "DB connection held during object storage I/O"
 
+    def get_local_file_path(self, filename):
+        raise FileNotFoundError(filename)
+
     def send_local_file(self, filename, mimetype=None, **kwargs):
         self.assert_released()
         return Response(b"test-preview", mimetype=mimetype)
@@ -154,6 +157,10 @@ class PostgisPathTests(unittest.TestCase):
                 for row in rows:
                     self.assertEqual(store.path(row['filename']).read_bytes(), data)
                     self.assertEqual(row['path'], 'panoramas/' + row['filename'])
+                    info = self.client.get(f"/api/pano_info/{row['id']}").get_json()
+                    self.assertEqual(info['media_type'], 'photo')
+                    self.assertEqual((info['width'], info['height']), (32, 16))
+                    self.assertEqual(info['display_name'], 'same.jpg')
                     url = '/api/panoramas/' + row['filename']
                     self.assertEqual(self.app.test_client().get(url).status_code, 401)
                     with self.client.get(url, headers={'Range': 'bytes=0-15'}) as response:

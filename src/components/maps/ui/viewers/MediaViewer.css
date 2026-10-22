@@ -1,0 +1,9 @@
+.bp-media-tools { position:absolute; top:12px; left:12px; z-index:5; display:flex; gap:4px; padding:4px; border-radius:12px; background:rgba(15,23,42,.88); box-shadow:0 4px 20px #0003; }
+.bp-media-tools button { min-width:36px; min-height:34px; padding:6px 10px; border:0; border-radius:8px; color:#f8fafc; background:transparent; cursor:pointer; font:inherit; font-size:13px; }
+.bp-media-tools button[aria-pressed="true"] { background:#2563eb; }
+.bp-media-tools button:hover:not(:disabled) { background:#334155; }
+.bp-media-tools button:focus-visible { outline:2px solid #93c5fd; outline-offset:1px; }
+.bp-media-tools button:disabled { opacity:.35; cursor:default; }
+.panorama-viewer.bp-photo-viewer { overflow:auto; cursor:auto; background:#111827; }
+.bp-photo-image { display:block; max-width:none; max-height:none; object-fit:contain; user-select:none; }
+.bp-media-loading { position:absolute; inset:0; display:grid; place-items:center; color:#e2e8f0; z-index:2; }

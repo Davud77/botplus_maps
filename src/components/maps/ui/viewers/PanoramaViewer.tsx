@@ -1,164 +1,127 @@
-// src/components/maps/ui/viewers/PanoramaViewer.tsx
-
 import React, { useRef, useEffect, useState } from 'react';
 // @ts-ignore
 import Marzipano from 'marzipano';
+import './MediaViewer.css';
 
 interface PanoramaViewerProps {
   markerId: string;
   isExpanded: boolean;
   onDataLoad?: (data: { title: string; date: string; alt: string }) => void;
 }
+type Mode = 'photo' | 'panorama';
+interface Asset {
+  url: string;
+  info: { filename: string; display_name?: string; width: number; height: number; media_type: Mode; direction?: number };
+}
 
 const PanoramaViewer: React.FC<PanoramaViewerProps> = ({ markerId, isExpanded, onDataLoad }) => {
   const viewerRef = useRef<HTMLDivElement | null>(null);
   const viewerInstanceRef = useRef<any>(null);
-  const [error, setError] = useState<string | null>(null);
-
   const onDataLoadRef = useRef(onDataLoad);
+  const [asset, setAsset] = useState<Asset | null>(null);
+  const [mode, setMode] = useState<Mode | null>(null);
+  const [zoom, setZoom] = useState(1);
+  const [error, setError] = useState<string | null>(null);
   useEffect(() => { onDataLoadRef.current = onDataLoad; }, [onDataLoad]);
 
-  // --- Viewer Initialization ---
   useEffect(() => {
-    let objectUrl: string | null = null;
     const controller = new AbortController();
-    let isMounted = true; 
-
-    const initializeViewer = async () => {
-      if (!markerId) return;
-      setError(null);
-
-      // Cleanup previous viewer instance immediately
-      if (viewerInstanceRef.current) {
-         viewerInstanceRef.current.destroy();
-         viewerInstanceRef.current = null;
-         if (viewerRef.current) viewerRef.current.innerHTML = '';
-      }
-
+    let active = true;
+    let url: string | null = null;
+    setAsset(null); setMode(null); setZoom(1); setError(null);
+    const load = async () => {
       try {
-        // [FIX] Correct API path with /api prefix
-        const infoUrl = `/api/pano_info/${markerId}`;
-        const infoResponse = await fetch(infoUrl, { signal: controller.signal });
-        
-        const contentType = infoResponse.headers.get("content-type");
-        if (contentType && contentType.includes("text/html")) {
-             throw new Error("API returned HTML instead of JSON. Check backend routing.");
-        }
-
-        if (!infoResponse.ok) {
-           throw new Error(`Failed to load info: ${infoResponse.status}`);
-        }
-        
-        const data = await infoResponse.json();
-        if (!isMounted) return;
-        
-        if (isMounted) {
-          // Отправляем данные наверх в MapPage
-          if (onDataLoadRef.current) {
-            onDataLoadRef.current({
-              title: data.filename || `Panorama ${markerId}`,
-              date: data.timestamp || data.upload_date || 'No date',
-              alt: data.altitude ? data.altitude.toFixed(1) : '0'
-            });
-          }
-        }
-
-        // [FIX] Correct API path for download
-        const imageUrl = `/api/pano_info/${markerId}/download`;
-        const imageResponse = await fetch(imageUrl, { signal: controller.signal });
-        
-        if (!imageResponse.ok) {
-            throw new Error(`Failed to load image: ${imageResponse.status}`);
-        }
-
-        const blob = await imageResponse.blob();
-        if (!isMounted) return;
-
-        objectUrl = URL.createObjectURL(blob);
-
-        if (viewerRef.current) {
-          // Double check cleanup
-          viewerRef.current.innerHTML = '';
-
-          // Create Viewer
-          const viewer = new Marzipano.Viewer(viewerRef.current, {
-            stage: { progressive: true },
-            controls: { mouseViewMode: 'drag' } 
+        const response = await fetch(`/api/pano_info/${markerId}`, { signal: controller.signal });
+        if (!response.ok) throw new Error(`Не удалось получить сведения: ${response.status}`);
+        const info = await response.json();
+        if (!active) return;
+        onDataLoadRef.current?.({ title: info.display_name || info.filename || 'Фотография',
+          date: info.timestamp || info.upload_date || 'Дата не указана', alt: Number(info.altitude || 0).toFixed(1) });
+        const image = await fetch(`/api/pano_info/${markerId}/download`, { signal: controller.signal });
+        if (!image.ok) throw new Error(`Не удалось загрузить изображение: ${image.status}`);
+        const blob = await image.blob();
+        if (!active) return;
+        url = URL.createObjectURL(blob);
+        // Compatibility with older API responses: decode only this selected image.
+        if (!info.width || !info.height) {
+          const size = await new Promise<{ width: number; height: number }>((resolve, reject) => {
+            const probe = new Image();
+            probe.onload = () => resolve({ width: probe.naturalWidth, height: probe.naturalHeight });
+            probe.onerror = () => reject(new Error('Не удалось прочитать изображение'));
+            probe.src = url!;
           });
-
-          const source = Marzipano.ImageUrlSource.fromString(objectUrl);
-          
-          // Geometry (Equirectangular)
-          const geometry = new Marzipano.EquirectGeometry([{ width: 4000 }]);
-          
-          // View Limiter
-          const limiter = Marzipano.RectilinearView.limit.traditional(
-            4096,
-            (120 * Math.PI) / 180
-          );
-          
-          // Initial View
-          // Use direction from data if available, otherwise 0
-          const initialYaw = data.direction ? (data.direction * Math.PI / 180) : 0;
-          
-          const view = new Marzipano.RectilinearView({ 
-              yaw: initialYaw, 
-              pitch: 0, 
-              roll: 0, 
-              fov: Math.PI / 4 
-          }, limiter);
-
-          const scene = viewer.createScene({
-            source: source,
-            geometry: geometry,
-            view: view,
-          });
-
-          scene.switchTo({ transitionDuration: 0 }); 
-          viewerInstanceRef.current = viewer;
+          Object.assign(info, size);
         }
-
-      } catch (err: any) {
-        if (err.name === 'AbortError') return;
-        console.error('Error initializing panorama:', err);
-        if (isMounted) setError(err.message || 'Error loading panorama');
+        if (!active) return;
+        info.media_type = info.media_type || (info.width >= 1024 && info.width === info.height * 2 ? 'panorama' : 'photo');
+        setAsset({ url, info });
+      } catch (error: any) {
+        if (active && error.name !== 'AbortError') setError(error.message || 'Не удалось открыть изображение');
       }
     };
-
-    initializeViewer();
-
+    load();
     return () => {
-      isMounted = false;
-      controller.abort();
-      if (objectUrl) {
-        URL.revokeObjectURL(objectUrl);
-      }
-      if (viewerInstanceRef.current) {
-         viewerInstanceRef.current.destroy();
-         viewerInstanceRef.current = null;
-      }
+      active = false; controller.abort();
+      if (url) URL.revokeObjectURL(url);
     };
   }, [markerId]);
 
-  return (
-    <div className="panorama-container">
-      
-      {/* Error Overlay */}
-      {error && (
-        <div className="pano-error-overlay">
-            <div className="pano-error-icon">⚠️</div>
-            {error}
-        </div>
-      )}
+  const selectedMode = mode || asset?.info.media_type || 'photo';
+  useEffect(() => {
+    const element = viewerRef.current;
+    if (!asset || !element) return;
+    element.replaceChildren();
+    setError(null);
+    let viewer: any = null;
+    let observer: ResizeObserver | null = null;
+    try {
+      if (selectedMode === 'photo') {
+        const image = document.createElement('img');
+        image.src = asset.url;
+        image.alt = asset.info.display_name || asset.info.filename;
+        image.className = 'bp-photo-image';
+        image.draggable = false;
+        image.style.width = `${zoom * 100}%`;
+        image.style.height = `${zoom * 100}%`;
+        element.appendChild(image);
+      } else {
+        viewer = new Marzipano.Viewer(element, { stage: { progressive: true }, controls: { mouseViewMode: 'drag' } });
+        const geometry = new Marzipano.EquirectGeometry([{ width: asset.info.width }]);
+        const limiter = Marzipano.RectilinearView.limit.traditional(asset.info.width, 120 * Math.PI / 180);
+        const view = new Marzipano.RectilinearView({ yaw: Number(asset.info.direction || 0) * Math.PI / 180,
+          pitch: 0, roll: 0, fov: Math.PI / 4 }, limiter);
+        viewer.createScene({ source: Marzipano.ImageUrlSource.fromString(asset.url), geometry, view })
+          .switchTo({ transitionDuration: 0 });
+        viewerInstanceRef.current = viewer;
+        if (typeof ResizeObserver !== 'undefined') {
+          observer = new ResizeObserver(() => viewer.updateSize());
+          observer.observe(element);
+        }
+      }
+    } catch (error: any) {
+      setError(error.message || 'Не удалось открыть изображение');
+    }
+    return () => {
+      observer?.disconnect(); viewer?.destroy();
+      viewerInstanceRef.current = null;
+      element.replaceChildren();
+    };
+  }, [asset, selectedMode, zoom]);
+  useEffect(() => { viewerInstanceRef.current?.updateSize(); }, [isExpanded]);
 
-      {/* Viewer Container */}
-      <div 
-        ref={viewerRef} 
-        className="panorama-viewer" 
-      ></div>
-      
-    </div>
-  );
+  return <div className="panorama-container">
+    {asset && <div className="bp-media-tools" role="group" aria-label="Просмотр изображения">
+      <button type="button" aria-pressed={selectedMode === 'photo'} onClick={() => { setMode('photo'); setZoom(1); }}>Фото</button>
+      <button type="button" aria-pressed={selectedMode === 'panorama'} disabled={asset.info.width !== asset.info.height * 2}
+        onClick={() => setMode('panorama')}>360°</button>
+      {selectedMode === 'photo' && <>
+        <button type="button" aria-label="Уменьшить фото" disabled={zoom <= 1} onClick={() => setZoom(value => Math.max(1, value - 0.5))}>−</button>
+        <button type="button" aria-label="Увеличить фото" disabled={zoom >= 4} onClick={() => setZoom(value => Math.min(4, value + 0.5))}>＋</button>
+      </>}
+    </div>}
+    {!asset && !error && <div className="bp-media-loading" role="status">Загрузка изображения…</div>}
+    {error && <div className="pano-error-overlay" role="alert">{error}</div>}
+    <div ref={viewerRef} className={`panorama-viewer ${selectedMode === 'photo' ? 'bp-photo-viewer' : ''}`} />
+  </div>;
 };
-
 export default PanoramaViewer;
