@@ -32,8 +32,15 @@ test('dragging a layer name changes order without centering the map',()=>{
     fireEvent.pointerMove(row,{clientX:20,clientY:40});
     expect(row.setPointerCapture).toHaveBeenCalledTimes(1);
     fireEvent.pointerUp(row);
-    fireEvent.click(name);
+    fireEvent.click(name,{detail:1});
     expect(useLayerStyleStore.getState().layers.map(x=>x.key)).toEqual(['ortho:8','ortho:7']);
     expect(focusLayer).not.toHaveBeenCalled();
+    // Captured pointer-up can target the row, leaving no button click after
+    // a real drag. Keyboard activation must still work immediately afterwards.
+    fireEvent.pointerDown(name,{button:0,clientX:10,clientY:10});
+    fireEvent.pointerMove(row,{clientX:20,clientY:40});
+    fireEvent.pointerUp(row);
+    fireEvent.click(name,{detail:0});
+    expect(focusLayer).toHaveBeenCalledWith('ortho:7');
   }finally{document.elementFromPoint=original;}
 });

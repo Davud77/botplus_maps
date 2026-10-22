@@ -13,8 +13,9 @@ export function ActiveLayersPanel({onClose,onRemovePanos}: {onClose:()=>void;onR
   const [focusError,setFocusError]=useState('');
   const [focusing,setFocusing]=useState<string|null>(null);
   const suppressClick=useRef(false);
-  const navigate=async(key:string)=>{
-    if(suppressClick.current){suppressClick.current=false;return;}
+  const navigate=async(key:string,keyboard:boolean)=>{
+    if(suppressClick.current && !keyboard){suppressClick.current=false;return;}
+    suppressClick.current=false;
     setFocusError('');setFocusing(key);
     try{await focusLayer(key);}catch(error){setFocusError((error as Error).message);}
     finally{setFocusing(null);}
@@ -79,7 +80,7 @@ export function ActiveLayersPanel({onClose,onRemovePanos}: {onClose:()=>void;onR
             onPointerCancel={finishDrag} onLostPointerCapture={finishDrag}>
             <button className="bp-drag-handle" aria-label={`Переместить ${name}`} title="Перетащить; с клавиатуры — стрелки вверх/вниз" onKeyDown={event=>{if(event.key==='ArrowUp'||event.key==='ArrowDown'){event.preventDefault();move(item.key,event.key==='ArrowUp'?-1:1);}}}>⠿</button>
             <input type="checkbox" checked={item.visible!==false} aria-label={`Видимость ${name}`} onChange={event=>update(item.key,{visible:event.target.checked})} />
-            <button type="button" className="bp-sortable-name bp-layer-focus" title={`Показать ${name} на карте`} aria-label={`Перейти к слою ${name}`} onClick={()=>navigate(item.key)}><strong>{name}</strong><small>{kind==='basemap'?'Подложка':kind==='ortho'?'Ортофотоплан':kind==='panoramas'?'Панорамы':'Векторный слой'}</small></button>
+            <button type="button" className="bp-sortable-name bp-layer-focus" title={`Показать ${name} на карте`} aria-label={`Перейти к слою ${name}`} onClick={event=>navigate(item.key,event.detail===0)}><strong>{name}</strong><small>{kind==='basemap'?'Подложка':kind==='ortho'?'Ортофотоплан':kind==='panoramas'?'Панорамы':'Векторный слой'}</small></button>
             <button className="bp-icon-button" aria-label={`Настройки ${name}`} title="Настройки слоя" onClick={()=>setEditing(item.key)}>⚙</button>
             <button className="bp-icon-button" aria-label={`Удалить ${name} с карты`} title="Удалить с карты" onClick={()=>remove(item.key)}>×</button>
           </div>;
