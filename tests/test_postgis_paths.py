@@ -42,7 +42,7 @@ class StorageProbe:
     def assert_released(self):
         assert all(c.closed for c in self.database.connections), "DB connection held during object storage I/O"
 
-    def send_local_file(self, filename, mimetype=None):
+    def send_local_file(self, filename, mimetype=None, **kwargs):
         self.assert_released()
         return Response(b"test-preview", mimetype=mimetype)
 
@@ -123,6 +123,51 @@ class PostgisPathTests(unittest.TestCase):
         self.assertEqual(self.controller.storage.deleted, ["test.jpg"])
         self.assertEqual(self.client.delete("/api/pano_info/1").status_code, 404)
         self.assert_released()
+
+    def test_real_photo_upload_catalog_range_and_delete_without_object_storage(self):
+        import io
+        import tempfile
+        from PIL import Image
+        import piexif
+        from server.storage import FileStorage
+        output = io.BytesIO()
+        exif = piexif.dump({'GPS': {
+            piexif.GPSIFD.GPSLatitudeRef: b'N',
+            piexif.GPSIFD.GPSLatitude: ((43, 1), (0, 1), (0, 1)),
+            piexif.GPSIFD.GPSLongitudeRef: b'E',
+            piexif.GPSIFD.GPSLongitude: ((47, 1), (0, 1), (0, 1)),
+        }})
+        Image.new('RGB', (32, 16), (20, 100, 30)).save(output, format='JPEG', exif=exif)
+        data = output.getvalue()
+        with tempfile.TemporaryDirectory() as directory:
+            store = FileStorage(directory)
+            with patch.object(self.controller, 'storage', store):
+                for _ in range(2):
+                    response = self.client.post('/api/upload', data={'files': (io.BytesIO(data), '../../same.jpg')}, content_type='multipart/form-data')
+                    self.assertEqual(response.status_code, 200)
+                    self.assertEqual(response.get_json()['failed_uploads'], [])
+                with self.db.cursor() as cursor:
+                    cursor.execute('SELECT id,filename,path FROM public.photos_4326 ORDER BY id')
+                    rows = cursor.fetchall()
+                self.assertEqual(len(rows), 2)
+                self.assertNotEqual(rows[0]['filename'], rows[1]['filename'])
+                for row in rows:
+                    self.assertEqual(store.path(row['filename']).read_bytes(), data)
+                    self.assertEqual(row['path'], 'panoramas/' + row['filename'])
+                    url = '/api/panoramas/' + row['filename']
+                    self.assertEqual(self.app.test_client().get(url).status_code, 401)
+                    with self.client.get(url, headers={'Range': 'bytes=0-15'}) as response:
+                        self.assertEqual(response.status_code, 206)
+                        self.assertEqual(response.data, data[:16])
+                    with self.client.get(f"/api/pano_info/{row['id']}/download") as response:
+                        self.assertEqual(response.data, data)
+                        self.assertIn('attachment', response.headers['Content-Disposition'])
+                # A disk file without a catalogue record is not a published asset.
+                store.save_file(io.BytesIO(b'hidden'), 'not-registered.jpg')
+                self.assertEqual(self.client.get('/api/panoramas/not-registered.jpg').status_code, 404)
+                self.assertEqual(self.client.delete(f"/api/pano_info/{rows[0]['id']}").status_code, 200)
+                self.assertFalse(store.path(rows[0]['filename']).exists())
+                self.assertTrue(store.path(rows[1]['filename']).exists())
 
     def test_ortho_crud_preserves_footprint_and_releases_every_operation(self):
         record = Ortho("scope.tif", crs="EPSG:4326", is_cog=True,

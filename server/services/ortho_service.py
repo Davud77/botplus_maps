@@ -112,14 +112,14 @@ class OrthoService:
                 except Exception as e:
                     logs.append(f"Внимание: Не удалось создать превью: {e}")
 
-                # 3. Загрузка в MinIO
+                # 3. Сохранение на подключённом диске
                 self.tasks.save_state(task_id, {"status": "processing", "progress": 70, "message": "Отправка в хранилище..."})
                 self.storage.upload_file(filename, temp_file_path)
-                logs.append("Основной файл загружен в MinIO")
+                logs.append("Основной файл сохранён на диске")
 
                 if has_preview:
                     self.storage.upload_file(preview_filename, preview_path)
-                    logs.append("Миниатюра загружена в MinIO")
+                    logs.append("Миниатюра сохранена на диске")
 
                 # 4. Запись в БД
                 self.tasks.save_state(task_id, {"status": "processing", "progress": 90, "message": "Сохранение в БД..."})
@@ -170,7 +170,7 @@ class OrthoService:
             local_path = os.path.join(self.temp_dir, ortho.filename)
             cog_path = None
             try:
-                self.tasks.save_state(task_id, {"status": "processing", "progress": 2, "message": "Скачивание из S3..."})
+                self.tasks.save_state(task_id, {"status": "processing", "progress": 2, "message": "Подготовка рабочего файла..."})
                 self.storage.download_file(ortho.filename, local_path)
 
                 name_part, ext = os.path.splitext(ortho.filename)
@@ -244,7 +244,7 @@ class OrthoService:
             local_path = os.path.join(self.temp_dir, ortho.filename)
             output_path = None
             try:
-                self.tasks.save_state(task_id, {"status": "processing", "progress": 2, "message": "Скачивание из S3..."})
+                self.tasks.save_state(task_id, {"status": "processing", "progress": 2, "message": "Подготовка рабочего файла..."})
                 self.storage.download_file(ortho.filename, local_path)
 
                 name_part, ext = os.path.splitext(ortho.filename)
@@ -365,19 +365,17 @@ class OrthoService:
 
         # [UPDATED] Берем настройки внутренних сервисов из конфигурации (.env)
         titiler_host = getattr(config, 'TITILER_INTERNAL_URL', "http://titiler:80")
-        minio_endpoint = getattr(config, 'MINIO_ENDPOINT', "minio:9000")
-        bucket_name = getattr(config, 'MINIO_ORTHO_BUCKET', "orthophotos")
 
         import import_jobs
         from flask import abort
         asset=import_jobs.asset_record(ortho_id,self.db)
-        try: s3_url=str(import_jobs.asset_path(asset)) if asset else f"s3://{bucket_name}/{ortho.filename}"
+        try: raster_path=str(import_jobs.asset_path(asset)) if asset else self.storage.get_local_file_path(ortho.filename)
         except (ValueError,OSError): abort(409,description='Источник изменён или недоступен. Проверьте импорт и подключённый диск.')
 
         try:
             resp = requests.get(
                 f"{titiler_host}/cog/tiles/WebMercatorQuad/{z}/{x}/{y}.png",
-                params={"url": s3_url, "rescale": "0,255"},
+                params={"url": raster_path, "rescale": "0,255"},
                 timeout=10
             )
             if resp.status_code == 200:

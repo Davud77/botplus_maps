@@ -15,22 +15,6 @@ services:
       interval: 5s
       timeout: 5s
       retries: 30
-  minio:
-    restart: unless-stopped
-    build:
-      context: .
-      dockerfile: Dockerfile.storage
-    command: server /data
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?Run configure_local.py}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Run configure_local.py}
-    volumes:
-      - local_objects:/data
-    healthcheck:
-      test: [CMD, curl, -f, http://localhost:9000/minio/health/live]
-      interval: 5s
-      timeout: 5s
-      retries: 30
   app:
     image: botplus-local-app
     restart: unless-stopped
@@ -46,10 +30,9 @@ services:
       COOKIE_SAMESITE: Lax
       SESSION_COOKIE_DOMAIN: ''
       CLIENT_ORIGINS: http://localhost:${APP_PORT:-5580},http://127.0.0.1:${APP_PORT:-5580}
-      MINIO_ENDPOINT: minio:9000
-      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
-      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
-      MINIO_SECURE: 'false'
+      MEDIA_ROOT: /app/data/media
+      TMPDIR: /app/data/temp
+      CPL_TMPDIR: /app/data/temp
       TITILER_INTERNAL_URL: http://titiler:80
       UPLOAD_FOLDER: /app/server/uploads
       ORTHO_FOLDER: /app/server/uploads/orthos
@@ -68,8 +51,6 @@ services:
       - ${LOCAL_SOURCE_DIR:-./data/sources}:/sources/local:ro
     depends_on:
       db:
-        condition: service_healthy
-      minio:
         condition: service_healthy
     healthcheck:
       test: [CMD, curl, -fsS, http://localhost:5000/api/health]
@@ -99,22 +80,11 @@ services:
       # Nested containers can see host CPU count rather than their CPU quota.
       WEB_CONCURRENCY: '2'
       MAX_WORKERS: '2'
-      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
-      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
-      AWS_REGION: us-east-1
-      AWS_ENDPOINT_URL: http://minio:9000
-      AWS_S3_ENDPOINT: minio:9000
-      AWS_VIRTUAL_HOSTING: 'FALSE'
-      AWS_HTTPS: 'FALSE'
       GDAL_DISABLE_READDIR_ON_OPEN: EMPTY_DIR
     volumes:
       - local_work:/app/data:ro
       - ${LOCAL_SOURCE_DIR:-./data/sources}:/sources/local:ro
-    depends_on:
-      minio:
-        condition: service_healthy
 volumes:
   local_postgres:
-  local_objects:
   local_uploads:
   local_work:

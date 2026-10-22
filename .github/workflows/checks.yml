@@ -42,7 +42,7 @@ jobs:
           /tmp/botplus-test/bin/python -c
           "import os, sysconfig; os.symlink('/usr/lib/python3/dist-packages/osgeo', os.path.join(sysconfig.get_path('purelib'), 'osgeo'))"
       - run: >-
-          /tmp/botplus-test/bin/pip install Flask==3.1.2 flask-cors flask-compress requests Pillow piexif minio
+          /tmp/botplus-test/bin/pip install Flask==3.1.2 flask-cors flask-compress requests Pillow piexif
           'psycopg2-binary>=2.9.10,<3' 'gevent>=24.2.1' psycogreen==1.0.2
       - run: /tmp/botplus-test/bin/python -m unittest discover -s tests -v
         env:

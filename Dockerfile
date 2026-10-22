@@ -58,7 +58,7 @@ COPY public ./public
 COPY --from=ui /ui/build ./public/build
 
 # Создаем базовые папки (с запасом под разные пути из конфигов)
-RUN mkdir -p /app/data /app/server/uploads /app/server/data/temp
+RUN mkdir -p /app/data/temp /app/data/media /app/server/uploads /app/server/data/temp
 
 # Создаем непривилегированного пользователя
 RUN useradd -u 10001 -m appuser

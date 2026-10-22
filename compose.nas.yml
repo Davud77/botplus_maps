@@ -1,0 +1,41 @@
+# NAS storage overlay. Mount NFS on the host first; use a mount guard at boot.
+# PostgreSQL stays in the base stack's server-local volume.
+services:
+  app:
+    environment:
+      LOCAL_SOURCE_ROOTS: '{"nas":"/sources/local"}'
+    volumes: &nas_volumes !override
+      - type: bind
+        source: ${NAS_DATA_DIR:?Set NAS_DATA_DIR to the mounted NAS system/work directory}
+        target: /app/data
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${NAS_UPLOADS_DIR:?Set NAS_UPLOADS_DIR to the NAS system/work/legacy-uploads directory}
+        target: /app/server/uploads
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${NAS_SOURCE_DIR:?Set NAS_SOURCE_DIR to the mounted NAS projects directory}
+        target: /sources/local
+        read_only: true
+        bind:
+          create_host_path: false
+  worker:
+    environment:
+      LOCAL_SOURCE_ROOTS: '{"nas":"/sources/local"}'
+    volumes: *nas_volumes
+  titiler:
+    volumes: !override
+      - type: bind
+        source: ${NAS_DATA_DIR}
+        target: /app/data
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${NAS_SOURCE_DIR}
+        target: /sources/local
+        read_only: true
+        bind:
+          create_host_path: false

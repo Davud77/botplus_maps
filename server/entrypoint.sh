@@ -4,6 +4,12 @@
 # Останавливаем скрипт при возникновении любых ошибок
 set -e
 
+# Multipart spooling and GDAL scratch must use the configured data filesystem.
+if [ -n "${TMPDIR:-}" ]; then
+    mkdir -p "$TMPDIR"
+    test -w "$TMPDIR"
+fi
+
 echo "====================================================="
 echo "  🚀 Запуск процесса инициализации Backend"
 echo "====================================================="

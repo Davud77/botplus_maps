@@ -2,11 +2,14 @@
 
 from flask import Blueprint, request, jsonify, send_file, Response
 from flask_cors import cross_origin
-import io
 import os
 import piexif
 import mimetypes
 from PIL import Image
+from pathlib import Path
+import uuid
+from werkzeug.utils import secure_filename
+from werkzeug.exceptions import HTTPException
 from datetime import datetime
 import traceback
 import logging
@@ -15,11 +18,11 @@ import json
 # Use centralized Database class
 try:
     from ..database import Database
-    from ..storage import MinioStorage
+    from ..storage import FileStorage
     from .. import config
 except ImportError:
     from database import Database
-    from storage import MinioStorage
+    from storage import FileStorage
     import config
 
 # Setup logging
@@ -30,22 +33,8 @@ class PanoController:
     def __init__(self):
         # Use centralized Database class (connects via pgbouncer)
         self.db = Database()
-        self.storage = MinioStorage()
-
-        # Подтягиваем имя бакета из конфигурации (.env)
-        self.pano_bucket = getattr(config, 'MINIO_BUCKET_NAME', 'panoramas')
-
-        # Гарантируем, что таблица photos_4326 и индексы существуют!
+        self.storage = FileStorage(Path(config.MEDIA_ROOT) / 'panoramas')
         self._ensure_table()
-
-        # Ensure bucket exists
-        if self.storage.client:
-            try:
-                # Используем динамическое имя бакета
-                if not self.storage.client.bucket_exists(self.pano_bucket):
-                    self.storage.client.make_bucket(self.pano_bucket)
-            except Exception as e:
-                logger.warning(f"MinIO bucket warning: {e}")
 
     def _ensure_table(self):
         """Создает таблицу photos_4326 и необходимые индексы, если их нет"""
@@ -85,6 +74,8 @@ class PanoController:
                 ON public.photos_4326 (id DESC);
             """
             cursor.execute(query_id_index)
+
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_photos_4326_filename ON public.photos_4326 (filename)")
 
             logger.info("Table photos_4326 and indexes are ready.")
 
@@ -232,28 +223,24 @@ class PanoController:
             filename = res['filename'] if isinstance(res, dict) else res[0]
             mime_type, _ = mimetypes.guess_type(filename)
             if not mime_type: mime_type = "application/octet-stream"
-            orig_bucket = self.storage.bucket_name
-            self.storage.bucket_name = self.pano_bucket
-            response = None
-            if self.storage.client:
-                try: response = self.storage.send_local_file(filename, mimetype=mime_type)
-                except: pass
-            self.storage.bucket_name = orig_bucket
-            if response: return response
-            return jsonify({"error": "File not found in storage"}), 404
+            return self.storage.send_local_file(filename, mimetype=mime_type, as_attachment=True)
+        except HTTPException:
+            raise
         except Exception as e:
             return jsonify({"error": str(e)}), 500
 
     @cross_origin()
     def get_pano_image_direct(self, filename):
         try:
+            with self.db.cursor() as cursor:
+                cursor.execute("SELECT 1 FROM public.photos_4326 WHERE filename=%s LIMIT 1", (filename,))
+                if not cursor.fetchone():
+                    return jsonify({"error": "Not found"}), 404
             mime_type, _ = mimetypes.guess_type(filename)
             if not mime_type: mime_type = "application/octet-stream"
-            orig_bucket = self.storage.bucket_name
-            self.storage.bucket_name = self.pano_bucket
-            response = self.storage.send_local_file(filename, mimetype=mime_type)
-            self.storage.bucket_name = orig_bucket
-            return response
+            return self.storage.send_local_file(filename, mimetype=mime_type)
+        except HTTPException:
+            raise
         except Exception as e:
             return jsonify({"error": str(e)}), 404
 
@@ -262,33 +249,34 @@ class PanoController:
         if request.method == "OPTIONS": return "", 200
         uploaded_files = request.files.getlist("files")
         successful, failed, failed_reasons = [], [], []
-        orig_bucket = self.storage.bucket_name
-        self.storage.bucket_name = self.pano_bucket
-        try:
-            for file in uploaded_files:
-                try:
-                    original_name = file.filename
-                    file_content = file.read()
-                    mime_type, _ = mimetypes.guess_type(original_name)
-                    if not mime_type: mime_type = "image/jpeg"
-                    img_stream = io.BytesIO(file_content)
-                    lat, lon, alt, direction, dt = self._parse_exif_data(img_stream)
-                    if lat is None or lon is None: raise ValueError("В файле нет GPS-координат (EXIF)")
-                    timestamp_str = dt.strftime("%Y%m%d_%H%M%S") if dt else "nodate"
-                    new_filename = f"pano_{timestamp_str}_{original_name}"
-                    file_path = f"{self.pano_bucket}/{new_filename}"
-                    save_stream = io.BytesIO(file_content)
-                    self.storage.save_file(save_stream, new_filename, content_type=mime_type)
-                    self._insert_pano_db(new_filename, file_path, lat, lon, alt, direction, dt)
-                    successful.append(original_name)
-                except Exception as e:
-                    failed.append(file.filename)
-                    failed_reasons.append(str(e))
-            return jsonify({"message": "Upload complete", "successful_uploads": successful, "failed_uploads": failed, "skipped_files": failed_reasons})
-        except Exception as e:
-            return jsonify({"error": str(e)}), 500
-        finally:
-            self.storage.bucket_name = orig_bucket
+        for file in uploaded_files:
+            new_filename = None
+            saved = False
+            try:
+                original_name = file.filename or ''
+                mime_type = mimetypes.guess_type(original_name)[0] or 'image/jpeg'
+                # Parse EXIF on Werkzeug's seekable spooled stream, not a full read.
+                lat, lon, alt, direction, dt = self._parse_exif_data(file.stream)
+                if lat is None or lon is None:
+                    raise ValueError("В файле нет GPS-координат (EXIF)")
+                identifier = uuid.uuid4().hex
+                safe_name = secure_filename(original_name.replace('\\', '/').rsplit('/', 1)[-1])[:160] or 'panorama.jpg'
+                new_filename = f"{identifier[:2]}/{identifier[2:4]}/{identifier}_{safe_name}"
+                file.stream.seek(0)
+                self.storage.save_file(file.stream, new_filename, content_type=mime_type)
+                saved = True
+                self._insert_pano_db(new_filename, f"panoramas/{new_filename}", lat, lon, alt, direction, dt)
+                successful.append(original_name)
+            except Exception as error:
+                if saved:
+                    try:
+                        self.storage.delete_file(new_filename)
+                    except OSError:
+                        logger.exception('Could not clean up unregistered panorama')
+                failed.append(file.filename)
+                failed_reasons.append(str(error))
+        return jsonify({"message": "Upload complete", "successful_uploads": successful,
+                        "failed_uploads": failed, "skipped_files": failed_reasons})
 
     @cross_origin()
     def delete_pano(self, pano_id):
@@ -298,13 +286,8 @@ class PanoController:
                 res = cursor.fetchone()
             if not res:
                 return jsonify({"error": "Not found"}), 404
-            # Object storage I/O happens only after the DB transaction is released.
-            original_bucket = self.storage.bucket_name
-            try:
-                self.storage.bucket_name = self.pano_bucket
-                self.storage.delete_file(res["filename"])
-            finally:
-                self.storage.bucket_name = original_bucket
+            # File I/O happens after the DB transaction is released.
+            self.storage.delete_file(res["filename"])
             return jsonify({"status": "deleted"})
         except Exception as e:
             return jsonify({"error": str(e)}), 500
@@ -315,7 +298,7 @@ class PanoController:
 
     def _insert_pano_db(self, filename, path, lat, lon, alt, direction, timestamp):
         query = 'INSERT INTO public.photos_4326 (geom, path, filename, directory, altitude, direction, rotation, longitude, latitude, "timestamp", "order") VALUES (ST_SetSRID(ST_MakePoint(%s, %s, %s), 4326), %s, %s, %s, %s, %s, 0, %s, %s, %s, 0)'
-        values = (float(lon), float(lat), float(alt or 0), path, filename, self.pano_bucket, float(alt or 0), float(direction or 0), str(lon), str(lat), timestamp or datetime.now())
+        values = (float(lon), float(lat), float(alt or 0), path, filename, 'panoramas', float(alt or 0), float(direction or 0), str(lon), str(lat), timestamp or datetime.now())
         with self.db.cursor(write=True) as cursor:
             cursor.execute(query, values)
 

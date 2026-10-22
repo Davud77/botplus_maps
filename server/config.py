@@ -73,19 +73,14 @@ DB_PASSWORD = os.getenv("DB_PASSWORD", "botplus_password")
 
 # Используем готовую строку из .env или собираем резервную
 DATABASE_URL = os.getenv(
-    "DATABASE_URL", 
+    "DATABASE_URL",
     f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 )
 
 # =======================================================
-# 6. OBJECT STORAGE (MinIO)
+# 6. MANAGED FILES (local disk / NAS)
 # =======================================================
-MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "minio:9000")
-MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "minioadmin")
-MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "minioadmin")
-MINIO_SECURE = _env_bool("MINIO_SECURE", False)
-MINIO_BUCKET_NAME = os.getenv("MINIO_BUCKET_NAME", "panoramas")
-MINIO_ORTHO_BUCKET = os.getenv("MINIO_ORTHO_BUCKET", "orthophotos")
+MEDIA_ROOT = os.getenv("MEDIA_ROOT", os.path.join(BASE_DIR, "..", "data", "media"))
 
 # =======================================================
 # 7. TITILER & GDAL

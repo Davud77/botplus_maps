@@ -14,8 +14,6 @@ def main():
         'COMPOSE_PROJECT_NAME=botplus-local',
         'APP_PORT=5580',
         'POSTGRES_PASSWORD=' + secrets.token_urlsafe(32),
-        'MINIO_ROOT_USER=botpluslocal',
-        'MINIO_ROOT_PASSWORD=' + secrets.token_urlsafe(32),
         'SECRET_KEY=' + secrets.token_urlsafe(48),
         'JWT_SECRET=' + secrets.token_urlsafe(48),
         '',
