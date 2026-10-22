@@ -24,5 +24,5 @@ test('map uses a bounded marker endpoint without removed filters',async()=>{
  expect(screen.getByTestId('markers')).toHaveTextContent('/api/media/markers?trash=0');
 });
 test('viewer has no bulk modification controls',async()=>{
- mockRole='viewer';render(<ProfilePanoramas/>);await screen.findByText('one.jpg');expect(screen.queryByRole('button',{name:'В корзину'})).toBeNull();expect(screen.queryByLabelText('Выбрать страницу')).toBeNull();
+ mockRole='viewer';render(<ProfilePanoramas/>);await screen.findByRole('button',{name:'Открыть one.jpg'});expect(screen.queryByRole('button',{name:'В корзину'})).toBeNull();expect(screen.queryByLabelText('Выбрать страницу')).toBeNull();
 });
