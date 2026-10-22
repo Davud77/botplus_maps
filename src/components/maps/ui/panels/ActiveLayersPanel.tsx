@@ -35,6 +35,7 @@ export function ActiveLayersPanel({onClose,onRemovePanos}: {onClose:()=>void;onR
     const source=dragging.current;
     if(!source)return;
     if(!source.started && Math.hypot(event.clientX-source.x,event.clientY-source.y)<5)return;
+    if(!source.started)event.currentTarget.setPointerCapture(event.pointerId);
     source.started=true;setDragKey(source.key);
     const row=document.elementFromPoint(event.clientX,event.clientY)?.closest<HTMLElement>('[data-layer-key]');
     const target=row?.dataset.layerKey;
@@ -65,7 +66,7 @@ export function ActiveLayersPanel({onClose,onRemovePanos}: {onClose:()=>void;onR
               const control=(event.target as HTMLElement).closest('input,button,select,a');
               if(control && !control.classList.contains('bp-drag-handle') && !control.classList.contains('bp-layer-focus'))return;
               suppressClick.current=false;
-              event.preventDefault();event.currentTarget.setPointerCapture(event.pointerId);
+              event.preventDefault();
               dragging.current={key:item.key,x:event.clientX,y:event.clientY,started:false};
             }}
             onPointerMove={pointerMove}

@@ -28,7 +28,9 @@ test('dragging a layer name changes order without centering the map',()=>{
   document.elementFromPoint=()=>target;
   try{
     fireEvent.pointerDown(name,{button:0,clientX:10,clientY:10});
+    expect(row.setPointerCapture).not.toHaveBeenCalled();
     fireEvent.pointerMove(row,{clientX:20,clientY:40});
+    expect(row.setPointerCapture).toHaveBeenCalledTimes(1);
     fireEvent.pointerUp(row);
     fireEvent.click(name);
     expect(useLayerStyleStore.getState().layers.map(x=>x.key)).toEqual(['ortho:8','ortho:7']);
