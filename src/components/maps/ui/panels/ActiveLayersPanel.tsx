@@ -4,11 +4,21 @@ import { LayerSettings } from './LayerSettings';
 import { useLayerStyleStore } from '../../hooks/useLayerStyleStore';
 import { useMapStore } from '../../hooks/useMapStore';
 import { useVectorStore } from '../../hooks/useVectorStore';
+import { focusLayer } from '../../hooks/focusLayer';
 export function ActiveLayersPanel({onClose,onRemovePanos}: {onClose:()=>void;onRemovePanos:()=>void}) {
   const {layers,update,move,reorder}=useLayerStyleStore();
   const {orthoImages,baseDefinition,baseLayerId}=useMapStore();
   const {layerSources}=useVectorStore();
   const [editing,setEditing]=useState<string|null>(null);
+  const [focusError,setFocusError]=useState('');
+  const [focusing,setFocusing]=useState<string|null>(null);
+  const suppressClick=useRef(false);
+  const navigate=async(key:string)=>{
+    if(suppressClick.current){suppressClick.current=false;return;}
+    setFocusError('');setFocusing(key);
+    try{await focusLayer(key);}catch(error){setFocusError((error as Error).message);}
+    finally{setFocusing(null);}
+  };
   const dragging=useRef<{key:string;x:number;y:number;started:boolean}|null>(null);
   const dropRef=useRef<{key:string;after:boolean}|null>(null);
   const [dragKey,setDragKey]=useState<string|null>(null);
@@ -41,7 +51,9 @@ export function ActiveLayersPanel({onClose,onRemovePanos}: {onClose:()=>void;onR
   }
   return <BasePanel title={selected?'Настройки слоя':'Слои на карте'} onClose={onClose}>
     {selected ? <LayerSettings layer={selected} {...info(selected.key)} onBack={()=>setEditing(null)} /> : <>
-      <p className="bp-muted">Перетащите слой вверх или вниз за название или маркер слева. Верхний слой перекрывает нижние.</p>
+      <p className="bp-muted">Нажмите название, чтобы перейти к слою. Перетащите за название или маркер слева, чтобы изменить порядок.</p>
+      {focusing && <p role="status">Определяем границы слоя…</p>}
+      {focusError && <p role="alert">{focusError}</p>}
       {!layers.length && <p>Добавьте данные или выберите подложку.</p>}
       <div className="bp-sortable-layers" role="list" aria-label="Порядок слоёв карты">
         {layers.map(item=>{
@@ -51,12 +63,14 @@ export function ActiveLayersPanel({onClose,onRemovePanos}: {onClose:()=>void;onR
             onPointerDown={event=>{
               if(event.button!==0)return;
               const control=(event.target as HTMLElement).closest('input,button,select,a');
-              if(control && !control.classList.contains('bp-drag-handle'))return;
+              if(control && !control.classList.contains('bp-drag-handle') && !control.classList.contains('bp-layer-focus'))return;
+              suppressClick.current=false;
               event.preventDefault();event.currentTarget.setPointerCapture(event.pointerId);
               dragging.current={key:item.key,x:event.clientX,y:event.clientY,started:false};
             }}
             onPointerMove={pointerMove}
             onPointerUp={event=>{
+              suppressClick.current=!!dragging.current?.started;
               if(dragging.current?.started && dropRef.current)reorder(dragging.current.key,dropRef.current.key,dropRef.current.after);
               if(event.currentTarget.hasPointerCapture(event.pointerId))event.currentTarget.releasePointerCapture(event.pointerId);
               finishDrag();
@@ -64,7 +78,7 @@ export function ActiveLayersPanel({onClose,onRemovePanos}: {onClose:()=>void;onR
             onPointerCancel={finishDrag} onLostPointerCapture={finishDrag}>
             <button className="bp-drag-handle" aria-label={`Переместить ${name}`} title="Перетащить; с клавиатуры — стрелки вверх/вниз" onKeyDown={event=>{if(event.key==='ArrowUp'||event.key==='ArrowDown'){event.preventDefault();move(item.key,event.key==='ArrowUp'?-1:1);}}}>⠿</button>
             <input type="checkbox" checked={item.visible!==false} aria-label={`Видимость ${name}`} onChange={event=>update(item.key,{visible:event.target.checked})} />
-            <span className="bp-sortable-name" title={name}><strong>{name}</strong><small>{kind==='basemap'?'Подложка':kind==='ortho'?'Ортофотоплан':kind==='panoramas'?'Панорамы':'Векторный слой'}</small></span>
+            <button type="button" className="bp-sortable-name bp-layer-focus" title={`Показать ${name} на карте`} aria-label={`Перейти к слою ${name}`} onClick={()=>navigate(item.key)}><strong>{name}</strong><small>{kind==='basemap'?'Подложка':kind==='ortho'?'Ортофотоплан':kind==='panoramas'?'Панорамы':'Векторный слой'}</small></button>
             <button className="bp-icon-button" aria-label={`Настройки ${name}`} title="Настройки слоя" onClick={()=>setEditing(item.key)}>⚙</button>
             <button className="bp-icon-button" aria-label={`Удалить ${name} с карты`} title="Удалить с карты" onClick={()=>remove(item.key)}>×</button>
           </div>;
