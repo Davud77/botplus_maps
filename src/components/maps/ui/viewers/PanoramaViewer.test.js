@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import Marzipano from 'marzipano';
 import PanoramaViewer from './PanoramaViewer';
@@ -10,6 +10,7 @@ jest.mock('marzipano', () => ({
   RectilinearView: Object.assign(jest.fn(), { limit: { traditional: jest.fn() } }),
 }));
 let mockViewer;
+let mockTextureError;
 function responses(media_type, width, height) {
   global.fetch = jest.fn().mockResolvedValueOnce({ ok: true, json: async () => ({ filename: 'ab/physical.jpg', display_name: 'GP123.JPG', width, height, media_type }) })
     .mockResolvedValueOnce({ ok: true, blob: async () => new Blob(['image']) });
@@ -18,7 +19,8 @@ beforeEach(() => {
   jest.clearAllMocks();
   URL.createObjectURL = jest.fn(() => 'blob:photo-test');
   URL.revokeObjectURL = jest.fn();
-  mockViewer = { createScene: jest.fn(() => ({ switchTo: jest.fn() })), destroy: jest.fn(), updateSize: jest.fn() };
+  mockTextureError = null;
+  mockViewer = { createScene: jest.fn(() => ({ switchTo: jest.fn(), layer: () => ({ textureStore: () => ({ addEventListener: (_name, callback) => { mockTextureError = callback; } }) }) })), destroy: jest.fn(), updateSize: jest.fn() };
   Marzipano.Viewer.mockImplementation(() => mockViewer);
 });
 
@@ -53,4 +55,16 @@ test('an unsuccessful download reports an error without creating a viewer', asyn
   render(<PanoramaViewer markerId="3" isExpanded={false} />);
   expect(await screen.findByRole('alert')).toHaveTextContent('404');
   expect(Marzipano.Viewer).not.toHaveBeenCalled();
+});
+
+test('a texture failure is visible and the downloaded image remains available in photo mode', async () => {
+  responses('panorama', 5760, 2880);
+  render(<PanoramaViewer markerId="2" isExpanded={false} />);
+  await waitFor(() => expect(mockTextureError).toBeInstanceOf(Function));
+  act(() => mockTextureError(null, new Error('Texture unavailable')));
+  expect(screen.getByRole('alert')).toHaveTextContent('Texture unavailable');
+  fireEvent.click(screen.getByRole('button', { name: 'Фото', exact: true }));
+  expect(await screen.findByRole('img', { name: 'GP123.JPG' })).toBeInTheDocument();
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  expect(fetch).toHaveBeenCalledTimes(2);
 });

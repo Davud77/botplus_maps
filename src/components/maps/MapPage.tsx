@@ -196,8 +196,9 @@ const MapPage: React.FC<MapPageProps> = ({ initialConfig, readOnly = false, docu
               onClick={toggleFullscreen}
               className="layers-button pano-fullscreen-btn"
               title="На весь экран"
+              aria-label="На весь экран"
             >
-              <img src="/images/svg/fullscreen-icon.svg" alt="На весь экран" width="24" height="24" />
+              <span aria-hidden="true">⛶</span>
             </button>
 
             {/* Кнопка Закрыть с картинкой */}

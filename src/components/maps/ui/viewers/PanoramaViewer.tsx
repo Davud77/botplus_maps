@@ -90,8 +90,12 @@ const PanoramaViewer: React.FC<PanoramaViewerProps> = ({ markerId, isExpanded, o
         const limiter = Marzipano.RectilinearView.limit.traditional(asset.info.width, 120 * Math.PI / 180);
         const view = new Marzipano.RectilinearView({ yaw: Number(asset.info.direction || 0) * Math.PI / 180,
           pitch: 0, roll: 0, fov: Math.PI / 4 }, limiter);
-        viewer.createScene({ source: Marzipano.ImageUrlSource.fromString(asset.url), geometry, view })
-          .switchTo({ transitionDuration: 0 });
+        const scene = viewer.createScene({ source: Marzipano.ImageUrlSource.fromString(asset.url), geometry, view,
+          pinFirstLevel: true });
+        scene.layer().textureStore().addEventListener('textureError', (_tile: any, error: Error) => {
+          setError(error?.message || 'Не удалось загрузить панораму. Откройте режим «Фото».');
+        });
+        scene.switchTo({ transitionDuration: 0 });
         viewerInstanceRef.current = viewer;
         if (typeof ResizeObserver !== 'undefined') {
           observer = new ResizeObserver(() => viewer.updateSize());

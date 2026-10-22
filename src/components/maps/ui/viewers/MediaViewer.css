@@ -1,4 +1,4 @@
-.bp-media-tools { position:absolute; top:12px; left:12px; z-index:5; display:flex; gap:4px; padding:4px; border-radius:12px; background:rgba(15,23,42,.88); box-shadow:0 4px 20px #0003; }
+.bp-media-tools { position:absolute; top:126px; left:12px; z-index:5; display:flex; gap:4px; padding:4px; border-radius:12px; background:rgba(15,23,42,.88); box-shadow:0 4px 20px #0003; }
 .bp-media-tools button { min-width:36px; min-height:34px; padding:6px 10px; border:0; border-radius:8px; color:#f8fafc; background:transparent; cursor:pointer; font:inherit; font-size:13px; }
 .bp-media-tools button[aria-pressed="true"] { background:#2563eb; }
 .bp-media-tools button:hover:not(:disabled) { background:#334155; }
