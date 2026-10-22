@@ -1,0 +1,11 @@
+import React from 'react';
+import '@testing-library/jest-dom';
+import {render,screen,fireEvent,waitFor} from '@testing-library/react';
+import TasksPanel from './TasksPanel';
+import {workspaceRequest} from '../../utils/workspaceApi';
+let mockRole='admin';
+jest.mock('../../hooks/useAuth',()=>({useAuth:()=>({user:{role:mockRole}})}));
+jest.mock('../../utils/workspaceApi',()=>({workspaceRequest:jest.fn()}));
+beforeEach(()=>{mockRole='admin';workspaceRequest.mockReset();workspaceRequest.mockImplementation(path=>Promise.resolve(path==='/system/logs'?{events:[{at:'2026-10-22T10:00:00Z',service:'import',message:'Исходник зарегистрирован'}],services:[],collected_at:null}:path==='/imports/registered'?{items:[{ortho_id:7,filename:'survey.tif',projection_id:'unknown_1',warning:'Исходник',is_cog:false}]}:{jobs:[]}));});
+test('preparation starts only on explicit action and system logs live in tasks',async()=>{render(<TasksPanel/>);expect(await screen.findByText('survey.tif')).toBeInTheDocument();expect(workspaceRequest.mock.calls.some(([p,m])=>m==='POST')).toBe(false);expect(await screen.findByText('Исходник зарегистрирован')).toBeInTheDocument();fireEvent.click(screen.getByRole('button',{name:'Подготовить отдельный COG'}));await waitFor(()=>expect(workspaceRequest).toHaveBeenCalledWith('/imports/rasters/7/prepare','POST',{}));});
+test('editor does not request administrator system logs',async()=>{mockRole='editor';render(<TasksPanel/>);await screen.findByText('survey.tif');expect(screen.queryByRole('heading',{name:'Системные журналы'})).toBeNull();expect(workspaceRequest.mock.calls.some(([p])=>p==='/system/logs')).toBe(false);});

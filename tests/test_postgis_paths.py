@@ -86,7 +86,7 @@ class PostgisPathTests(unittest.TestCase):
 
     def setUp(self):
         with self.db.cursor(write=True) as cursor:
-            cursor.execute("TRUNCATE public.photos_4326, orthophotos RESTART IDENTITY")
+            cursor.execute("TRUNCATE public.photos_4326, orthophotos RESTART IDENTITY CASCADE")
         self.client = self.app.test_client()
         self.client.set_cookie("access_token", "valid")
         self.controller.storage.deleted.clear()

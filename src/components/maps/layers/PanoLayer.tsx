@@ -14,6 +14,7 @@ interface MarkerType {
 }
 
 interface PanoLayerProps {
+  endpoint?: string; query?: string;
   pane?: string;
   selectedMarker?: string | null;
   onMarkerClick?: (marker: MarkerType) => void;
@@ -71,7 +72,7 @@ const createClusterIcon = (count: number) => {
 };
 
 const PanoLayer: React.FC<PanoLayerProps> = ({
-  selectedMarker = null, pane = 'overlayPane',
+  endpoint = API_ENDPOINT, query = '', selectedMarker = null, pane = 'overlayPane',
   onMarkerClick,
   togglePanoLayer,
 }) => {
@@ -95,7 +96,8 @@ const PanoLayer: React.FC<PanoLayerProps> = ({
       abortControllerRef.current = new AbortController();
 
       try {
-        const url = new URL(API_ENDPOINT, window.location.origin);
+        const url = new URL(endpoint, window.location.origin);
+        new URLSearchParams(query).forEach((value,key)=>url.searchParams.set(key,value));
         
         // Берем область карты с запасом 20%, чтобы избежать "прострелов" при легком скролле
         const paddedBounds = bounds.pad(0.2);
@@ -140,7 +142,7 @@ const PanoLayer: React.FC<PanoLayerProps> = ({
         if (error.name !== 'AbortError') console.error('Error fetching panoramas:', error);
       }
     },
-    [togglePanoLayer]
+    [togglePanoLayer,endpoint,query]
   );
 
   // --- Debounce ---

@@ -158,7 +158,7 @@ const MapPage: React.FC<MapPageProps> = ({ initialConfig, readOnly = false, docu
           showSettings={!!documentControls}
           readOnly={readOnly}
           onSearch={handleSearch}
-          onTogglePano={() => setShowPanoLayer(!showPanoLayer)}
+          onTogglePano={() => {setShowPanoLayer(true);useLayerStyleStore.getState().update('panoramas',{visible:true});}}
           isPanoLoading={isLoadingPano}
         />
       </div>
@@ -176,7 +176,7 @@ const MapPage: React.FC<MapPageProps> = ({ initialConfig, readOnly = false, docu
         {activePanel === 'pano' && (
           <PanoPanel
             onClose={closeAll}
-            panoDetails={isPanoVisible ? panoDetails : null} added={showPanoLayer} onAdd={()=>setShowPanoLayer(true)}
+            panoDetails={isPanoVisible ? panoDetails : null} added={showPanoLayer} onAdd={()=>{setShowPanoLayer(true);useLayerStyleStore.getState().update('panoramas',{visible:true});}}
           />
         )}
       </div>

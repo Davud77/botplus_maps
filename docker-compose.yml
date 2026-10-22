@@ -118,6 +118,21 @@ services:
       app:
         condition: service_healthy
 
+  media-worker:
+    image: ${BOTPLUS_IMAGE:-botplus-maps:local}
+    restart: unless-stopped
+    command: [python, server/media_worker.py]
+    mem_limit: 512m
+    cpus: 1.0
+    environment: *app_environment
+    volumes:
+      - ${HOST_DATA_DIR:-./data}:/app/data
+      - ${HOST_UPLOADS_DIR:-./server/uploads}:${UPLOAD_FOLDER}
+      - ${LOCAL_SOURCE_DIR:-./data/sources}:/sources/local:ro
+    depends_on:
+      app:
+        condition: service_healthy
+
   # --- 5. TiTiler (Tile Server) ---
   titiler:
     image: ghcr.io/developmentseed/titiler:0.18.5

@@ -24,7 +24,8 @@ function LayerCoordinates({code}: {code:string}) {
 export function LayerSettings({layer,name,kind,onBack}: {layer:LayerPresentation;name:string;kind:'vector'|'ortho'|'panoramas'|'basemap';onBack:()=>void}) {
   const {data,load}=useSettings();const update=useLayerStyleStore(s=>s.update);
   const [error,setError]=useState('');
-  const code=layer.coordinate_system || (kind==='basemap'?'EPSG:3857':'EPSG:4326');
+  const native=useMapStore(s=>s.orthoImages.find(o=>`ortho:${o.id}`===layer.key)?.crs);
+  const code=layer.coordinate_system || (kind==='basemap'?'EPSG:3857':kind==='ortho'&&data?.coordinate_systems.some(c=>c.id===native)?native!:'EPSG:4326');
   const style=layer.style || {};
   useEffect(()=>{load().catch(e=>setError(e.message));},[load]);
   return <div className="bp-layer-settings">

@@ -38,24 +38,8 @@ def enqueue():
 
 @imports_blueprint.post('/imports/uploads')
 def upload(field_name='file'):
-    editor();request.max_content_length=int(os.environ.get('IMPORT_WEB_MAX_BYTES',str(2*1024**3)))
-    file=request.files.get(field_name)
-    if not file or Path(file.filename or '').suffix.lower() not in {'.tif','.tiff'}: abort(400,description='Выберите GeoTIFF .tif/.tiff.')
-    root=jobs.staging_root();root.mkdir(parents=True,exist_ok=True)
-    key=f'{uuid4()}.tif';path=root/key;queued=False
-    try:
-        with path.open('xb') as target:
-            while True:
-                chunk=file.stream.read(8*1024*1024)
-                if not chunk: break
-                target.write(chunk)
-            target.flush();os.fsync(target.fileno())
-        job=jobs.enqueue(g.current_user_id,'__uploads',key,title=request.form.get('title') or Path(file.filename).name,crs_id=request.form.get('source_crs_id') or None,internal=True)
-        queued=True
-        return jsonify(job=jobs.serialize(job),task_id=str(job['id']),status='started'),202
-    except ValueError as exc: abort(400,description=str(exc))
-    finally:
-        if not queued: path.unlink(missing_ok=True)
+    from controllers.data_import import upload_original
+    return upload_original(field_name=field_name)
 
 
 @imports_blueprint.get('/imports/jobs')

@@ -11,7 +11,7 @@ from unittest.mock import patch
 import test_workspace_integration as workspace_tests
 import import_jobs as jobs
 import job_worker
-from controllers import import_controller
+from controllers import import_controller, data_import
 from managers.ortho_manager import OrthoManager
 
 
@@ -28,7 +28,7 @@ class ImportIntegrationTests(unittest.TestCase):
              'IMPORT_PRODUCTS_DIR':str(self.folder/'products'),'IMPORT_STAGING_DIR':str(self.folder/'staging')}
         (self.folder/'sources').mkdir()
         patcher=patch.dict(os.environ,env);patcher.start();self.addCleanup(patcher.stop)
-        for module in [jobs,import_controller]:
+        for module in [jobs,import_controller,data_import]:
             patcher=patch.object(module,'Database',return_value=self.db);patcher.start();self.addCleanup(patcher.stop)
         with self.db.cursor(write=True) as cur: cur.execute('DROP TABLE orthophotos')
         OrthoManager(self.db)
@@ -127,14 +127,12 @@ class ImportIntegrationTests(unittest.TestCase):
             cur.execute('SELECT status,attempts FROM import_jobs WHERE id=%s',(str(claims[0]['id']),));row=cur.fetchone()
             self.assertEqual(row['status'],'queued');self.assertEqual(row['attempts'],0)
 
-    def test_web_upload_uses_same_queue_and_rejects_invalid_data(self):
+    def test_web_upload_registers_without_processing_and_rejects_invalid_data(self):
         response=self.editor.post('/api/imports/uploads',data={'file':(BytesIO(self.cog.read_bytes()),'uploaded.tif')},content_type='multipart/form-data')
-        self.assertEqual(response.status_code,202,response.get_data(as_text=True))
-        self.assertIsNotNone(job_worker.execute(jobs.claim(self.db),self.db))
+        self.assertEqual(response.status_code,201,response.get_data(as_text=True))
+        self.assertIn('ortho_id',response.json['result']);self.assertIsNone(jobs.claim(self.db))
         response=self.editor.post('/api/imports/uploads',data={'file':(BytesIO(b'not a raster'),'fake.tif')},content_type='multipart/form-data')
-        self.assertEqual(response.status_code,202)
-        self.assertIsNone(job_worker.execute(jobs.claim(self.db),self.db))
-        self.assertEqual(self.editor.get('/api/imports/jobs/'+response.get_json()['job']['id']).get_json()['job']['status'],'failed')
+        self.assertEqual(response.status_code,400);self.assertIsNone(jobs.claim(self.db))
         self.assertEqual(self.editor.post('/api/imports/uploads',data={'file':(BytesIO(b'x'),'bad.zip')}).status_code,400)
 
     def test_unregister_keeps_source_and_allows_fresh_registration(self):
@@ -147,18 +145,13 @@ class ImportIntegrationTests(unittest.TestCase):
         fresh=self.enqueue();self.assertEqual(fresh['status'],'queued')
         self.assertIsNotNone(job_worker.execute(jobs.claim(self.db),self.db))
 
-    def test_legacy_web_uploader_uses_durable_queue_and_compatible_status(self):
+    def test_legacy_web_uploader_registers_original_without_processing(self):
         from controllers.ortho_controller import OrthoController
         controller=object.__new__(OrthoController);controller.db=self.db
         self.app.add_url_rule('/api/upload_ortho',view_func=controller.upload_ortho,methods=['POST'])
-        self.app.add_url_rule('/api/tasks/<task_id>',view_func=controller.get_task_status)
         response=self.editor.post('/api/upload_ortho',data={'files':(BytesIO(self.cog.read_bytes()),'old-form.tif')},content_type='multipart/form-data')
-        self.assertEqual(response.status_code,202,response.get_data(as_text=True))
-        identifier=response.get_json()['task_id']
-        self.assertEqual(self.editor.get('/api/tasks/'+identifier).get_json()['status'],'pending')
-        self.assertEqual(self.other.get('/api/tasks/'+identifier).status_code,404)
-        self.assertIsNotNone(job_worker.execute(jobs.claim(self.db),self.db))
-        self.assertEqual(self.editor.get('/api/tasks/'+identifier).get_json()['status'],'success')
+        self.assertEqual(response.status_code,201,response.get_data(as_text=True))
+        self.assertIn('ortho_id',response.json['result']);self.assertIsNone(jobs.claim(self.db))
 
     def test_tile_gateway_requests_png_for_local_assets_and_rejects_stale_sources(self):
         self.enqueue();result=job_worker.execute(jobs.claim(self.db),self.db)

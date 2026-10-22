@@ -20,6 +20,7 @@ class ClientTests(unittest.TestCase):
         with patch.dict(os.environ,{'BOTPLUS_PASSWORD':'test-only-password'}),patch.object(import_client,'build_opener',return_value=Opener()),redirect_stdout(output):
             self.assertEqual(import_client.run(args),0)
         self.assertEqual(len(requests),2)
+        self.assertTrue(requests[1].full_url.endswith('/imports/register'))
         payload=json.loads(requests[1].data)
         self.assertEqual(payload['root_id'],'nas')
         self.assertEqual(payload['key'],args.path)

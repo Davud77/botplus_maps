@@ -8,7 +8,7 @@ let mockUser;
 const mockNavigate = jest.fn();
 const mockRefresh = jest.fn();
 jest.mock('../../hooks/useAuth', () => ({ useAuth: () => ({ user: mockUser, logout: jest.fn(), refreshUser: mockRefresh }) }));
-jest.mock('react-router-dom', () => ({ useNavigate: () => mockNavigate, Link: ({ to, ...props }) => require('react').createElement('a', { href: to, ...props }) }), { virtual: true });
+jest.mock('react-router-dom', () => ({ useNavigate: () => mockNavigate, useSearchParams: () => {const React=require('react');const [value,setValue]=React.useState(new URLSearchParams());return [value,next=>setValue(new URLSearchParams(next))];}, Link: ({ to, ...props }) => require('react').createElement('a', { href: to, ...props }) }), { virtual: true });
 jest.mock('../Header', () => () => null);
 jest.mock('../profile/ProfileVector', () => () => null);
 jest.mock('../profile/ProfilePanoramas', () => () => null);

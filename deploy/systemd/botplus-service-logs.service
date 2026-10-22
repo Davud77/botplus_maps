@@ -1,0 +1,9 @@
+[Unit]
+Description=BotPlus Maps bounded service log snapshot
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/botplus/app/scripts/collect_service_logs.py --project botplus-server --output /srv/botplus/work/logs/services.json --uid 10001 --gid 10001
+TimeoutStartSec=60
+Nice=10

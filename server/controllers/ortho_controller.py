@@ -56,7 +56,7 @@ class OrthoController:
         return jsonify(self.ortho_service.get_all()), 200
 
     def upload_ortho(self):
-        # Compatibility endpoint: web uploads now use the durable worker too.
+        # Compatibility endpoint: save/register only, without automatic preparation.
         from controllers.import_controller import upload
         return upload(field_name='files')
 
@@ -156,6 +156,7 @@ class OrthoController:
         if self.local_asset(ortho_id):
             with self.db.cursor(write=True) as cur:
                 cur.execute('DELETE FROM import_assets WHERE ortho_id=%s',(ortho_id,))
+                cur.execute('DELETE FROM raster_sources WHERE ortho_id=%s',(ortho_id,))
                 cur.execute('DELETE FROM orthophotos WHERE id=%s',(ortho_id,))
             return jsonify(status='success',message='Регистрация удалена; исходный файл сохранён.'),200
 

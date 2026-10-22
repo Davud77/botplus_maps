@@ -145,6 +145,10 @@ def asset_record(ortho_id,db=None):
     with (db or Database()).cursor() as cursor:
         cursor.execute('SELECT asset FROM import_assets WHERE ortho_id=%s',(ortho_id,))
         row=cursor.fetchone()
+        if not row:
+            cursor.execute("SELECT to_regclass('raster_sources') AS name")
+            if cursor.fetchone()['name']:
+                cursor.execute('SELECT asset FROM raster_sources WHERE ortho_id=%s',(ortho_id,));row=cursor.fetchone()
     return row['asset'] if row else None
 
 

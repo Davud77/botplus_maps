@@ -23,6 +23,7 @@ def main(argv=None):
             command.add_argument('--title',default='')
             command.add_argument('--source-crs-id',help='Explicit source CRS override from the server catalog')
             command.add_argument('--idempotency-key')
+            command.add_argument('--prepare',action='store_true',help='Explicitly prepare a separate COG')
             command.add_argument('--wait',action='store_true')
         if name=='job':
             command.add_argument('id')

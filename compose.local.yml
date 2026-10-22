@@ -72,6 +72,21 @@ services:
     depends_on:
       app:
         condition: service_healthy
+  media-worker:
+    image: botplus-local-app
+    restart: unless-stopped
+    command: [python, server/media_worker.py]
+    mem_limit: ${MEDIA_WORKER_MEMORY:-512m}
+    cpus: ${MEDIA_WORKER_CPUS:-1.0}
+    environment: *app_environment
+    stop_grace_period: 30s
+    volumes:
+      - local_work:/app/data
+      - local_uploads:/app/server/uploads
+      - ${LOCAL_SOURCE_DIR:-./data/sources}:/sources/local:ro
+    depends_on:
+      app:
+        condition: service_healthy
   titiler:
     restart: unless-stopped
     image: ghcr.io/developmentseed/titiler:0.18.5

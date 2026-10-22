@@ -81,6 +81,11 @@ def init_auth_db():
                 );
             """)
 
+            from controllers.media_catalog import initialize as initialize_media
+            initialize_media(cur)
+            from controllers.data_import import initialize as initialize_import_catalog
+            initialize_import_catalog(cur)
+
             # 3. Создаем таблицу ортофотографий (ortholist)
             print("Creating table 'ortholist'...")
             cur.execute("""

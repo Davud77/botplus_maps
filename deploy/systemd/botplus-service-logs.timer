@@ -1,0 +1,10 @@
+[Unit]
+Description=Refresh BotPlus Maps service logs
+
+[Timer]
+OnBootSec=15s
+OnUnitActiveSec=15s
+AccuracySec=2s
+
+[Install]
+WantedBy=timers.target

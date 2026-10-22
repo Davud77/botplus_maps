@@ -25,6 +25,10 @@ services:
     environment:
       LOCAL_SOURCE_ROOTS: '{"nas":"/sources/local"}'
     volumes: *nas_volumes
+  media-worker:
+    environment:
+      LOCAL_SOURCE_ROOTS: '{"nas":"/sources/local"}'
+    volumes: *nas_volumes
   titiler:
     volumes: !override
       - type: bind

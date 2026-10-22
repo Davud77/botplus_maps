@@ -1,7 +1,9 @@
+import { useSearchParams } from 'react-router-dom';
 import React, { useCallback, useEffect, useState } from 'react';
 import Header from './Header';
 import MapPreferences from './profile/MapPreferences';
 import ImportJobs from './profile/ImportJobs';
+import TasksPanel from './profile/TasksPanel';
 import { useAuth } from '../hooks/useAuth';
 import { Role, roleNames, WorkspaceUser, workspaceRequest } from '../utils/workspaceApi';
 import ProfileVector from './profile/ProfileVector';
@@ -11,7 +13,9 @@ import './workspace/Workspace.css';
 
 export default function ProfilePage() {
   const { user, logout, refreshUser } = useAuth();
-  const [tab, setTab] = useState('account');
+  const [params,setParams]=useSearchParams();
+  const tab=params.get('section')||'account';
+  const setTab=(value:string)=>setParams({section:value});
   const [users, setUsers] = useState<WorkspaceUser[]>([]);
   const [usersLoading, setUsersLoading] = useState(false);
   const [pending, setPending] = useState(false);
@@ -60,7 +64,7 @@ export default function ProfilePage() {
     { title: 'Личное', items: [['account','Аккаунт'],['security','Безопасность'],['appearance','Оформление']] },
     ...(user?.role === 'admin' ? [{ title: 'Команда', items: [['users','Пользователи']] }] : []),
     { title: 'Настройки карт', items: [['crs','Проекции'],['basemaps','Подложки']] },
-    { title: 'Геоданные', items: [...(user?.role !== 'viewer' ? [['imports','Импорт и задания']] : []),['ortho','Ортофотопланы'],['panoramas','Панорамы'],['vector','Векторные данные']] },
+    { title: 'Геоданные', items: [...(user?.role !== 'viewer' ? [['imports','Импорт'],['tasks','Задания']] : []),['ortho','Ортофотопланы'],['panoramas','Панорамы'],['vector','Векторные данные']] },
   ];
   return <div className="ws-shell"><Header /><main className="ws-main">
     <div className="ws-eyebrow">ЛИЧНОЕ ПРОСТРАНСТВО</div><div className="ws-page-heading"><div><h1>Данные и настройки</h1><p>Управляйте своим аккаунтом, доступом команды и геоданными.</p></div></div>
@@ -69,7 +73,8 @@ export default function ProfilePage() {
       <button className="ws-logout" onClick={() => logout()}>Выйти из аккаунта ↗</button>
     </aside><section className="ws-profile-content">
       {notice && <div className={`ws-notice ${notice.error ? 'ws-error' : ''}`} role={notice.error ? 'alert' : 'status'}>{notice.text}</div>}
-      {tab==='imports' && user?.role!=='viewer' && <ImportJobs />}
+      {tab==='imports' && user?.role!=='viewer' && <ImportJobs key={params.toString()} />}
+      {tab==='tasks' && user?.role!=='viewer' && <TasksPanel />}
       {['appearance','crs','basemaps'].includes(tab) && <MapPreferences key={tab} section={tab} />}
       {tab === 'account' && <><section className="ws-card"><div className="ws-section-kicker">АККАУНТ</div><h2>Личная информация</h2><p>Ваш аккаунт в этой установке BotPlus Maps.</p><dl className="ws-details"><div><dt>Логин</dt><dd>{user?.username}</dd></div><div><dt>Роль</dt><dd>{user && roleNames[user.role]}</dd></div><div><dt>Размещение</dt><dd>Собственная инфраструктура</dd></div></dl></section><section className="ws-card ws-accent-card"><h2>Всё начинается с карты</h2><p>Объединяйте слои в проекты и публикуйте только то, чем хотите поделиться.</p><a href="/">Перейти к картам →</a></section></>}
       {tab === 'security' && <section className="ws-card"><div className="ws-section-kicker">БЕЗОПАСНОСТЬ</div><h2>Сменить пароль</h2><p>После смены пароля остальные сеансы вашего аккаунта завершатся.</p><form className="ws-form-narrow" onSubmit={changePassword}>

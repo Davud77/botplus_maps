@@ -52,6 +52,7 @@ RUN pip install --no-cache-dir GDAL==$(gdal-config --version)
 # ВАЖНО: Убедитесь, что файл entrypoint.sh лежит в папке server на вашем компьютере,
 # чтобы он скопировался внутрь контейнера вместе с остальным кодом.
 COPY server ./server
+COPY scripts ./scripts
 
 # Публичные файлы и сборка фронта
 COPY public ./public

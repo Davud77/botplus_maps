@@ -32,6 +32,16 @@ def add_crs():
     return jsonify(coordinate_system=row),201
 
 
+@settings_blueprint.patch('/settings/coordinate-systems/<path:code>')
+def update_crs(code):
+    require_admin();data=body();definition=map_settings.parse_crs(data.get('definition'))
+    with Database().cursor(write=True) as cursor:
+        cursor.execute('UPDATE coordinate_systems SET definition=%s,resolved=TRUE WHERE id=%s AND NOT builtin RETURNING id,name',(definition,code))
+        row=cursor.fetchone()
+        if not row:abort(404)
+    return jsonify(coordinate_system=row)
+
+
 @settings_blueprint.post('/settings/basemaps')
 def add_basemap():
     require_admin(); data=body()
@@ -50,7 +60,7 @@ def update_defaults():
         cursor.execute('SELECT * FROM map_defaults WHERE id=1 FOR UPDATE'); current=cursor.fetchone()
         crs=data.get('coordinate_system',current['coordinate_system']); basemap=data.get('basemap',current['basemap'])
         if not isinstance(crs,str) or not isinstance(basemap,str): abort(400)
-        cursor.execute('SELECT 1 FROM coordinate_systems WHERE id=%s',(crs,))
+        cursor.execute("SELECT 1 FROM coordinate_systems WHERE id=%s AND definition<>''",(crs,))
         if not cursor.fetchone(): abort(400,description='Система координат не найдена.')
         cursor.execute('SELECT 1 FROM basemaps WHERE id=%s',(basemap,))
         if not cursor.fetchone(): abort(400,description='Подложка не найдена.')

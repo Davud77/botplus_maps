@@ -449,7 +449,7 @@ const ProfileOrthophotos: FC = () => {
             <button className="secondary-button" onClick={loadOrthos} disabled={loadingOrthos || isProcessing}>
                 {loadingOrthos ? '⏳' : 'Обновить'}
             </button>
-            <Link to="/uploadortho">
+            <Link to="/profile?section=imports&type=raster&mode=upload">
                 <button className="primary-button">+ Загрузить</button>
             </Link>
         </div>

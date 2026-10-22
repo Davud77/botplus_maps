@@ -7,8 +7,8 @@ import MapDocumentPage from './components/workspace/MapDocumentPage';
 import PublicMapPage from './components/workspace/PublicMapPage';
 import LoginPage from './components/LoginPage';
 import ProfilePage from './components/ProfilePage';
-import UploadOrtho from './components/UploadOrtho';
-import UploadPano from './components/UploadPano';
+
+
 import { useAuth } from './hooks/useAuth';
 import './index.css';
 
@@ -48,11 +48,11 @@ const App: React.FC = () => {
         />
         <Route
           path="/upload"
-          element={isAuthenticated ? <UploadPano /> : <Navigate to="/login" replace />}
+          element={isAuthenticated ? <Navigate to="/profile?section=imports&type=panoramas&mode=upload" replace /> : <Navigate to="/login" replace />}
         />
         <Route
           path="/uploadortho"
-          element={isAuthenticated ? <UploadOrtho /> : <Navigate to="/login" replace />}
+          element={isAuthenticated ? <Navigate to="/profile?section=imports&type=raster&mode=upload" replace /> : <Navigate to="/login" replace />}
         />
         <Route path="*" element={<Navigate to={isAuthenticated ? "/" : "/login"} replace />} />
       </Routes>

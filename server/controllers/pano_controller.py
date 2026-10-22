@@ -14,7 +14,7 @@ from datetime import datetime
 import traceback
 import logging
 import json
-from services.media_metadata import read_media_metadata, display_name
+from services.media_metadata import read_media_metadata, display_name, media_kind
 
 # Use centralized Database class
 try:
@@ -78,6 +78,11 @@ class PanoController:
 
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_photos_4326_filename ON public.photos_4326 (filename)")
 
+            try:
+                from .media_catalog import initialize
+            except ImportError:
+                from controllers.media_catalog import initialize
+            initialize(cursor)
             logger.info("Table photos_4326 and indexes are ready.")
 
     @staticmethod
@@ -137,7 +142,7 @@ class PanoController:
                                 ROUND(AVG(ST_X(geom))::numeric, 6) AS lng,
                                 COUNT(*) as count
                             FROM public.photos_4326
-                            WHERE geom && ST_MakeEnvelope(%s, %s, %s, %s, 4326)
+                            WHERE deleted_at IS NULL AND geom && ST_MakeEnvelope(%s, %s, %s, %s, 4326)
                             GROUP BY ST_SnapToGrid(geom, %s)
                             LIMIT %s
                         ) sub;
@@ -158,7 +163,7 @@ class PanoController:
                                 ROUND(ST_Y(geom)::numeric, 6) as lat,
                                 ROUND(ST_X(geom)::numeric, 6) as lng
                             FROM public.photos_4326
-                            WHERE geom && ST_MakeEnvelope(%s, %s, %s, %s, 4326)
+                            WHERE deleted_at IS NULL AND geom && ST_MakeEnvelope(%s, %s, %s, %s, 4326)
                             ORDER BY id DESC
                             LIMIT %s
                         ) sub;
@@ -174,7 +179,7 @@ class PanoController:
                         'count', 1
                     )), '[]'::json)
                     FROM (
-                        SELECT id, geom FROM public.photos_4326 ORDER BY id DESC LIMIT %s
+                        SELECT id, geom FROM public.photos_4326 WHERE deleted_at IS NULL ORDER BY id DESC LIMIT %s
                     ) sub;
                 """
                 params = (limit,)
@@ -196,17 +201,29 @@ class PanoController:
             traceback.print_exc()
             return jsonify({"error": str(e)}), 500
 
+    def source_file(self, row):
+        source=row.get('source_ref') if isinstance(row,dict) else None
+        if source:
+            import import_jobs
+            from media_worker import source_path
+            root,path=source_path(source['root_id'],source['key'])
+            if import_jobs.fingerprint(path)!=source['fingerprint']:
+                from flask import abort
+                abort(409,description='Исходник изменён. Выполните импорт повторно.')
+            return str(path)
+        return self.storage.get_local_file_path(row['filename'])
+
     @cross_origin()
     def get_pano_info(self, pano_id):
         try:
-            query = 'SELECT id, latitude, longitude, altitude, direction, filename, directory, "timestamp" FROM public.photos_4326 WHERE id = %s'
+            query = 'SELECT id, latitude, longitude, altitude, direction, filename, directory, "timestamp", source_ref FROM public.photos_4326 WHERE id = %s AND deleted_at IS NULL'
             with self.db.cursor() as cursor:
                 cursor.execute(query, (pano_id,))
                 row = cursor.fetchone()
             if row:
                 data = row if isinstance(row, dict) else {"id": row[0], "latitude": row[1], "longitude": row[2], "altitude": row[3], "direction": row[4], "filename": row[5], "directory": row[6], "timestamp": row[7]}
                 try:
-                    metadata = read_media_metadata(self.storage.get_local_file_path(data['filename']))
+                    metadata = read_media_metadata(self.source_file(data))
                 except OSError:
                     metadata = {}
                 return jsonify({
@@ -216,6 +233,8 @@ class PanoController:
                     "filename": data["filename"], "directory": data["directory"], "timestamp": data["timestamp"].isoformat() if data["timestamp"] else None
                 })
             return jsonify({"error": "Not found"}), 404
+        except HTTPException:
+            raise
         except Exception as e:
             return jsonify({"error": str(e)}), 500
 
@@ -223,12 +242,14 @@ class PanoController:
     def download_pano_file(self, pano_id):
         try:
             with self.db.cursor() as cursor:
-                cursor.execute("SELECT filename FROM public.photos_4326 WHERE id = %s", (pano_id,))
+                cursor.execute("SELECT filename,source_ref FROM public.photos_4326 WHERE id = %s AND deleted_at IS NULL", (pano_id,))
                 res = cursor.fetchone()
             if not res: return jsonify({"error": "Not found"}), 404
             filename = res['filename'] if isinstance(res, dict) else res[0]
             mime_type, _ = mimetypes.guess_type(filename)
             if not mime_type: mime_type = "application/octet-stream"
+            if res.get('source_ref'):
+                return send_file(self.source_file(res),mimetype=mime_type,as_attachment=True,download_name=display_name(filename))
             return self.storage.send_local_file(filename, mimetype=mime_type, as_attachment=True)
         except HTTPException:
             raise
@@ -239,9 +260,12 @@ class PanoController:
     def get_pano_image_direct(self, filename):
         try:
             with self.db.cursor() as cursor:
-                cursor.execute("SELECT 1 FROM public.photos_4326 WHERE filename=%s LIMIT 1", (filename,))
-                if not cursor.fetchone():
+                cursor.execute("SELECT filename,source_ref FROM public.photos_4326 WHERE filename=%s AND deleted_at IS NULL LIMIT 1", (filename,))
+                row=cursor.fetchone()
+                if not row:
                     return jsonify({"error": "Not found"}), 404
+            if row.get('source_ref'):
+                return send_file(self.source_file(row),mimetype=mimetypes.guess_type(filename)[0] or 'image/jpeg')
             mime_type, _ = mimetypes.guess_type(filename)
             if not mime_type: mime_type = "application/octet-stream"
             return self.storage.send_local_file(filename, mimetype=mime_type)
@@ -253,6 +277,7 @@ class PanoController:
     @cross_origin()
     def upload_pano_files(self):
         if request.method == "OPTIONS": return "", 200
+        request.max_content_length = 128*1024*1024
         uploaded_files = request.files.getlist("files")
         successful, failed, failed_reasons = [], [], []
         for file in uploaded_files:
@@ -261,6 +286,13 @@ class PanoController:
             try:
                 original_name = file.filename or ''
                 mime_type = mimetypes.guess_type(original_name)[0] or 'image/jpeg'
+                if Path(original_name).suffix.lower() not in {'.jpg','.jpeg','.webp'}: raise ValueError('Поддерживаются JPEG и WebP.')
+                probe=Image.open(file.stream)
+                metadata={'width':probe.width,'height':probe.height,'media_type':media_kind(probe.width,probe.height,probe.info.get('xmp',b''))}
+                if request.form.get('only_360')=='true' and metadata['media_type']!='panorama':raise ValueError('Файл не является полной панорамой 360°.')
+                tags=request.form.get('tags','')
+                if len(tags)>2000:raise ValueError('Теги: не более 2000 символов.')
+                file.stream.seek(0)
                 # Parse EXIF on Werkzeug's seekable spooled stream, not a full read.
                 lat, lon, alt, direction, dt = self._parse_exif_data(file.stream)
                 if lat is None or lon is None:
@@ -271,7 +303,7 @@ class PanoController:
                 file.stream.seek(0)
                 self.storage.save_file(file.stream, new_filename, content_type=mime_type)
                 saved = True
-                self._insert_pano_db(new_filename, f"panoramas/{new_filename}", lat, lon, alt, direction, dt)
+                self._insert_pano_db(new_filename, f"panoramas/{new_filename}", lat, lon, alt, direction, dt, metadata=metadata, tags=tags)
                 successful.append(original_name)
             except Exception as error:
                 if saved:
@@ -302,11 +334,17 @@ class PanoController:
     def update_pano(self, pano_id):
         return jsonify({"status": "error", "message": "Update not implemented"}), 501
 
-    def _insert_pano_db(self, filename, path, lat, lon, alt, direction, timestamp):
+    def _insert_pano_db(self, filename, path, lat, lon, alt, direction, timestamp, metadata=None, tags=""):
+        metadata=metadata or {}
         query = 'INSERT INTO public.photos_4326 (geom, path, filename, directory, altitude, direction, rotation, longitude, latitude, "timestamp", "order") VALUES (ST_SetSRID(ST_MakePoint(%s, %s, %s), 4326), %s, %s, %s, %s, %s, 0, %s, %s, %s, 0)'
         values = (float(lon), float(lat), float(alt or 0), path, filename, 'panoramas', float(alt or 0), float(direction or 0), str(lon), str(lat), timestamp or datetime.now())
         with self.db.cursor(write=True) as cursor:
-            cursor.execute(query, values)
+            cursor.execute(query + ' RETURNING id', values)
+            identifier=cursor.fetchone()['id']
+            cursor.execute('UPDATE public.photos_4326 SET media_type=%s,width=%s,height=%s,tags=%s WHERE id=%s',
+                (metadata.get('media_type'),metadata.get('width'),metadata.get('height'),tags,identifier))
+            cursor.execute("INSERT INTO system_events(service,message) VALUES ('upload',%s)",(f'Файл №{identifier} сохранён без обработки.',))
+            return identifier
 
     def _parse_exif_data(self, stream):
         try:

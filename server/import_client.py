@@ -28,6 +28,10 @@ def run(args):
     except EOFError as exc: raise ValueError('Use an interactive terminal or provide BOTPLUS_PASSWORD in the environment.') from exc
     request('/auth/login','POST',{'username':args.username,'password':password})
     if args.command=='import-raster':
+        if not getattr(args,'prepare',False):
+            if args.source_crs_id or args.wait:raise ValueError('--source-crs-id and --wait require explicit --prepare')
+            result=request('/imports/register','POST',{'root_id':args.root,'key':args.path,'title':args.title})
+            print(json.dumps(result,ensure_ascii=False,indent=2));return 0
         result=request('/imports/jobs','POST',{'root_id':args.root,'key':args.path,'title':args.title,'source_crs_id':args.source_crs_id,'idempotency_key':args.idempotency_key})
         if args.wait:
             job_id=result['job']['id']

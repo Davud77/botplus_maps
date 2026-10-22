@@ -16,6 +16,8 @@ from controllers.maps_controller import maps_blueprint
 from controllers.settings_controller import settings_blueprint
 from controllers.import_controller import imports_blueprint
 from controllers.layer_bounds_controller import bounds_blueprint
+from controllers.media_catalog import media_blueprint
+from controllers.data_import import data_import_blueprint
 from services.permissions import resolve_session
 from controllers.pano_controller import create_pano_blueprint
 from controllers.ortho_controller import create_ortho_blueprint
@@ -132,6 +134,8 @@ def create_app():
     app.register_blueprint(settings_blueprint, url_prefix="/api")
     app.register_blueprint(imports_blueprint, url_prefix="/api")
     app.register_blueprint(bounds_blueprint, url_prefix="/api")
+    app.register_blueprint(media_blueprint, url_prefix="/api")
+    app.register_blueprint(data_import_blueprint, url_prefix="/api")
     app.register_blueprint(maps_blueprint, url_prefix="/api")
     app.register_blueprint(vector_bp, url_prefix="/api")
     app.register_blueprint(create_pano_blueprint(), url_prefix="/api")
