@@ -6,6 +6,7 @@ from unittest.mock import patch
 from uuid import uuid4
 from psycopg2.extras import Json
 from PIL import Image
+from flask import Flask
 import piexif
 from server.database import Database
 from server.controllers.pano_controller import PanoController
@@ -33,6 +34,21 @@ class MediaWorkerTests(unittest.TestCase):
                     with db.cursor() as cur:
                         cur.execute('SELECT * FROM media_import_jobs WHERE id=%s',(identifier,));result=cur.fetchone()
                     self.assertEqual(result['status'],'succeeded');self.assertEqual(result['failed'],0);self.assertEqual(result['imported'],1 if attempt==0 else 0)
+                # NAS references must serve the original bytes, including Range,
+                # and refuse changed sources without converting a 409 into 500.
+                with db.cursor() as cur:
+                    cur.execute("SELECT id FROM public.photos_4326 WHERE source_ref->>'root_id'='test' AND source_ref->>'key'='sphere.jpg'");photo_id=cur.fetchone()['id']
+                app=Flask(__name__)
+                app.add_url_rule('/info/<int:pano_id>',view_func=c.get_pano_info)
+                app.add_url_rule('/download/<int:pano_id>',view_func=c.download_pano_file)
+                client=app.test_client()
+                self.assertEqual(client.get(f'/info/{photo_id}').json['media_type'],'panorama')
+                response=client.get(f'/download/{photo_id}',headers={'Range':'bytes=0-15'})
+                self.assertEqual(response.status_code,206);self.assertEqual(response.data,before[:16]);response.close()
+                pano.write_bytes(before+b'changed')
+                self.assertEqual(client.get(f'/info/{photo_id}').status_code,409)
+                self.assertEqual(client.get(f'/download/{photo_id}').status_code,409)
+                pano.write_bytes(before)
                 self.assertEqual(pano.read_bytes(),before)
                 self.assertEqual(len(list(managed.rglob('*.jpg'))),0)
                 outside=Path(folder)/'outside.jpg';outside.write_bytes(before);(root/'escape.jpg').symlink_to(outside)

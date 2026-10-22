@@ -26,6 +26,7 @@ def main():
         try:
             logs=subprocess.run(['docker','logs','--tail','150','--since','30m','--timestamps',identifier],capture_output=True,text=True,timeout=8)
             for line in (logs.stdout+'\n'+logs.stderr).splitlines():
+                if not line.strip():continue
                 at,sep,message=line.partition(' ')
                 entries.append({'at':at if sep and at[:4].isdigit() else now,'service':service,'message':redact(message if sep else line)})
         except subprocess.TimeoutExpired:entries.append({'at':now,'service':service,'message':'Log collection timed out'})
