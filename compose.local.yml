@@ -96,6 +96,9 @@ services:
     image: ghcr.io/developmentseed/titiler:0.18.5
     platform: linux/amd64
     environment:
+      # Nested containers can see host CPU count rather than their CPU quota.
+      WEB_CONCURRENCY: '2'
+      MAX_WORKERS: '2'
       AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
       AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
       AWS_REGION: us-east-1
