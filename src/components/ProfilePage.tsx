@@ -56,11 +56,16 @@ export default function ProfilePage() {
       if (id === user?.id) { const me = await refreshUser(); if (me?.role !== 'admin') setTab('account'); }
     } catch (e) { setNotice({ text: (e as Error).message, error: true }); } finally { setPending(false); }
   }
-  const tabs = [['account','Аккаунт'],['security','Безопасность'],['appearance','Оформление'],['crs','Системы координат'],['basemaps','Подложки'],...(user?.role === 'admin' ? [['users','Пользователи']] : []),...(user?.role!=='viewer' ? [['imports','Импорт и задания']] : []),['ortho','Ортофотопланы'],['panoramas','Панорамы'],['vector','Векторные данные']];
+  const groups = [
+    { title: 'Личное', items: [['account','Аккаунт'],['security','Безопасность'],['appearance','Оформление']] },
+    ...(user?.role === 'admin' ? [{ title: 'Команда', items: [['users','Пользователи']] }] : []),
+    { title: 'Настройки карт', items: [['crs','Проекции'],['basemaps','Подложки']] },
+    { title: 'Геоданные', items: [...(user?.role !== 'viewer' ? [['imports','Импорт и задания']] : []),['ortho','Ортофотопланы'],['panoramas','Панорамы'],['vector','Векторные данные']] },
+  ];
   return <div className="ws-shell"><Header /><main className="ws-main">
     <div className="ws-eyebrow">ЛИЧНОЕ ПРОСТРАНСТВО</div><div className="ws-page-heading"><div><h1>Данные и настройки</h1><p>Управляйте своим аккаунтом, доступом команды и геоданными.</p></div></div>
     <div className="ws-profile-layout"><aside className="ws-sidebar"><div className="ws-person"><span className="ws-avatar large">{user?.username.slice(0,2).toUpperCase()}</span><strong>{user?.username}</strong><span>{user && roleNames[user.role]}</span></div>
-      <nav aria-label="Разделы профиля">{tabs.map(([key,label]) => <button key={key} className={tab === key ? 'active' : ''} onClick={() => { setTab(key); setNotice(null); }}>{label}<span aria-hidden="true">›</span></button>)}</nav>
+      <nav aria-label="Разделы профиля">{groups.map(group => <div className="ws-nav-group" key={group.title} role="group" aria-label={group.title}><h2 className="ws-nav-group-title">{group.title}</h2>{group.items.map(([key,label]) => <button key={key} className={tab === key ? 'active' : ''} aria-current={tab === key ? 'page' : undefined} onClick={() => { setTab(key); setNotice(null); }}>{label}<span aria-hidden="true">›</span></button>)}</div>)}</nav>
       <button className="ws-logout" onClick={() => logout()}>Выйти из аккаунта ↗</button>
     </aside><section className="ws-profile-content">
       {notice && <div className={`ws-notice ${notice.error ? 'ws-error' : ''}`} role={notice.error ? 'alert' : 'status'}>{notice.text}</div>}
