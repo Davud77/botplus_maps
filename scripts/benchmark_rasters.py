@@ -4,6 +4,7 @@ Run inside the app container with --operator, or use --username from a client.
 Reports contain private layer extents/tile coordinates: keep output private.
 """
 import argparse
+import base64
 import concurrent.futures
 import datetime
 import getpass
@@ -34,8 +35,9 @@ def tiles(bounds,zoom):
 
 
 def main():
-    parser=argparse.ArgumentParser();parser.add_argument('--format',choices=['png','webp'],default='png');parser.add_argument('--server',default='http://127.0.0.1:5000');parser.add_argument('--operator',action='store_true');parser.add_argument('--token-stdin',action='store_true');parser.add_argument('--tile-scale',type=int,choices=[1,2],default=1);parser.add_argument('--username');parser.add_argument('--ids',default='2,5');parser.add_argument('--zooms',default='14,17,20');parser.add_argument('--rounds',type=int,default=3);parser.add_argument('--concurrency',type=int,default=6);parser.add_argument('--manifest',type=Path);parser.add_argument('--output',type=Path,required=True);args=parser.parse_args()
+    parser=argparse.ArgumentParser();parser.add_argument('--transport',choices=['individual','stream'],default='individual');parser.add_argument('--format',choices=['png','webp'],default='png');parser.add_argument('--server',default='http://127.0.0.1:5000');parser.add_argument('--operator',action='store_true');parser.add_argument('--token-stdin',action='store_true');parser.add_argument('--tile-scale',type=int,choices=[1,2],default=1);parser.add_argument('--username');parser.add_argument('--ids',default='2,5');parser.add_argument('--zooms',default='14,17,20');parser.add_argument('--rounds',type=int,default=3);parser.add_argument('--concurrency',type=int,default=6);parser.add_argument('--manifest',type=Path);parser.add_argument('--output',type=Path,required=True);args=parser.parse_args()
     if args.format=='webp' and args.tile_scale!=2:parser.error('WebP uses --tile-scale 2')
+    if args.transport=='stream' and (args.format!='webp' or args.tile_scale!=2):parser.error('Stream transport uses --format webp --tile-scale 2')
     server=args.server.rstrip('/');parsed=urlsplit(server)
     if parsed.scheme not in {'http','https'} or not parsed.netloc or parsed.username or parsed.password or parsed.query or parsed.fragment:parser.error('Use an HTTP(S) URL without embedded credentials')
     if args.operator and parsed.hostname not in {'localhost','127.0.0.1','::1'}:parser.error('--operator is restricted to the local app container')
@@ -67,16 +69,37 @@ def main():
             r=local.session.get(f'{server}/api/orthophotos/{identifier}/tiles/{z}/{x}/{y}{'@2x' if args.tile_scale==2 else ''}.{args.format}',timeout=60)
             return {'tile':tile,'seconds':time.perf_counter()-started,'status':r.status_code,'png':(r.content.startswith(b'\x89PNG\r\n\x1a\n') if args.format=='png' else r.content[:4]==b'RIFF' and r.content[8:12]==b'WEBP'),'bytes':len(r.content),'sha256':hashlib.sha256(r.content).hexdigest(),'cache':r.headers.get('X-Raster-Cache'),'server_timing':r.headers.get('Server-Timing')}
         except requests.RequestException as e:return {'tile':tile,'seconds':time.perf_counter()-started,'status':0,'png':False,'error':type(e).__name__}
+    def stream_tiles(case,started):
+        requested={tuple(t) for t in case['tiles']};received=set()
+        if len(requested)>24:raise ValueError('Stream cases support up to 24 tiles')
+        query={'z':case['tiles'][0][0],'tiles':';'.join(f'{x},{y}' for z,x,y in case['tiles'])}
+        try:
+            with session.get(f"{server}/api/orthophotos/{case['ortho_id']}/tiles/batch",params=query,stream=True,timeout=60) as response:
+                response.raise_for_status()
+                for line in response.iter_lines(chunk_size=8192):
+                    if not line:continue
+                    frame=json.loads(line);tile=(query['z'],frame['x'],frame['y'])
+                    if tile not in requested or tile in received:continue
+                    received.add(tile);value=base64.b64decode(frame.get('data',''),validate=True)
+                    yield {'tile':list(tile),'seconds':time.perf_counter()-started,'status':frame.get('error',200),'png':value[:4]==b'RIFF' and value[8:12]==b'WEBP','bytes':len(value),'wire_bytes':len(line)+1,'sha256':hashlib.sha256(value).hexdigest(),'cache':frame.get('cache'),'server_timing':frame.get('server_timing')}
+        except (requests.RequestException,ValueError,KeyError):pass
+        for tile in requested-received:
+            yield {'tile':list(tile),'seconds':time.perf_counter()-started,'status':0,'png':False,'bytes':0}
     for case in cases:
         for iteration in range(args.rounds):
             started=time.perf_counter();first=None;rows=[]
-            with concurrent.futures.ThreadPoolExecutor(max_workers=args.concurrency) as pool:
-                for future in concurrent.futures.as_completed([pool.submit(fetch,(case['ortho_id'],t)) for t in case['tiles']]):
-                    value=future.result();rows.append(value)
+            if args.transport=='stream':
+                for value in stream_tiles(case,started):
+                    rows.append(value)
                     if first is None and value['status']==200 and value['png']:first=time.perf_counter()-started
+            else:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=args.concurrency) as pool:
+                    for future in concurrent.futures.as_completed([pool.submit(fetch,(case['ortho_id'],t)) for t in case['tiles']]):
+                        value=future.result();rows.append(value)
+                        if first is None and value['status']==200 and value['png']:first=time.perf_counter()-started
             summary={'ortho_id':case['ortho_id'],'zoom':case['zoom'],'round':iteration+1,'tiles':len(rows),'ok':sum(r['status']==200 and r['png'] for r in rows),'first_seconds':first,'all_seconds':time.perf_counter()-started,'p50_seconds':statistics.median(r['seconds'] for r in rows) if rows else None,'p95_seconds':percentile([r['seconds'] for r in rows],.95),'responses':rows}
             results.append(summary);print(json.dumps({k:v for k,v in summary.items() if k!='responses'}),flush=True)
-    report={'at':datetime.datetime.now(datetime.timezone.utc).isoformat(),'concurrency':args.concurrency,'rounds':args.rounds,'tile_scale':args.tile_scale,'format':args.format,'cases':cases,'results':results,'note':'Live system; OS/NAS caches not flushed. First pass is not guaranteed physically cold.'}
+    report={'at':datetime.datetime.now(datetime.timezone.utc).isoformat(),'concurrency':args.concurrency,'rounds':args.rounds,'tile_scale':args.tile_scale,'format':args.format,'transport':args.transport,'cases':cases,'results':results,'note':'Live system; OS/NAS caches not flushed. First pass is not guaranteed physically cold.'}
     args.output.parent.mkdir(parents=True,exist_ok=True);args.output.write_text(json.dumps(report,ensure_ascii=False,indent=2))
 
 

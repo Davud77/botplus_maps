@@ -3,7 +3,7 @@ import '@testing-library/jest-dom';
 import {render,screen,act} from '@testing-library/react';
 import RasterTileLayer,{RasterLoadingStatus} from './RasterTileLayer';
 let mockProps;
-jest.mock('react-leaflet',()=>({TileLayer:props=>{mockProps=props;return null;}}));
+jest.mock('./BatchedRasterTileLayer',()=>({__esModule:true,default:props=>{mockProps=props;return null;}}));
 test('512 px tiles preserve native detail and report the measured load, including errors',()=>{
  const view=render(<><RasterTileLayer telemetryKey="test" label="ОФП" url="/tile"/><RasterLoadingStatus/></>);
  expect(mockProps.tileSize).toBe(512);expect(mockProps.zoomOffset).toBe(-1);expect(mockProps.minNativeZoom).toBe(1);expect(mockProps.updateWhenZooming).toBe(false);

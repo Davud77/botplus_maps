@@ -62,6 +62,7 @@ class WorkspaceIntegrationTests(unittest.TestCase):
         self.app.register_blueprint(auth_blueprint, url_prefix='/api/auth')
         self.app.add_url_rule('/api/upload', view_func=lambda: jsonify(ok=True), methods=['POST'])
         self.app.add_url_rule('/test-raster', endpoint='ortho.get_ortho_tile', view_func=lambda *args, **kwargs: Response(b'tile', mimetype='image/png'))
+        self.app.add_url_rule('/test-batch',endpoint='ortho.get_ortho_batch',view_func=lambda *a,**k: Response('{}\\n',mimetype='application/x-ndjson'))
         self.admin, self.editor, self.viewer, self.other = [self.client(role) for role in ['admin','editor','viewer','other']]
 
     def cleanup_schema(self):
@@ -177,6 +178,8 @@ class WorkspaceIntegrationTests(unittest.TestCase):
         self.assertEqual(anonymous.get(prefix+'/orthophotos/2/tiles/0/0/0.png').status_code,404)
         self.assertEqual(anonymous.get(prefix+'/orthophotos/1/tiles/0/0/0@2x.webp').status_code,200)
         self.assertEqual(anonymous.get(prefix+'/orthophotos/2/tiles/0/0/0@2x.webp').status_code,404)
+        self.assertEqual(anonymous.get(prefix+'/orthophotos/1/tiles/batch?z=0&tiles=0,0').status_code,200)
+        self.assertEqual(anonymous.get(prefix+'/orthophotos/2/tiles/batch?z=0&tiles=0,0').status_code,404)
         self.assertEqual(anonymous.get(prefix+'/vectors/1/tiles/0/0/0.pbf').status_code,404)
         mvt = anonymous.get(prefix+'/vectors/0/tiles/0/0/0.pbf')
         self.assertEqual(mvt.status_code,200,mvt.data)

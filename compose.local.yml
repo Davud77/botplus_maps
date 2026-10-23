@@ -96,10 +96,10 @@ services:
     platform: linux/amd64
     environment:
       # Nested containers can see host CPU count rather than their CPU quota.
-      WEB_CONCURRENCY: '2'
-      MAX_WORKERS: '2'
+      WEB_CONCURRENCY: '${RASTER_WORKERS:-2}'
+      MAX_WORKERS: '${RASTER_WORKERS:-2}'
       GDAL_DISABLE_READDIR_ON_OPEN: EMPTY_DIR
-      GDAL_CACHEMAX: '64'
+      GDAL_CACHEMAX: '${RASTER_GDAL_CACHE_MB:-64}'
       GDAL_NUM_THREADS: '1'
     volumes:
       - local_work:/app/data:ro

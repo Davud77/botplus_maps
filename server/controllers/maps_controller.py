@@ -227,6 +227,12 @@ def check_tile(z, x, y):
         abort(404)
 
 
+@maps_blueprint.get('/public/maps/<slug>/orthophotos/<int:ortho_id>/tiles/batch')
+def public_raster_batch(slug,ortho_id):
+    if ortho_id not in publication(slug)['config']['orthophoto_ids']:abort(404)
+    return current_app.view_functions['ortho.get_ortho_batch'](ortho_id)
+
+
 @maps_blueprint.get('/public/maps/<slug>/orthophotos/<int:ortho_id>/tiles/<int:z>/<int:x>/<int:y>@2x.webp', defaults={'scale':2,'image_format':'webp'})
 @maps_blueprint.get('/public/maps/<slug>/orthophotos/<int:ortho_id>/tiles/<int:z>/<int:x>/<int:y>@2x.png', defaults={'scale':2})
 @maps_blueprint.get('/public/maps/<slug>/orthophotos/<int:ortho_id>/tiles/<int:z>/<int:x>/<int:y>.png')

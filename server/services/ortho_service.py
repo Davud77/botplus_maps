@@ -359,7 +359,7 @@ class OrthoService:
         threading.Thread(target=worker).start()
         return task_id
 
-    def proxy_tile(self, ortho_id, z, x, y, scale=1, image_format='png'):
+    def proxy_tile(self, ortho_id, z, x, y, scale=1, image_format='png', metrics=None):
         import time
         from pathlib import Path
         import import_jobs
@@ -412,7 +412,9 @@ class OrthoService:
         except OSError:
             # Cache storage is optional; the source still must pass validation.
             content=render();state='BYPASS'
+        timing=f'source;dur={(resolved-started)*1000:.2f}, render;dur={render_seconds*1000:.2f}, total;dur={(time.perf_counter()-started)*1000:.2f}'
+        if metrics is not None:metrics.update(cache=state,server_timing=timing)
         if has_request_context():
             g.raster_cache=state
-            g.raster_server_timing=f'source;dur={(resolved-started)*1000:.2f}, render;dur={render_seconds*1000:.2f}, total;dur={(time.perf_counter()-started)*1000:.2f}'
+            g.raster_server_timing=timing
         return content

@@ -212,6 +212,34 @@ class ImportIntegrationTests(unittest.TestCase):
             self.cog.write_bytes(self.cog.read_bytes()+b'changed')
             self.assertEqual(self.editor.get('/api/webp/tiles/3/2/2').status_code,409)
 
+    def test_streamed_tiles_validate_auth_bounds_and_source_before_cache(self):
+        import base64
+        from controllers.ortho_controller import OrthoController
+        from services.ortho_service import OrthoService
+        from test_raster_cache import png
+        from PIL import Image
+        service=object.__new__(OrthoService);service.db=self.db;service.manager=OrthoManager(self.db,ensure_schema=False)
+        controller=object.__new__(OrthoController);controller.ortho_service=service
+        self.app.add_url_rule('/api/stream/<int:ortho_id>',endpoint='stream_test',view_func=controller.get_ortho_batch)
+        self.enqueue();result=job_worker.execute(jobs.claim(self.db),self.db);identifier=result['ortho_id']
+        url=f'/api/stream/{identifier}'
+        query={'z':3,'tiles':'2,2;3,2;2,2'}
+        with patch('services.ortho_service.requests.get') as upstream:
+            upstream.return_value.status_code=200;upstream.return_value.content=png(2)
+            self.assertEqual(self.app.test_client().get(url,query_string=query).status_code,401)
+            for invalid in [{},{'z':25,'tiles':'0,0'},{'z':3,'tiles':'-1,0'},{'z':3,'tiles':'8,0'},{'z':3,'tiles':';'.join(['0,0']*25)}]:
+                self.assertEqual(self.editor.get(url,query_string=invalid).status_code,400)
+            response=self.editor.get(url,query_string=query,buffered=True)
+            self.assertEqual(response.mimetype,'application/x-ndjson');self.assertTrue(response.cache_control.no_store)
+            rows=[json.loads(line) for line in response.data.splitlines()]
+            self.assertEqual(len(rows),2);self.assertEqual(upstream.call_count,2)
+            for row in rows:
+                self.assertEqual(Image.open(BytesIO(base64.b64decode(row['data']))).size,(512,512));self.assertEqual(row['cache'],'MISS')
+            again=self.editor.get(url,query_string=query,buffered=True);self.assertEqual(upstream.call_count,2)
+            self.cog.write_bytes(self.cog.read_bytes()+b'changed')
+            stale=self.editor.get(url,query_string=query,buffered=True)
+            self.assertTrue(all(json.loads(line).get('error')==409 for line in stale.data.splitlines()));self.assertEqual(upstream.call_count,2)
+
     def test_custom_source_crs_override_creates_derivative_without_rewriting_original(self):
         response=self.admin.post('/api/settings/coordinate-systems',json={'name':'Local geographic','definition':'+proj=longlat +datum=WGS84 +no_defs'})
         self.assertEqual(response.status_code,201)

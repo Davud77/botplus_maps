@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo } from 'react';
-import { TileLayer, TileLayerProps } from 'react-leaflet';
+import { TileLayerProps } from 'react-leaflet';
+import TileLayer from './BatchedRasterTileLayer';
 import { create } from 'zustand';
 interface Load {label:string;loading:boolean;first?:number;total?:number;errors:number;}
 const useLoads=create<{items:Record<string,Load>;put:(key:string,value:Load|null)=>void}>(set=>({items:{},put:(key,value)=>set(state=>{const items={...state.items};if(value)items[key]=value;else delete items[key];return {items};})}));
