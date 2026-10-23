@@ -8,7 +8,7 @@ interface Group {controller:AbortController;entries:TileRequest[];}
 // Only the transport changes: visible tiles share progressive HTTP responses.
 export class BatchRasterLayer extends L.TileLayer {
   private pending:TileRequest[]=[];
-  private scheduled?:number;
+  private scheduled=false;
   private groups=new Set<Group>();
   private entries=new WeakMap<HTMLImageElement,TileRequest>();
   private active=true;
@@ -28,8 +28,7 @@ export class BatchRasterLayer extends L.TileLayer {
   onAdd(map:L.Map):this{this.active=true;return super.onAdd(map);}
   onRemove(map:L.Map):this{
     this.active=false;
-    if(this.scheduled!==undefined)cancelAnimationFrame(this.scheduled);
-    this.scheduled=undefined;this.pending=[];
+    this.scheduled=false;this.pending=[];
     this.groups.forEach(group=>group.controller.abort());this.groups.clear();
     return super.onRemove(map);
   }
@@ -39,11 +38,11 @@ export class BatchRasterLayer extends L.TileLayer {
     image.onload=()=>{if(entry.objectUrl)URL.revokeObjectURL(entry.objectUrl);if(!entry.cancelled)done(undefined,image);};
     image.onerror=()=>{if(entry.objectUrl)URL.revokeObjectURL(entry.objectUrl);if(!entry.cancelled)done(new Error('Не удалось загрузить тайл'),image);};
     this.pending.push(entry);
-    if(this.scheduled===undefined)this.scheduled=requestAnimationFrame(()=>this.flush());
+    if(!this.scheduled){this.scheduled=true;queueMicrotask(()=>this.flush());}
     return image;
   }
   private flush(){
-    this.scheduled=undefined;
+    this.scheduled=false;
     const pending=this.pending.filter(entry=>!entry.cancelled);this.pending=[];
     if(!this.active)return;
     const byZoom=new Map<number,TileRequest[]>();
@@ -72,7 +71,7 @@ export class BatchRasterLayer extends L.TileLayer {
       if(!response.ok)throw new Error(`HTTP ${response.status}`);
       if(!response.body){(await response.text()).split('\n').forEach(accept);}
       else{
-        const reader=response.body.getReader();const decoder=new TextDecoder();let buffer='';
+        const reader=response.body.getReader();const decoder=new TextDecoder();let buffer='';let finished=false;
         try{
           while(true){
             const {done,value}=await reader.read();
@@ -80,9 +79,9 @@ export class BatchRasterLayer extends L.TileLayer {
             if(buffer.length>8*1024*1024)throw new Error('Слишком большой тайл');
             let end:number;
             while((end=buffer.indexOf('\n'))>=0){accept(buffer.slice(0,end));buffer=buffer.slice(end+1);}
-            if(done){if(buffer.trim())accept(buffer);break;}
+            if(done){if(buffer.trim())accept(buffer);finished=true;break;}
           }
-        }finally{await reader.cancel().catch(()=>{});reader.releaseLock();}
+        }finally{if(!finished)await reader.cancel().catch(()=>{});reader.releaseLock();}
       }
     }catch(error){
       // Report remaining visible tiles below. Cancelled batches have no callbacks.

@@ -4,7 +4,7 @@ import {BatchRasterLayer} from './BatchRasterLayer';
 const coords=(x,y)=>Object.assign(L.point(x,y),{z:17});
 let flush;
 beforeEach(()=>{
- jest.spyOn(window,'requestAnimationFrame').mockImplementation(callback=>{flush=callback;return 1;});
+ jest.spyOn(global,'queueMicrotask').mockImplementation(callback=>{flush=callback;});
  URL.createObjectURL=jest.fn(()=>`blob:${Math.random()}`);URL.revokeObjectURL=jest.fn();
  global.fetch=jest.fn();
 });
@@ -41,10 +41,20 @@ test('decodes split streamed lines and displays the first tile before the stream
  const grid=layer(),a=grid.createTile(coords(1,3),jest.fn()),b=grid.createTile(coords(2,3),jest.fn());flush();
  await waitFor(()=>expect(a.src).toMatch(/^blob:/));expect(b.getAttribute('src')).toBeNull();
  release({value:encoder.encode(frame(2,3)),done:false});await waitFor(()=>expect(b.src).toMatch(/^blob:/));
- expect(reader.releaseLock).toHaveBeenCalled();
+ expect(reader.releaseLock).toHaveBeenCalled();expect(reader.cancel).not.toHaveBeenCalled();
 });
 test('invalid image encoding completes tiles with errors instead of hanging',async()=>{
  fetch.mockResolvedValue({ok:true,body:null,text:async()=>JSON.stringify({x:1,y:3,data:'!invalid!'})+'\n'});
  const grid=layer(),done=jest.fn();grid.createTile(coords(1,3),done);flush();
  await waitFor(()=>expect(done).toHaveBeenCalled());expect(done.mock.calls[0][0]).toBeInstanceOf(Error);
+});
+test('cancels an obsolete zoom request and allows the next zoom to finish',async()=>{
+ fetch.mockImplementationOnce((url,options)=>new Promise((resolve,reject)=>options.signal.addEventListener('abort',()=>reject(new Error('aborted')))))
+ .mockResolvedValueOnce({ok:true,body:null,text:async()=>frame(3,6)});
+ const grid=layer(),oldDone=jest.fn(),newDone=jest.fn(),oldTile=grid.createTile(coords(1,3),oldDone);flush();
+ const oldSignal=fetch.mock.calls[0][1].signal;grid.fire('tileunload',{tile:oldTile});expect(oldSignal.aborted).toBe(true);
+ const next=grid.createTile(Object.assign(L.point(3,6),{z:18}),newDone);flush();
+ await waitFor(()=>expect(next.src).toMatch(/^blob:/));next.dispatchEvent(new Event('load'));
+ expect(oldDone).not.toHaveBeenCalled();expect(newDone).toHaveBeenCalledTimes(1);
+ expect(new URL(fetch.mock.calls[1][0],'http://localhost').searchParams.get('z')).toBe('17');
 });
