@@ -25,7 +25,7 @@ class ImportIntegrationTests(unittest.TestCase):
         self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
         self.folder=Path(self.temp.name)
         env={'LOCAL_SOURCE_ROOTS':json.dumps({'local':str(self.folder/'sources')}),
-             'IMPORT_PRODUCTS_DIR':str(self.folder/'products'),'IMPORT_STAGING_DIR':str(self.folder/'staging')}
+             'IMPORT_PRODUCTS_DIR':str(self.folder/'products'),'IMPORT_STAGING_DIR':str(self.folder/'staging'),'RASTER_TILE_CACHE_DIR':str(self.folder/'tile-cache')}
         (self.folder/'sources').mkdir()
         patcher=patch.dict(os.environ,env);patcher.start();self.addCleanup(patcher.stop)
         for module in [jobs,import_controller,data_import]:
@@ -167,6 +167,29 @@ class ImportIntegrationTests(unittest.TestCase):
             request.reset_mock()
             with self.app.test_request_context(),self.assertRaises(Conflict):service.proxy_tile(result['ortho_id'],0,0,0)
             request.assert_not_called()
+
+    def test_scaled_tile_cache_keeps_authentication_and_source_validation(self):
+        from controllers.ortho_controller import OrthoController
+        from services.ortho_service import OrthoService
+        from test_raster_cache import png
+        service=object.__new__(OrthoService);service.db=self.db;service.manager=OrthoManager(self.db,ensure_schema=False)
+        controller=object.__new__(OrthoController);controller.ortho_service=service
+        self.app.add_url_rule('/api/raster/<int:z>/<int:x>/<int:y>',endpoint='scaled_raster_test',view_func=lambda z,x,y:controller.get_ortho_tile(identifier,z,x,y,scale=2))
+        self.enqueue();result=job_worker.execute(jobs.claim(self.db),self.db);identifier=result['ortho_id']
+        with patch('services.ortho_service.requests.get') as upstream:
+            upstream.return_value.status_code=200;upstream.return_value.content=png(2)
+            self.assertEqual(self.app.test_client().get('/api/raster/3/2/2').status_code,401)
+            first=self.editor.get('/api/raster/3/2/2');self.assertEqual(first.status_code,200);self.assertEqual(first.headers['X-Raster-Cache'],'MISS')
+            again=self.editor.get('/api/raster/3/2/2');self.assertEqual(again.data,first.data);self.assertEqual(again.headers['X-Raster-Cache'],'MEMORY');self.assertEqual(upstream.call_count,1)
+            self.assertTrue(upstream.call_args.args[0].endswith('/3/2/2@2x.png'))
+            self.assertEqual(self.editor.get('/api/raster/3/99/2').status_code,404);self.assertEqual(upstream.call_count,1)
+            from requests import ConnectionError
+            upstream.side_effect=ConnectionError('renderer offline')
+            self.assertEqual(self.editor.get('/api/raster/3/3/2').status_code,502)
+            upstream.side_effect=None
+            self.assertEqual(self.editor.get('/api/raster/3/3/2').headers['X-Raster-Cache'],'MISS')
+            self.cog.write_bytes(self.cog.read_bytes()+b'changed')
+            self.assertEqual(self.editor.get('/api/raster/3/2/2').status_code,409);self.assertEqual(upstream.call_count,3)
 
     def test_custom_source_crs_override_creates_derivative_without_rewriting_original(self):
         response=self.admin.post('/api/settings/coordinate-systems',json={'name':'Local geographic','definition':'+proj=longlat +datum=WGS84 +no_defs'})

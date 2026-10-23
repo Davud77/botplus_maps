@@ -1,5 +1,5 @@
 # server/controllers/ortho_controller.py
-from flask import Blueprint, jsonify, request, make_response, send_file, abort
+from flask import Blueprint, jsonify, request, make_response, send_file, abort, g
 import import_jobs
 from managers.ortho_manager import OrthoManager
 from database import Database
@@ -43,6 +43,7 @@ class OrthoController:
         blueprint.add_url_rule("/orthophotos/<int:ortho_id>", view_func=c.update_ortho, methods=["PUT"])
         blueprint.add_url_rule("/orthophotos/<int:ortho_id>", view_func=c.delete_ortho, methods=["DELETE"])
         blueprint.add_url_rule("/orthophotos/<int:ortho_id>/tiles/<int:z>/<int:x>/<int:y>.png", view_func=c.get_ortho_tile, methods=["GET"])
+        blueprint.add_url_rule("/orthophotos/<int:ortho_id>/tiles/<int:z>/<int:x>/<int:y>@2x.png", endpoint="get_ortho_tile_2x", view_func=lambda ortho_id,z,x,y: c.get_ortho_tile(ortho_id,z,x,y,scale=2), methods=["GET"])
         blueprint.add_url_rule("/orthophotos/<int:ortho_id>/reproject", view_func=c.reproject_ortho, methods=["POST"])
         blueprint.add_url_rule("/tasks/<task_id>", view_func=c.get_task_status, methods=["GET"])
 
@@ -168,14 +169,16 @@ class OrthoController:
         self.ortho_manager.delete_ortho(ortho_id)
         return jsonify({"status": "success"}), 200
 
-    def get_ortho_tile(self, ortho_id, z, x, y):
-        content = self.ortho_service.proxy_tile(ortho_id, z, x, y)
+    def get_ortho_tile(self, ortho_id, z, x, y, scale=1):
+        content = self.ortho_service.proxy_tile(ortho_id, z, x, y, scale=scale)
         if not content:
              return jsonify({"error": "Raster tile unavailable"}), 502
 
         response = make_response(content)
         response.headers.set("Content-Type", "image/png")
-        response.headers.set("Cache-Control", "public, max-age=3600")
+        response.headers.set("Cache-Control", "private, max-age=60")
+        response.headers["X-Raster-Cache"]=getattr(g,"raster_cache","BYPASS")
+        response.headers["Server-Timing"]=getattr(g,"raster_server_timing","")
         return response
 
     def get_task_status(self, task_id):

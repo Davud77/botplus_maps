@@ -31,6 +31,7 @@ import PanoramaViewer from './ui/viewers/PanoramaViewer';
 // --- LAYERS ---
 import PanoLayer from './layers/PanoLayer';
 import { VectorLayerRenderer } from './layers/VectorLayerRenderer';
+import { RasterLoadingStatus } from './layers/RasterTileLayer';
 import { OrthoTileLayer } from './layers/OrthoLayer';
 
 // --- CORE ---
@@ -163,6 +164,7 @@ const MapPage: React.FC<MapPageProps> = ({ initialConfig, readOnly = false, docu
         />
       </div>
 
+      <RasterLoadingStatus />
       {/* 2. SIDE PANELS */}
       <div className="ui-overlay-layer">
         {activePanel === 'settings' && documentControls && <BasePanel title="Настройки карты" onClose={closeAll}>{documentControls}</BasePanel>}

@@ -1,7 +1,7 @@
 import { LayerPane } from './LayerPane';
 // src/components/maps/layers/OrthoLayer.tsx
 import React from 'react';
-import { TileLayer } from 'react-leaflet';
+import RasterTileLayer from './RasterTileLayer';
 // [FIX] Исправлен путь импорта: поднимаемся на одну папку вверх (..) в maps, затем в hooks
 import { useMapStore } from '../hooks/useMapStore';
 
@@ -26,11 +26,12 @@ export const OrthoTileLayer = () => {
         // ИСПОЛЬЗУЕМ НАШ БЭКЕНД ДЛЯ ПРОКСИРОВАНИЯ ТАЙЛОВ
         // Flask-бэкенд сам обратится к Titiler внутри Docker сети (по адресу из .env) 
         // и безопасно вернет готовую PNG картинку тайла на клиент.
-        const tileUrl = `${API_BASE}/api/orthophotos/${id}/tiles/{z}/{x}/{y}.png`;
+        const tileUrl = `${API_BASE}/api/orthophotos/${id}/tiles/{z}/{x}/{y}@2x.png`;
 
         return (
-          <LayerPane key={id} name={`ortho-overlay-${id}`} style={{zIndex:400+layers.length-Math.max(order,0),opacity:presentation?.opacity??1}}><TileLayer
+          <LayerPane key={id} name={`ortho-overlay-${id}`} style={{zIndex:400+layers.length-Math.max(order,0),opacity:presentation?.opacity??1}}><RasterTileLayer
             key={id}
+            telemetryKey={`ortho:${id}`} label={ortho.filename}
             url={tileUrl}
             maxZoom={24}
             maxNativeZoom={21}

@@ -88,6 +88,8 @@ services:
       app:
         condition: service_healthy
   titiler:
+    mem_limit: ${RASTER_MEMORY:-1536m}
+    cpus: ${RASTER_CPUS:-2.0}
     restart: unless-stopped
     image: ghcr.io/developmentseed/titiler:0.18.5
     platform: linux/amd64
@@ -96,6 +98,8 @@ services:
       WEB_CONCURRENCY: '2'
       MAX_WORKERS: '2'
       GDAL_DISABLE_READDIR_ON_OPEN: EMPTY_DIR
+      GDAL_CACHEMAX: '64'
+      GDAL_NUM_THREADS: '1'
     volumes:
       - local_work:/app/data:ro
       - ${LOCAL_SOURCE_DIR:-./data/sources}:/sources/local:ro
