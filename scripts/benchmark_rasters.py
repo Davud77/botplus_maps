@@ -69,6 +69,7 @@ def main():
             r=local.session.get(f'{server}/api/orthophotos/{identifier}/tiles/{z}/{x}/{y}{'@2x' if args.tile_scale==2 else ''}.{args.format}',timeout=60)
             return {'tile':tile,'seconds':time.perf_counter()-started,'status':r.status_code,'png':(r.content.startswith(b'\x89PNG\r\n\x1a\n') if args.format=='png' else r.content[:4]==b'RIFF' and r.content[8:12]==b'WEBP'),'bytes':len(r.content),'sha256':hashlib.sha256(r.content).hexdigest(),'cache':r.headers.get('X-Raster-Cache'),'server_timing':r.headers.get('Server-Timing')}
         except requests.RequestException as e:return {'tile':tile,'seconds':time.perf_counter()-started,'status':0,'png':False,'error':type(e).__name__}
+    transfer_stats={}
     def stream_tiles(case,started):
         requested={tuple(t) for t in case['tiles']};received=set()
         if len(requested)>24:raise ValueError('Stream cases support up to 24 tiles')
@@ -81,13 +82,14 @@ def main():
                     frame=json.loads(line);tile=(query['z'],frame['x'],frame['y'])
                     if tile not in requested or tile in received:continue
                     received.add(tile);value=base64.b64decode(frame.get('data',''),validate=True)
-                    yield {'tile':list(tile),'seconds':time.perf_counter()-started,'status':frame.get('error',200),'png':value[:4]==b'RIFF' and value[8:12]==b'WEBP','bytes':len(value),'wire_bytes':len(line)+1,'sha256':hashlib.sha256(value).hexdigest(),'cache':frame.get('cache'),'server_timing':frame.get('server_timing')}
+                    yield {'tile':list(tile),'seconds':time.perf_counter()-started,'status':frame.get('error',200),'png':value[:4]==b'RIFF' and value[8:12]==b'WEBP','bytes':len(value),'framed_bytes':len(line)+1,'sha256':hashlib.sha256(value).hexdigest(),'cache':frame.get('cache'),'server_timing':frame.get('server_timing')}
+                transfer_stats.update(wire_bytes=response.raw.tell(),content_encoding=response.headers.get('Content-Encoding','identity'))
         except (requests.RequestException,ValueError,KeyError):pass
         for tile in requested-received:
             yield {'tile':list(tile),'seconds':time.perf_counter()-started,'status':0,'png':False,'bytes':0}
     for case in cases:
         for iteration in range(args.rounds):
-            started=time.perf_counter();first=None;rows=[]
+            started=time.perf_counter();first=None;rows=[];transfer_stats.clear()
             if args.transport=='stream':
                 for value in stream_tiles(case,started):
                     rows.append(value)
@@ -98,6 +100,7 @@ def main():
                         value=future.result();rows.append(value)
                         if first is None and value['status']==200 and value['png']:first=time.perf_counter()-started
             summary={'ortho_id':case['ortho_id'],'zoom':case['zoom'],'round':iteration+1,'tiles':len(rows),'ok':sum(r['status']==200 and r['png'] for r in rows),'first_seconds':first,'all_seconds':time.perf_counter()-started,'p50_seconds':statistics.median(r['seconds'] for r in rows) if rows else None,'p95_seconds':percentile([r['seconds'] for r in rows],.95),'responses':rows}
+            if args.transport=='stream':summary.update(transfer_stats)
             results.append(summary);print(json.dumps({k:v for k,v in summary.items() if k!='responses'}),flush=True)
     report={'at':datetime.datetime.now(datetime.timezone.utc).isoformat(),'concurrency':args.concurrency,'rounds':args.rounds,'tile_scale':args.tile_scale,'format':args.format,'transport':args.transport,'cases':cases,'results':results,'note':'Live system; OS/NAS caches not flushed. First pass is not guaranteed physically cold.'}
     args.output.parent.mkdir(parents=True,exist_ok=True);args.output.write_text(json.dumps(report,ensure_ascii=False,indent=2))

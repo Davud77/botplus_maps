@@ -6,6 +6,7 @@ hold the first image. Source checks and NAS cache remain in OrthoService.
 import base64
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
+import zlib
 from flask import Response, abort, request
 from werkzeug.exceptions import HTTPException
 
@@ -34,13 +35,19 @@ def tile_stream(service, ortho_id):
         except Exception:return {'x':x,'y':y,'error':502}
 
     def generate():
+        compressor = zlib.compressobj(1,zlib.DEFLATED,16+zlib.MAX_WBITS) if compressed else None
         futures = [_executor.submit(render,x,y) for x,y in tiles]
         try:
             for future in as_completed(futures):
-                yield json.dumps(future.result(),separators=(',',':'))+'\n'
+                payload=(json.dumps(future.result(),separators=(',',':'))+'\n').encode()
+                # Recover base64's transfer overhead without buffering the stream.
+                yield compressor.compress(payload)+compressor.flush(zlib.Z_SYNC_FLUSH) if compressor else payload
         finally:
             # Running reads may finish and populate cache; queued work is cancelled.
             for future in futures:future.cancel()
+        if compressor:yield compressor.flush()
 
-    return Response(generate(),mimetype='application/x-ndjson',headers={
-        'Cache-Control':'no-store','X-Accel-Buffering':'no','X-Content-Type-Options':'nosniff'})
+    compressed = request.accept_encodings.quality('gzip') > 0
+    headers = {'Cache-Control':'no-store','X-Accel-Buffering':'no','X-Content-Type-Options':'nosniff','Vary':'Accept-Encoding'}
+    if compressed:headers['Content-Encoding']='gzip'
+    return Response(generate(),mimetype='application/x-ndjson',headers=headers)
