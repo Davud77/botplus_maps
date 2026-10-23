@@ -15,6 +15,8 @@ import struct
 import tempfile
 import threading
 import time
+from io import BytesIO
+from PIL import Image, WebPImagePlugin
 from storage import FileStorage
 
 PNG=b'\x89PNG\r\n\x1a\n'
@@ -26,8 +28,8 @@ class RasterCache:
         self.memory=OrderedDict();self.used=0;self.mutex=threading.Lock()
 
     @staticmethod
-    def key(asset,z,x,y,scale):
-        return hashlib.sha256(json.dumps({'recipe':'png-v1','asset':asset,'tile':[z,x,y,scale],'rescale':'0,255'},sort_keys=True,default=str).encode()).hexdigest()
+    def key(asset,z,x,y,scale,image_format='png'):
+        return hashlib.sha256(json.dumps({'recipe':'webp-q90-v1' if image_format=='webp' else 'png-v1','asset':asset,'tile':[z,x,y,scale],'rescale':'0,255'},sort_keys=True,default=str).encode()).hexdigest()
 
     def remember(self,key,value):
         if len(value)>self.memory_limit:return
@@ -40,7 +42,31 @@ class RasterCache:
 
     @staticmethod
     def valid(value):
+        if not value:return False
+        if value and value[:4]==b'RIFF' and value[8:12]==b'WEBP':
+            if len(value)<20 or struct.unpack('<I',value[4:8])[0]+8!=len(value):return False
+            try:
+                with Image.open(BytesIO(value)) as image:return image.format=='WEBP' and image.size in {(256,256),(512,512)}
+            except (OSError,ValueError):return False
         return len(value)>=45 and value.endswith(b'\x00\x00\x00\x00IEND\xaeB`\x82') and value.startswith(PNG) and struct.unpack('>II',value[16:24]) in {(256,256),(512,512)}
+
+    def lookup(self,key,extension='png'):
+        """Read without acquiring a render lock (safe for cross-format reuse)."""
+        if len(key)!=64 or any(c not in '0123456789abcdef' for c in key) or extension not in {'png','webp'}:raise ValueError('Invalid cache key')
+        now=time.time()
+        with self.mutex:
+            item=self.memory.get(key)
+            if item and now-item[0]<self.ttl:
+                self.memory.move_to_end(key);return item[1],'MEMORY'
+            if item:self.used-=len(item[1]);del self.memory[key]
+        try:
+            path=self.storage.path(key[:2]+'/'+key+'.'+extension)
+            info=path.stat()
+            if now-info.st_mtime>=self.ttl or info.st_size>8*1024**2:return None
+            value=path.read_bytes()
+            if self.valid(value):self.remember(key,value);return value,'DISK'
+        except OSError:pass
+        return None
 
     def publish(self,path,value):
         descriptor,temporary=tempfile.mkstemp(prefix='.tile-',dir=path.parent)
@@ -50,16 +76,12 @@ class RasterCache:
         finally:
             Path(temporary).unlink(missing_ok=True)
 
-    def get(self,key,render):
-        if len(key)!=64 or any(c not in '0123456789abcdef' for c in key):raise ValueError('Invalid cache key')
+    def get(self,key,render,extension='png'):
+        cached=self.lookup(key,extension)
+        if cached:return cached
         now=time.time()
-        with self.mutex:
-            item=self.memory.get(key)
-            if item and now-item[0]<self.ttl:
-                self.memory.move_to_end(key);return item[1],'MEMORY'
-            if item:self.used-=len(item[1]);del self.memory[key]
         prefix=key[:2];folder=self.storage.path(prefix);folder.mkdir(exist_ok=True)
-        path=self.storage.path(prefix+'/'+key+'.png')
+        path=self.storage.path(prefix+'/'+key+'.'+extension)
         def read():
             try:
                 info=path.stat()
@@ -90,15 +112,18 @@ class RasterCache:
             except (OSError,ValueError,TypeError):
                 # Recover only this bounded shard after an interrupted first write.
                 index={}
-                for candidate in folder.glob('*.png'):
-                    if len(candidate.stem)==64 and all(c in '0123456789abcdef' for c in candidate.stem):
+                for candidate in folder.iterdir():
+                    if candidate.suffix in {'.png','.webp'} and len(candidate.stem)==64 and all(c in '0123456789abcdef' for c in candidate.stem):
                         st=candidate.stat();index[candidate.stem]={'size':st.st_size,'at':st.st_mtime}
             index.pop(key,None)
             for old in list(index):
                 if now-index[old]['at']>=self.ttl:
-                    self.storage.path(prefix+'/'+old+'.png').unlink(missing_ok=True);del index[old]
+                    for suffix in ('png','webp'):self.storage.path(prefix+'/'+old+'.'+suffix).unlink(missing_ok=True)
+                    del index[old]
             while index and (len(index)>=self.shard_entries or sum(i['size'] for i in index.values())+len(value)>self.shard_bytes):
-                old=min(index,key=lambda k:index[k]['at']);self.storage.path(prefix+'/'+old+'.png').unlink(missing_ok=True);del index[old]
+                old=min(index,key=lambda k:index[k]['at'])
+                for suffix in ('png','webp'):self.storage.path(prefix+'/'+old+'.'+suffix).unlink(missing_ok=True)
+                del index[old]
             try:
                 if len(value)<=self.shard_bytes and self.shard_entries>0:
                     index[key]={'size':len(value),'at':now}

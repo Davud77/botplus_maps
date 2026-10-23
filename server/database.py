@@ -2,12 +2,16 @@
 from contextlib import contextmanager
 import logging
 import os
+import threading
 
 import psycopg2
 from psycopg2 import extensions
 from psycopg2.extras import RealDictCursor
+from psycopg2.pool import ThreadedConnectionPool
 
 logger = logging.getLogger(__name__)
+_pools = {}
+_pools_lock = threading.Lock()
 
 
 def _enable_cooperative_io():
@@ -39,7 +43,7 @@ class Database:
     LEGACY_SCHEMA_LOCK = 941027001
 
     def __init__(self, dsn=None, *, connect_timeout=None, statement_timeout_ms=None,
-                 idle_transaction_timeout_ms=None):
+                 idle_transaction_timeout_ms=None, pool_size=None):
         if dsn is None:
             try:
                 from .config import DATABASE_URL
@@ -47,6 +51,8 @@ class Database:
                 from config import DATABASE_URL
             dsn = DATABASE_URL
         self._dsn = dsn
+        self.pool_size = pool_size if pool_size is not None else _setting('DB_POOL_SIZE', 0, 0)
+        if self.pool_size < 0:raise ValueError('DB_POOL_SIZE must not be negative')
         self.connect_timeout = (connect_timeout if connect_timeout is not None
                                 else _setting("DB_CONNECT_TIMEOUT_SECONDS", 5, 1))
         self.statement_timeout_ms = (statement_timeout_ms if statement_timeout_ms is not None
@@ -99,7 +105,24 @@ class Database:
 
     @contextmanager
     def cursor(self, *, write=False, dict_rows=True, database_name=None):
-        connection = self.connect(database_name, dict_rows=dict_rows)
+        # Opt-in for API processes. CLI/low-level connect() retain fresh-connection
+        # semantics. Pools are PID/DSN scoped and never reuse another DB's session.
+        pool = gate = None
+        if self.pool_size:
+            _enable_cooperative_io()
+            dsn = extensions.make_dsn(self._dsn, dbname=database_name) if database_name is not None else self._dsn
+            key = (os.getpid(), dsn, dict_rows, self.connect_timeout, self.pool_size)
+            with _pools_lock:
+                if key not in _pools:
+                    kwargs = {'connect_timeout': self.connect_timeout}
+                    if dict_rows:kwargs['cursor_factory'] = RealDictCursor
+                    _pools[key] = (ThreadedConnectionPool(self.pool_size, self.pool_size, dsn, **kwargs), threading.BoundedSemaphore(self.pool_size))
+                pool, gate = _pools[key]
+            if not gate.acquire(timeout=self.connect_timeout):raise psycopg2.OperationalError('Database pool is busy')
+            try:connection = pool.getconn()
+            except BaseException:
+                gate.release();raise
+        else:connection = self.connect(database_name, dict_rows=dict_rows)
         try:
             with connection.cursor() as cursor:
                 self.configure_transaction(cursor, read_only=not write)
@@ -108,4 +131,13 @@ class Database:
                 connection.commit()
             # Reads and errors roll back in release(). No implicit write commit.
         finally:
-            self.release(connection)
+            if pool is None:self.release(connection)
+            else:
+                discard = bool(connection.closed)
+                try:
+                    if not discard:connection.rollback()
+                except Exception:
+                    discard = True
+                    logger.warning('PostgreSQL rollback failed; discarding pooled connection')
+                try:pool.putconn(connection, close=discard)
+                finally:gate.release()

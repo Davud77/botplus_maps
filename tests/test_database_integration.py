@@ -131,6 +131,48 @@ class DatabaseIntegrationTests(unittest.TestCase):
                 raise ValueError("rollback outer only")
         self.assertEqual(self.tokens(), ["inner"])
 
+    def test_pool_reuses_session_and_rolls_back_errors_before_reuse(self):
+        db=Database(TEST_DSN,pool_size=1)
+        with db.cursor() as c:
+            c.execute('SELECT pg_backend_pid() AS pid');pid=c.fetchone()['pid']
+        with self.assertRaises(psycopg2.errors.DivisionByZero):
+            with db.cursor(write=True) as c:
+                c.execute(sql.SQL("INSERT INTO {} VALUES ('pooled-failed')").format(self.table))
+                c.execute('SELECT 1/0')
+        with db.cursor() as c:
+            c.execute('SELECT pg_backend_pid() AS pid');self.assertEqual(c.fetchone()['pid'],pid)
+        with self.assertRaises(psycopg2.errors.ReadOnlySqlTransaction):
+            with db.cursor() as c:c.execute(sql.SQL("INSERT INTO {} VALUES ('forbidden')").format(self.table))
+        with db.cursor(write=True) as c:c.execute(sql.SQL("INSERT INTO {} VALUES ('pooled-ok')").format(self.table))
+        self.assertEqual(self.tokens(),['pooled-ok'])
+
+    def test_pool_saturation_has_bounded_wait_and_does_not_leak_slots(self):
+        db=Database(TEST_DSN,pool_size=1,connect_timeout=1)
+        with db.cursor():
+            started=time.monotonic()
+            with self.assertRaisesRegex(psycopg2.OperationalError,'pool is busy'):
+                with db.cursor():pass
+            self.assertLess(time.monotonic()-started,2)
+        with db.cursor() as c:
+            c.execute('SELECT 1 AS value');self.assertEqual(c.fetchone()['value'],1)
+
+    def test_pooled_concurrent_transactions_do_not_share_connection(self):
+        db=Database(TEST_DSN,pool_size=2);barrier=threading.Barrier(2);pids=[];errors=[]
+        def run(fail):
+            try:
+                with db.cursor(write=True) as c:
+                    c.execute('SELECT pg_backend_pid() AS pid');pids.append(c.fetchone()['pid'])
+                    c.execute(sql.SQL('INSERT INTO {} VALUES (%s)').format(self.table),('pool-bad' if fail else 'pool-good',))
+                    barrier.wait(timeout=5)
+                    if fail:raise ValueError('rollback')
+            except ValueError:pass
+            except BaseException as e:errors.append(type(e).__name__)
+        threads=[threading.Thread(target=run,args=(v,)) for v in (True,False)]
+        for t in threads:t.start()
+        for t in threads:t.join(timeout=10)
+        self.assertFalse(any(t.is_alive() for t in threads));self.assertEqual(errors,[]);self.assertEqual(len(set(pids)),2)
+        self.assertEqual(self.tokens(),['pool-good'])
+
     def test_transaction_local_settings_do_not_survive_commit(self):
         connection = self.db.connect(dict_rows=False)
         try:

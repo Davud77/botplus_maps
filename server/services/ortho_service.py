@@ -359,13 +359,13 @@ class OrthoService:
         threading.Thread(target=worker).start()
         return task_id
 
-    def proxy_tile(self, ortho_id, z, x, y, scale=1):
+    def proxy_tile(self, ortho_id, z, x, y, scale=1, image_format='png'):
         import time
         from pathlib import Path
         import import_jobs
         from flask import abort, g, has_request_context
         from raster_cache import configured_cache, RasterCache
-        if scale not in (1,2) or z<0 or z>24 or x<0 or y<0 or x>=2**z or y>=2**z:abort(404)
+        if image_format not in {'png','webp'} or scale not in (1,2) or z<0 or z>24 or x<0 or y<0 or x>=2**z or y>=2**z:abort(404)
         started=time.perf_counter()
         ortho=self.manager.get_ortho_by_id(ortho_id)
         if not ortho:return None
@@ -375,7 +375,7 @@ class OrthoService:
             descriptor=asset or {'legacy':str(path),'fingerprint':import_jobs.fingerprint(path)}
         except (ValueError,OSError):abort(409,description='Источник изменён или недоступен. Проверьте импорт и подключённый диск.')
         resolved=time.perf_counter();render_seconds=0
-        def render():
+        def render_png():
             nonlocal render_seconds
             begin=time.perf_counter()
             host=getattr(config,'TITILER_INTERNAL_URL','http://titiler:80')
@@ -390,8 +390,24 @@ class OrthoService:
             except requests.RequestException:return None
             except (ValueError,OSError):abort(409,description='Источник изменился во время чтения.')
             finally:render_seconds=time.perf_counter()-begin
+        def render():
+            if image_format=='png':return render_png()
+            from io import BytesIO
+            from PIL import Image
+            # Reuse existing PNG tiles without nested shard locks. A miss renders
+            # once under the WebP key's lock; sources are still checked above.
+            try:cached=configured_cache().lookup(RasterCache.key(descriptor,z,x,y,scale))
+            except OSError:cached=None
+            png=cached[0] if cached else render_png()
+            if not png or not RasterCache.valid(png):return None
+            try:
+                with Image.open(BytesIO(png)) as image:
+                    output=BytesIO()
+                    image.save(output,format='WEBP',quality=90,method=2,exact=True)
+                    return output.getvalue()
+            except OSError:return None
         try:
-            content,state=configured_cache().get(RasterCache.key(descriptor,z,x,y,scale),render)
+            content,state=configured_cache().get(RasterCache.key(descriptor,z,x,y,scale,image_format),render,extension=image_format)
         except TimeoutError:abort(503,description='Сервер тайлов занят. Повторите запрос.')
         except OSError:
             # Cache storage is optional; the source still must pass validation.

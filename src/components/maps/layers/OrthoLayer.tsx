@@ -25,8 +25,8 @@ export const OrthoTileLayer = () => {
 
         // ИСПОЛЬЗУЕМ НАШ БЭКЕНД ДЛЯ ПРОКСИРОВАНИЯ ТАЙЛОВ
         // Flask-бэкенд сам обратится к Titiler внутри Docker сети (по адресу из .env) 
-        // и безопасно вернет готовую PNG картинку тайла на клиент.
-        const tileUrl = `${API_BASE}/api/orthophotos/${id}/tiles/{z}/{x}/{y}@2x.png`;
+        // и безопасно вернет компактный WebP тайл с прозрачностью на клиент.
+        const tileUrl = `${API_BASE}/api/orthophotos/${id}/tiles/{z}/{x}/{y}@2x.webp`;
 
         return (
           <LayerPane key={id} name={`ortho-overlay-${id}`} style={{zIndex:400+layers.length-Math.max(order,0),opacity:presentation?.opacity??1}}><RasterTileLayer

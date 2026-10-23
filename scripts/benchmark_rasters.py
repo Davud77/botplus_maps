@@ -34,7 +34,8 @@ def tiles(bounds,zoom):
 
 
 def main():
-    parser=argparse.ArgumentParser();parser.add_argument('--server',default='http://127.0.0.1:5000');parser.add_argument('--operator',action='store_true');parser.add_argument('--token-stdin',action='store_true');parser.add_argument('--tile-scale',type=int,choices=[1,2],default=1);parser.add_argument('--username');parser.add_argument('--ids',default='2,5');parser.add_argument('--zooms',default='14,17,20');parser.add_argument('--rounds',type=int,default=3);parser.add_argument('--concurrency',type=int,default=6);parser.add_argument('--manifest',type=Path);parser.add_argument('--output',type=Path,required=True);args=parser.parse_args()
+    parser=argparse.ArgumentParser();parser.add_argument('--format',choices=['png','webp'],default='png');parser.add_argument('--server',default='http://127.0.0.1:5000');parser.add_argument('--operator',action='store_true');parser.add_argument('--token-stdin',action='store_true');parser.add_argument('--tile-scale',type=int,choices=[1,2],default=1);parser.add_argument('--username');parser.add_argument('--ids',default='2,5');parser.add_argument('--zooms',default='14,17,20');parser.add_argument('--rounds',type=int,default=3);parser.add_argument('--concurrency',type=int,default=6);parser.add_argument('--manifest',type=Path);parser.add_argument('--output',type=Path,required=True);args=parser.parse_args()
+    if args.format=='webp' and args.tile_scale!=2:parser.error('WebP uses --tile-scale 2')
     server=args.server.rstrip('/');parsed=urlsplit(server)
     if parsed.scheme not in {'http','https'} or not parsed.netloc or parsed.username or parsed.password or parsed.query or parsed.fragment:parser.error('Use an HTTP(S) URL without embedded credentials')
     if args.operator and parsed.hostname not in {'localhost','127.0.0.1','::1'}:parser.error('--operator is restricted to the local app container')
@@ -63,8 +64,8 @@ def main():
             local.session=requests.Session();local.session.cookies.update(cookies)
         identifier,tile=item;z,x,y=tile;started=time.perf_counter()
         try:
-            r=local.session.get(f'{server}/api/orthophotos/{identifier}/tiles/{z}/{x}/{y}{'@2x' if args.tile_scale==2 else ''}.png',timeout=60)
-            return {'tile':tile,'seconds':time.perf_counter()-started,'status':r.status_code,'png':r.content.startswith(b'\x89PNG\r\n\x1a\n'),'bytes':len(r.content),'sha256':hashlib.sha256(r.content).hexdigest(),'cache':r.headers.get('X-Raster-Cache'),'server_timing':r.headers.get('Server-Timing')}
+            r=local.session.get(f'{server}/api/orthophotos/{identifier}/tiles/{z}/{x}/{y}{'@2x' if args.tile_scale==2 else ''}.{args.format}',timeout=60)
+            return {'tile':tile,'seconds':time.perf_counter()-started,'status':r.status_code,'png':(r.content.startswith(b'\x89PNG\r\n\x1a\n') if args.format=='png' else r.content[:4]==b'RIFF' and r.content[8:12]==b'WEBP'),'bytes':len(r.content),'sha256':hashlib.sha256(r.content).hexdigest(),'cache':r.headers.get('X-Raster-Cache'),'server_timing':r.headers.get('Server-Timing')}
         except requests.RequestException as e:return {'tile':tile,'seconds':time.perf_counter()-started,'status':0,'png':False,'error':type(e).__name__}
     for case in cases:
         for iteration in range(args.rounds):
@@ -75,7 +76,7 @@ def main():
                     if first is None and value['status']==200 and value['png']:first=time.perf_counter()-started
             summary={'ortho_id':case['ortho_id'],'zoom':case['zoom'],'round':iteration+1,'tiles':len(rows),'ok':sum(r['status']==200 and r['png'] for r in rows),'first_seconds':first,'all_seconds':time.perf_counter()-started,'p50_seconds':statistics.median(r['seconds'] for r in rows) if rows else None,'p95_seconds':percentile([r['seconds'] for r in rows],.95),'responses':rows}
             results.append(summary);print(json.dumps({k:v for k,v in summary.items() if k!='responses'}),flush=True)
-    report={'at':datetime.datetime.now(datetime.timezone.utc).isoformat(),'concurrency':args.concurrency,'rounds':args.rounds,'tile_scale':args.tile_scale,'cases':cases,'results':results,'note':'Live system; OS/NAS caches not flushed. First pass is not guaranteed physically cold.'}
+    report={'at':datetime.datetime.now(datetime.timezone.utc).isoformat(),'concurrency':args.concurrency,'rounds':args.rounds,'tile_scale':args.tile_scale,'format':args.format,'cases':cases,'results':results,'note':'Live system; OS/NAS caches not flushed. First pass is not guaranteed physically cold.'}
     args.output.parent.mkdir(parents=True,exist_ok=True);args.output.write_text(json.dumps(report,ensure_ascii=False,indent=2))
 
 

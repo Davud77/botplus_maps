@@ -38,7 +38,7 @@ def register_http_policies(app, decode_token, origin_allowed, resolve_user=None)
     def apply_cache_policy(response):
         if request.path.startswith("/api/"):
             is_tile = ("/tiles/" in request.path
-                       and response.mimetype in {"image/png", "application/vnd.mapbox-vector-tile"})
+                       and response.mimetype in {"image/png", "image/webp", "application/vnd.mapbox-vector-tile"})
             if not request.path.startswith("/api/public/") and is_tile and request.method in {"GET", "HEAD"} and response.status_code == 200:
                 # Legacy URLs are not versioned yet. Never share authenticated tiles in a public cache.
                 response.headers["Cache-Control"] = "private, max-age=60"

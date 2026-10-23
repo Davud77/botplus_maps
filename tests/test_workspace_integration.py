@@ -175,6 +175,8 @@ class WorkspaceIntegrationTests(unittest.TestCase):
         self.assertEqual(anonymous.get(prefix+'/orthophotos/1/tiles/0/0/0@2x.png').status_code,200)
         self.assertEqual(anonymous.get(prefix+'/orthophotos/2/tiles/0/0/0@2x.png').status_code,404)
         self.assertEqual(anonymous.get(prefix+'/orthophotos/2/tiles/0/0/0.png').status_code,404)
+        self.assertEqual(anonymous.get(prefix+'/orthophotos/1/tiles/0/0/0@2x.webp').status_code,200)
+        self.assertEqual(anonymous.get(prefix+'/orthophotos/2/tiles/0/0/0@2x.webp').status_code,404)
         self.assertEqual(anonymous.get(prefix+'/vectors/1/tiles/0/0/0.pbf').status_code,404)
         mvt = anonymous.get(prefix+'/vectors/0/tiles/0/0/0.pbf')
         self.assertEqual(mvt.status_code,200,mvt.data)

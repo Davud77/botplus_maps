@@ -9,6 +9,8 @@ import threading
 import time
 import unittest
 import zlib
+from io import BytesIO
+from PIL import Image
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'server'))
 from raster_cache import RasterCache,PNG
 
@@ -59,3 +61,15 @@ class RasterCacheTests(unittest.TestCase):
         cache.publish=fail
         def render():calls.append(1);return self.image
         self.assertEqual(cache.get(self.key,render),(self.image,'BYPASS'));self.assertEqual(len(calls),1)
+
+    def test_webp_is_validated_and_shares_quota_without_colliding_with_png(self):
+        output=BytesIO();Image.open(BytesIO(self.image)).save(output,format='WEBP',quality=90)
+        value=output.getvalue();self.assertTrue(RasterCache.valid(value));self.assertFalse(RasterCache.valid(value[:-1]))
+        cache=RasterCache(self.root,memory_bytes=0,shard_entries=1)
+        cache.get(self.key,lambda:self.image)
+        key='aa'+'1'*62
+        self.assertEqual(cache.get(key,lambda:value,extension='webp'),(value,'MISS'))
+        self.assertFalse((self.root/'aa'/(self.key+'.png')).exists())
+        self.assertEqual(RasterCache(self.root).lookup(key,'webp'),(value,'DISK'))
+        self.assertIsNone(cache.lookup(key,'png'))
+        self.assertNotEqual(RasterCache.key({},1,0,0,2),RasterCache.key({},1,0,0,2,'webp'))
