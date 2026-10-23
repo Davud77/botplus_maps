@@ -20,14 +20,16 @@ class LeaseLost(Exception): pass
 
 
 class Lease:
-    def __init__(self,job,db):
+    def __init__(self,job,db,*,table='import_jobs',event_writer=None):
+        if table not in {'import_jobs','raster_display_jobs'}:raise ValueError('Invalid job table')
+        self.table=table;self.event_writer=event_writer or jobs.event
         self.job=job;self.db=db;self.done=threading.Event();self.lost=threading.Event()
         self.thread=threading.Thread(target=self.heartbeat,daemon=True)
     def heartbeat(self):
         while not self.done.wait(5):
             try:
                 with self.db.cursor(write=True) as cur:
-                    cur.execute("""UPDATE import_jobs SET lease_until=NOW()+make_interval(secs=>%s),updated_at=NOW()
+                    cur.execute(f"""UPDATE {self.table} SET lease_until=NOW()+make_interval(secs=>%s),updated_at=NOW()
                         WHERE id=%s AND lease_token=%s AND status='running' AND lease_until>NOW() AND NOT cancel_requested RETURNING id""",
                         (jobs.LEASE_SECONDS,str(self.job['id']),str(self.job['lease_token'])))
                     if not cur.fetchone(): self.lost.set();return
@@ -35,13 +37,13 @@ class Lease:
     def check(self):
         if STOP.is_set() or self.lost.is_set(): raise LeaseLost('Обработка прервана; исходник сохранён.')
         with self.db.cursor() as cur:
-            cur.execute("SELECT 1 FROM import_jobs WHERE id=%s AND lease_token=%s AND status='running' AND lease_until>NOW() AND NOT cancel_requested",(str(self.job['id']),str(self.job['lease_token'])))
+            cur.execute(f"SELECT 1 FROM {self.table} WHERE id=%s AND lease_token=%s AND status='running' AND lease_until>NOW() AND NOT cancel_requested",(str(self.job['id']),str(self.job['lease_token'])))
             if not cur.fetchone(): raise LeaseLost('Обработка отменена или worker потерял аренду задания.')
     def progress(self,percent,message,*,record=False):
         self.check()
         with self.db.cursor(write=True) as cur:
-            cur.execute("UPDATE import_jobs SET progress=%s,message=%s,updated_at=NOW() WHERE id=%s AND lease_token=%s AND status='running'",(percent,message,str(self.job['id']),str(self.job['lease_token'])))
-            if record: jobs.event(cur,self.job['id'],message)
+            cur.execute(f"UPDATE {self.table} SET progress=%s,message=%s,updated_at=NOW() WHERE id=%s AND lease_token=%s AND status='running'",(percent,message,str(self.job['id']),str(self.job['lease_token'])))
+            if record:self.event_writer(cur,self.job['id'],message)
 
 
 def execute(job,db=None):

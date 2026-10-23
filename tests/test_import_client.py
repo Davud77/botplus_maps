@@ -30,3 +30,16 @@ class ClientTests(unittest.TestCase):
     def test_invalid_server_urls_are_rejected_before_login(self):
         for server in ['file:///etc/passwd','https://user:password@host','http://host/?token=secret']:
             with self.subTest(server=server),self.assertRaises(ValueError):import_client.run(argparse.Namespace(server=server))
+
+    def test_map_preparation_sends_only_catalog_ids_and_explicit_quality_limit(self):
+        requests=[]
+        class Opener:
+            def open(self,request,timeout):
+                requests.append(request)
+                return BytesIO(json.dumps({'status':'ok'} if request.full_url.endswith('/auth/login') else {'job':{'id':'queued-job','status':'queued'}}).encode())
+        args=argparse.Namespace(server='http://localhost:5580',username='operator',command='map-prepare',ids=[2,5],max_zoom=21,wait=False)
+        with patch.dict(os.environ,{'BOTPLUS_PASSWORD':'test-only-password'}),patch.object(import_client,'build_opener',return_value=Opener()),redirect_stdout(StringIO()):
+            self.assertEqual(import_client.run(args),0)
+        self.assertEqual(len(requests),3)
+        self.assertTrue(requests[1].full_url.endswith('/raster-display/orthophotos/2'))
+        self.assertEqual(json.loads(requests[2].data),{'max_zoom':21})

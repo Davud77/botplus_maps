@@ -83,7 +83,7 @@ def main():
                     if tile not in requested or tile in received:continue
                     received.add(tile);value=base64.b64decode(frame.get('data',''),validate=True)
                     yield {'tile':list(tile),'seconds':time.perf_counter()-started,'status':frame.get('error',200),'png':value[:4]==b'RIFF' and value[8:12]==b'WEBP','bytes':len(value),'framed_bytes':len(line)+1,'sha256':hashlib.sha256(value).hexdigest(),'cache':frame.get('cache'),'server_timing':frame.get('server_timing')}
-                transfer_stats.update(wire_bytes=response.raw.tell(),content_encoding=response.headers.get('Content-Encoding','identity'))
+                transfer_stats.update(wire_bytes=response.raw.tell() or None,content_encoding=response.headers.get('Content-Encoding','identity'))
         except (requests.RequestException,ValueError,KeyError):pass
         for tile in requested-received:
             yield {'tile':list(tile),'seconds':time.perf_counter()-started,'status':0,'png':False,'bytes':0}

@@ -218,6 +218,7 @@ class ImportIntegrationTests(unittest.TestCase):
         from services.ortho_service import OrthoService
         from test_raster_cache import png
         from PIL import Image
+        from test_raster_codec import npy
         service=object.__new__(OrthoService);service.db=self.db;service.manager=OrthoManager(self.db,ensure_schema=False)
         controller=object.__new__(OrthoController);controller.ortho_service=service
         self.app.add_url_rule('/api/stream/<int:ortho_id>',endpoint='stream_test',view_func=controller.get_ortho_batch)
@@ -225,7 +226,7 @@ class ImportIntegrationTests(unittest.TestCase):
         url=f'/api/stream/{identifier}'
         query={'z':3,'tiles':'2,2;3,2;2,2'}
         with patch('services.ortho_service.requests.get') as upstream:
-            upstream.return_value.status_code=200;upstream.return_value.content=png(2)
+            upstream.return_value.status_code=200;upstream.return_value.content=npy(Image.open(BytesIO(png(2))))
             self.assertEqual(self.app.test_client().get(url,query_string=query).status_code,401)
             for invalid in [{},{'z':25,'tiles':'0,0'},{'z':3,'tiles':'-1,0'},{'z':3,'tiles':'8,0'},{'z':3,'tiles':';'.join(['0,0']*25)}]:
                 self.assertEqual(self.editor.get(url,query_string=invalid).status_code,400)

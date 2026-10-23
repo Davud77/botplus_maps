@@ -27,7 +27,16 @@ def run(args):
     try: password=os.environ.get('BOTPLUS_PASSWORD') or getpass.getpass('BotPlus password: ')
     except EOFError as exc: raise ValueError('Use an interactive terminal or provide BOTPLUS_PASSWORD in the environment.') from exc
     request('/auth/login','POST',{'username':args.username,'password':password})
-    if args.command=='import-raster':
+    if args.command=='map-prepare':
+        if not 1<=len(args.ids)<=100:raise ValueError('Select 1 to 100 raster IDs')
+        rows=[request(f'/raster-display/orthophotos/{identifier}','POST',{'max_zoom':args.max_zoom})['job'] for identifier in args.ids]
+        if args.wait:
+            while any(row['status'] in {'queued','running'} for row in rows):
+                time.sleep(2);rows=[request('/raster-display/jobs/'+row['id'])['job'] for row in rows]
+        result={'jobs':rows}
+    elif args.command=='map-jobs':result=request('/raster-display/jobs')
+    elif args.command=='map-job':result=request('/raster-display/jobs/'+args.id+('/'+args.action if args.action else ''),'POST' if args.action else 'GET',{} if args.action else None)
+    elif args.command=='import-raster':
         if not getattr(args,'prepare',False):
             if args.source_crs_id or args.wait:raise ValueError('--source-crs-id and --wait require explicit --prepare')
             result=request('/imports/register','POST',{'root_id':args.root,'key':args.path,'title':args.title})
@@ -43,4 +52,4 @@ def run(args):
         result=request('/imports/jobs/'+args.id+('/'+args.action if args.action else ''),'POST' if args.action else 'GET',{} if args.action else None)
     else: result=request('/imports/sources')
     print(json.dumps(result,ensure_ascii=False,indent=2,default=str))
-    return 2 if isinstance(result.get('job'),dict) and result['job']['status'] in {'failed','cancelled'} else 0
+    return 2 if (isinstance(result.get('job'),dict) and result['job']['status'] in {'failed','cancelled'}) or (args.command=='map-prepare' and any(row['status'] in {'failed','cancelled'} for row in result.get('jobs',[]))) else 0

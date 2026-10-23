@@ -124,20 +124,22 @@ def serialize(row):
     return value
 
 
-def claim(db=None):
+def claim(db=None,*,table='import_jobs',event_writer=None):
+    if table not in {'import_jobs','raster_display_jobs'}:raise ValueError('Invalid job table')
+    event_writer=event_writer or event
     db=db or Database()
     with db.cursor(write=True) as cursor:
-        cursor.execute("""UPDATE import_jobs SET status=CASE WHEN cancel_requested THEN 'cancelled' ELSE 'failed' END,
+        cursor.execute(f"""UPDATE {table} SET status=CASE WHEN cancel_requested THEN 'cancelled' ELSE 'failed' END,
             message='Предыдущий worker не завершил задание. Доступен повторный запуск.',lease_token=NULL,lease_until=NULL,updated_at=NOW()
             WHERE status='running' AND lease_until<NOW() AND (attempts>=%s OR cancel_requested)""",(MAX_ATTEMPTS,))
-        cursor.execute("""WITH candidate AS (SELECT id FROM import_jobs
+        cursor.execute(f"""WITH candidate AS (SELECT id FROM {table}
             WHERE (status='queued' OR (status='running' AND lease_until<NOW())) AND NOT cancel_requested AND attempts<%s
             ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1)
-            UPDATE import_jobs j SET status='running',attempts=attempts+1,progress=0,error=NULL,
+            UPDATE {table} j SET status='running',attempts=attempts+1,progress=0,error=NULL,
                 message='Проверка источника',lease_token=%s,lease_until=NOW()+make_interval(secs=>%s),updated_at=NOW()
             FROM candidate c WHERE j.id=c.id RETURNING j.*""",(MAX_ATTEMPTS,str(uuid.uuid4()),LEASE_SECONDS))
         row=cursor.fetchone()
-        if row: event(cursor,row['id'],f"Начата попытка {row['attempts']}.")
+        if row: event_writer(cursor,row['id'],f"Начата попытка {row['attempts']}.")
     return dict(row) if row else None
 
 

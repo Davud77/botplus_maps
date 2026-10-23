@@ -73,6 +73,20 @@ services:
     depends_on:
       app:
         condition: service_healthy
+  display-worker:
+    image: botplus-local-app
+    restart: unless-stopped
+    command: [python, server/display_worker.py]
+    mem_limit: ${DISPLAY_WORKER_MEMORY:-1536m}
+    cpus: ${DISPLAY_WORKER_CPUS:-2.0}
+    environment: *app_environment
+    stop_grace_period: 30s
+    volumes:
+      - local_work:/app/data
+      - ${LOCAL_SOURCE_DIR:-./data/sources}:/sources/local:ro
+    depends_on:
+      app:
+        condition: service_healthy
   media-worker:
     image: botplus-local-app
     restart: unless-stopped

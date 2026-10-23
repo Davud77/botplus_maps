@@ -15,6 +15,7 @@ from controllers.account_controller import account_blueprint
 from controllers.maps_controller import maps_blueprint
 from controllers.settings_controller import settings_blueprint
 from controllers.import_controller import imports_blueprint
+from controllers.display_controller import display_blueprint
 from controllers.layer_bounds_controller import bounds_blueprint
 from controllers.media_catalog import media_blueprint
 from controllers.data_import import data_import_blueprint
@@ -133,6 +134,7 @@ def create_app():
     app.register_blueprint(account_blueprint, url_prefix="/api")
     app.register_blueprint(settings_blueprint, url_prefix="/api")
     app.register_blueprint(imports_blueprint, url_prefix="/api")
+    app.register_blueprint(display_blueprint, url_prefix="/api")
     app.register_blueprint(bounds_blueprint, url_prefix="/api")
     app.register_blueprint(media_blueprint, url_prefix="/api")
     app.register_blueprint(data_import_blueprint, url_prefix="/api")

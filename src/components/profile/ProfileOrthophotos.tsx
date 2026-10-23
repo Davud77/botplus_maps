@@ -1,6 +1,7 @@
 // src/components/profile/ProfileOrthophotos.tsx
 import React, { FC, useEffect, useState, useRef, useCallback } from 'react';
 import { Link } from 'react-router-dom';
+import {workspaceRequest} from '../../utils/workspaceApi';
 import { 
   fetchOrthophotos, 
   deleteOrtho, 
@@ -22,6 +23,7 @@ interface LogEntry {
 }
 
 const ProfileOrthophotos: FC = () => {
+  const [displayNotice,setDisplayNotice]=useState('');
   const [orthos, setOrthos] = useState<OrthoItem[]>([]);
   const [loadingOrthos, setLoadingOrthos] = useState(false);
   const [errorOrthos, setErrorOrthos] = useState('');
@@ -421,10 +423,17 @@ const ProfileOrthophotos: FC = () => {
     items.forEach(item => window.open(item.url, '_blank'));
   };
 
+  const prepareForMap=async()=>{
+    setIsProcessing(true);setDisplayNotice('');
+    try{for(const id of selectedIds)await workspaceRequest(`/raster-display/orthophotos/${id}`,'POST',{});setDisplayNotice('Подготовка для быстрого показа поставлена в очередь. Прогресс и отмена — в разделе «Задания». Оригиналы сохраняются.');}
+    catch(e){setDisplayNotice((e as Error).message);}finally{setIsProcessing(false);}
+  };
+
   return (
     <div className="table-container ortho-container">
       <div className="table-header ortho-header-actions">
         <div className="action-buttons-group">
+            <button className="primary-button" onClick={prepareForMap} disabled={!selectedIds.length||isProcessing}>Ускорить для карты</button>
             <button className="secondary-button" onClick={handleBulkToggleVisibility} disabled={selectedIds.length === 0 || isProcessing}>
                 Видимость
             </button>
@@ -455,6 +464,7 @@ const ProfileOrthophotos: FC = () => {
         </div>
       </div>
 
+      {displayNotice&&<p role="status" className="ws-notice">{displayNotice} <Link to="/profile?section=tasks">Открыть задания →</Link></p>}
       {loadingOrthos && <div className="loading-state">Загрузка...</div>}
       {errorOrthos && <div className="error-message ortho-error-message"><strong>Ошибка:</strong> {errorOrthos}</div>}
       {!loadingOrthos && !errorOrthos && orthos.length === 0 && <div className="empty-state">Нет загруженных ортофотопланов</div>}
@@ -512,7 +522,7 @@ const ProfileOrthophotos: FC = () => {
                                     </div>
                                 </div>
                             ) : (
-                                <span className="status-ready">Готов к работе</span>
+                                <span className="status-ready">{ortho.display_ready?'Быстрый показ подготовлен':'Для карты не подготовлен'}</span>
                             )}
                         </td>
                         <td className="cell-bounds">

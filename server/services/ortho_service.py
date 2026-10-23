@@ -32,6 +32,11 @@ class OrthoService:
 
     def get_all(self):
         orthos = self.manager.get_all_orthos()
+        with self.db.cursor() as cur:
+            cur.execute("""SELECT ortho_id FROM import_assets WHERE asset ? 'display'
+                UNION ALL SELECT ortho_id FROM raster_sources s WHERE asset ? 'display'
+                AND NOT EXISTS(SELECT 1 FROM import_assets a WHERE a.ortho_id=s.ortho_id)""")
+            display_ready={row['ortho_id'] for row in cur.fetchall()}
         results = []
         for o in orthos:
             b = None
@@ -53,6 +58,7 @@ class OrthoService:
                 "crs": crs_val,
                 "is_visible": getattr(o, 'is_visible', False),
                 "is_cog": getattr(o, 'is_cog', False),
+                "display_ready": o.id in display_ready,
                 "upload_date": str(o.upload_date) if hasattr(o, 'upload_date') else None
             })
         return results
@@ -365,6 +371,7 @@ class OrthoService:
         import import_jobs
         from flask import abort, g, has_request_context
         from raster_cache import configured_cache, RasterCache
+        from display_jobs import base_asset, display_path
         if image_format not in {'png','webp'} or scale not in (1,2) or z<0 or z>24 or x<0 or y<0 or x>=2**z or y>=2**z:abort(404)
         started=time.perf_counter()
         ortho=self.manager.get_ortho_by_id(ortho_id)
@@ -372,40 +379,49 @@ class OrthoService:
         asset=import_jobs.asset_record(ortho_id,self.db)
         try:
             path=import_jobs.asset_path(asset) if asset else Path(self.storage.get_local_file_path(ortho.filename))
-            descriptor=asset or {'legacy':str(path),'fingerprint':import_jobs.fingerprint(path)}
+            descriptor=base_asset(asset) if asset else {'legacy':str(path),'fingerprint':import_jobs.fingerprint(path)}
+            display=display_path(asset,z,scale) if asset and image_format=='webp' else None
+            if display:
+                path=display;descriptor={'native':descriptor,'display':asset['display']}
         except (ValueError,OSError):abort(409,description='Источник изменён или недоступен. Проверьте импорт и подключённый диск.')
         resolved=time.perf_counter();render_seconds=0
-        def render_png():
+        def fetch_raster(output_format):
             nonlocal render_seconds
             begin=time.perf_counter()
             host=getattr(config,'TITILER_INTERNAL_URL','http://titiler:80')
             suffix='@2x' if scale==2 else ''
             try:
-                response=requests.get(f'{host}/cog/tiles/WebMercatorQuad/{z}/{x}/{y}{suffix}.png',params={'url':str(path),'rescale':'0,255'},timeout=(3,30))
+                response=requests.get(f'{host}/cog/tiles/WebMercatorQuad/{z}/{x}/{y}{suffix}.{output_format}',params={'url':str(path),'rescale':'0,255'},timeout=(3,30))
                 if response.status_code!=200:return None
                 # Never publish a cached result if the source changed during GDAL.
                 if asset:import_jobs.asset_path(asset)
                 elif import_jobs.fingerprint(path)!=descriptor['fingerprint']:raise ValueError('Source changed')
+                if display and display_path(asset,z,scale)!=display:raise ValueError('Display product changed')
                 return response.content
             except requests.RequestException:return None
             except (ValueError,OSError):abort(409,description='Источник изменился во время чтения.')
             finally:render_seconds=time.perf_counter()-begin
         def render():
-            if image_format=='png':return render_png()
+            if image_format=='png':return fetch_raster('png')
             from io import BytesIO
             from PIL import Image
             # Reuse existing PNG tiles without nested shard locks. A miss renders
             # once under the WebP key's lock; sources are still checked above.
             try:cached=configured_cache().lookup(RasterCache.key(descriptor,z,x,y,scale))
             except OSError:cached=None
-            png=cached[0] if cached else render_png()
-            if not png or not RasterCache.valid(png):return None
             try:
-                with Image.open(BytesIO(png)) as image:
+                if cached:
+                    image=Image.open(BytesIO(cached[0]))
+                else:
+                    from raster_codec import decode_npy
+                    raw=fetch_raster('npy')
+                    if not raw:return None
+                    image=decode_npy(raw,256*scale)
+                with image:
                     output=BytesIO()
                     image.save(output,format='WEBP',quality=90,method=2,exact=True)
                     return output.getvalue()
-            except OSError:return None
+            except (OSError,ValueError):return None
         try:
             content,state=configured_cache().get(RasterCache.key(descriptor,z,x,y,scale,image_format),render,extension=image_format)
         except TimeoutError:abort(503,description='Сервер тайлов занят. Повторите запрос.')

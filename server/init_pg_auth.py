@@ -60,6 +60,8 @@ def init_auth_db():
             initialize_catalogs(cur)
             from import_jobs import initialize
             initialize(cur)
+            from display_jobs import initialize as initialize_display
+            initialize_display(cur)
 
             # 2. Создаем таблицу панорам (photos_4326)
             # ВАЖНО: Требует расширения PostGIS в базе данных

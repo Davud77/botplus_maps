@@ -22,7 +22,7 @@ def main():
     entries=[];now=datetime.datetime.now(datetime.timezone.utc).isoformat()
     for row in result.stdout.splitlines():
         identifier,service=row.split('\t',1)
-        if service not in {'app','worker','media-worker','db','titiler','pgbouncer'}:continue
+        if service not in {'app','worker','media-worker','display-worker','db','titiler','pgbouncer'}:continue
         try:
             logs=subprocess.run(['docker','logs','--tail','150','--since','30m','--timestamps',identifier],capture_output=True,text=True,timeout=8)
             for line in (logs.stdout+'\n'+logs.stderr).splitlines():

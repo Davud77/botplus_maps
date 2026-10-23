@@ -13,7 +13,7 @@ def main(argv=None):
     crs = inspect.add_mutually_exclusive_group()
     crs.add_argument("--source-crs", help="Explicit source CRS: EPSG code, WKT or PROJ definition")
     crs.add_argument("--crs-file", type=Path, help="Local UTF-8 WKT/PRJ file defining source coordinates")
-    for name,help_text in [('import-raster','Register a server-local raster without uploading it'),('jobs','List durable import jobs'),('job','Inspect, cancel or retry an import job'),('sources','List configured source IDs')]:
+    for name,help_text in [('import-raster','Register a server-local raster without uploading it'),('jobs','List durable import jobs'),('job','Inspect, cancel or retry an import job'),('sources','List configured source IDs'),('map-prepare','Prepare separate map display derivatives'),('map-jobs','List map preparation jobs'),('map-job','Inspect, cancel or retry map preparation')]:
         command=commands.add_parser(name,help=help_text)
         command.add_argument('--server',default='http://localhost:5580')
         command.add_argument('--username',required=True)
@@ -25,7 +25,11 @@ def main(argv=None):
             command.add_argument('--idempotency-key')
             command.add_argument('--prepare',action='store_true',help='Explicitly prepare a separate COG')
             command.add_argument('--wait',action='store_true')
-        if name=='job':
+        if name=='map-prepare':
+            command.add_argument('ids',type=int,nargs='+')
+            command.add_argument('--max-zoom',type=int,default=21)
+            command.add_argument('--wait',action='store_true')
+        if name in {'job','map-job'}:
             command.add_argument('id')
             command.add_argument('--action',choices=['cancel','retry'])
     args = parser.parse_args(argv)
