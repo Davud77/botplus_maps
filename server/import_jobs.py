@@ -38,6 +38,9 @@ def initialize(cursor):
         at TIMESTAMPTZ NOT NULL DEFAULT NOW(), message TEXT NOT NULL
     )''')
     cursor.execute('CREATE INDEX IF NOT EXISTS import_events_job_idx ON import_events(job_id,id DESC)')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS task_dismissals (
+        owner_id INTEGER NOT NULL REFERENCES users(id), kind TEXT NOT NULL, job_id UUID NOT NULL,
+        dismissed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), PRIMARY KEY(owner_id,kind,job_id))''')
 
 
 def roots():
@@ -48,11 +51,11 @@ def roots():
 
 
 def staging_root():
-    return Path(os.environ.get('IMPORT_STAGING_DIR','/app/data/import-staging'))
+    return Path(os.environ.get('IMPORT_STAGING_DIR','/app/data/media/orthophotos/originals'))
 
 
 def products_root():
-    return Path(os.environ.get('IMPORT_PRODUCTS_DIR','/app/data/import-products'))
+    return Path(os.environ.get('IMPORT_PRODUCTS_DIR','/app/data/media/orthophotos/products'))
 
 
 def resolve_source(root_id,key,*,internal=False):
@@ -62,7 +65,13 @@ def resolve_source(root_id,key,*,internal=False):
     if relative.is_absolute() or '..' in relative.parts or relative.suffix.lower() not in {'.tif','.tiff'}:
         raise ValueError('Разрешены только относительные пути к .tif/.tiff внутри источника.')
     root=staging_root() if internal and root_id=='__uploads' else roots().get(root_id)
+    if internal and root_id=='__managed_orthophotos':
+        import config
+        root=Path(config.MEDIA_ROOT)/'orthophotos'
     if root is None: raise ValueError('Источник не подключён администратором.')
+    if internal and root_id=='__uploads' and not (root/str(relative)).exists():
+        legacy=Path('/app/data/import-staging')
+        if (legacy/str(relative)).exists():root=legacy
     root=root.resolve(strict=True)
     path=(root/str(relative)).resolve(strict=True)
     if not path.is_relative_to(root) or not path.is_file(): raise ValueError('Файл находится вне разрешённого источника.')
@@ -76,6 +85,7 @@ def fingerprint(path):
 
 def event(cursor,job_id,message):
     cursor.execute('INSERT INTO import_events (job_id,message) VALUES (%s,%s)',(str(job_id),message))
+    cursor.execute("INSERT INTO system_events(service,message) VALUES ('worker',%s)",(message,))
 
 
 def enqueue(owner_id,root_id,key,*,title='',crs_id=None,idempotency_key=None,internal=False,db=None):
@@ -161,7 +171,58 @@ def asset_path(asset):
     path=resolve_source(source['root_id'],source['key'],internal=True)
     if fingerprint(path)!=source['fingerprint']: raise ValueError('Исходный файл изменён. Требуется новый импорт.')
     if asset['kind']=='source': return path
-    root=products_root().resolve(strict=True)
+    root=product_root_for(asset['key']).resolve(strict=True)
     result=(root/asset['key']).resolve(strict=True)
     if not result.is_relative_to(root) or fingerprint(result)!=asset['fingerprint']: raise ValueError('Подготовленный файл отсутствует или изменён.')
     return result
+
+
+TABLES = {'import': 'import_jobs', 'display': 'raster_display_jobs', 'media': 'media_import_jobs'}
+
+
+def enqueue_operation(owner_id, operation, title, payload, db=None):
+    identifier=str(uuid.uuid4())
+    source={'operation':operation,'title':title,'root_id':payload.get('root_id',''),
+            'key':payload.get('key',''),'payload':payload}
+    with (db or Database()).cursor(write=True) as cur:
+        cur.execute('INSERT INTO import_jobs(id,owner_id,idempotency_key,source) VALUES (%s,%s,%s,%s) RETURNING *',
+                    (identifier,owner_id,identifier,Json(source)))
+        row=dict(cur.fetchone());event(cur,identifier,'Задание поставлено в очередь: '+title)
+    return row
+
+
+def claim_next(db=None):
+    """One FIFO across all workers. The transaction lock serializes claims only."""
+    db=db or Database()
+    with db.cursor(write=True) as cur:
+        cur.execute('SELECT pg_advisory_xact_lock(%s)',(941027010,))
+        for table in TABLES.values():
+            cur.execute(f"""UPDATE {table} SET status=CASE WHEN cancel_requested THEN 'cancelled' ELSE 'failed' END,
+                lease_token=NULL,lease_until=NULL,updated_at=NOW()
+                WHERE status='running' AND lease_until<NOW() AND (cancel_requested OR attempts>=%s)""",(MAX_ATTEMPTS,))
+        union=' UNION ALL '.join(f"SELECT '{kind}' AS kind,id,created_at,status,lease_until,cancel_requested,attempts FROM {table}" for kind,table in TABLES.items())
+        cur.execute(f"SELECT 1 FROM ({union}) q WHERE status='running' AND lease_until>NOW() LIMIT 1")
+        if cur.fetchone():return None
+        cur.execute(f"""SELECT kind,id FROM ({union}) q WHERE
+            (status='queued' OR (status='running' AND lease_until<NOW())) AND NOT cancel_requested AND attempts<%s
+            ORDER BY created_at,id LIMIT 1""",(MAX_ATTEMPTS,))
+        candidate=cur.fetchone()
+        if not candidate:return None
+        table=TABLES[candidate['kind']]
+        reset="progress=0,error=NULL," if candidate['kind']!='media' else ''
+        cur.execute(f"""UPDATE {table} SET {reset}status='running',attempts=attempts+1,message='Начато выполнение',
+            lease_token=%s,lease_until=NOW()+make_interval(secs=>%s),updated_at=NOW()
+            WHERE id=%s AND NOT cancel_requested AND (status='queued' OR (status='running' AND lease_until<NOW())) RETURNING *""",(str(uuid.uuid4()),LEASE_SECONDS,str(candidate['id'])))
+        claimed=cur.fetchone()
+        if not claimed:return None
+        row=dict(claimed);row['_kind']=candidate['kind']
+        cur.execute("INSERT INTO system_events(service,message) VALUES ('worker',%s)",
+                    ('Начато задание '+str(row['id']),))
+        return row
+
+
+def product_root_for(key):
+    root=products_root()
+    if not (root/key).exists() and (Path('/app/data/import-products')/key).exists():
+        return Path('/app/data/import-products')
+    return root

@@ -51,7 +51,7 @@ def display_path(asset,z,scale):
         zoom=display['max_map_zoom']
         if type(zoom) is not int or not 12<=zoom<=23 or z+int(math.log2(scale))>zoom:return None
         if display['signature']!=signature(asset,zoom):return None
-        root=imports.products_root().resolve(strict=True);path=(root/display['key']).resolve(strict=True)
+        root=imports.product_root_for(display['key']).resolve(strict=True);path=(root/display['key']).resolve(strict=True)
         if not path.is_relative_to(root) or imports.fingerprint(path)!=display['fingerprint']:return None
         return path
     except (OSError,ValueError,KeyError,TypeError):return None
@@ -60,14 +60,25 @@ def display_path(asset,z,scale):
 def enqueue(owner_id,ortho_id,max_zoom=21,db=None):
     if type(max_zoom) is not int or not 12<=max_zoom<=23:raise ValueError('Масштаб подготовки: от 12 до 23.')
     db=db or Database();asset=imports.asset_record(ortho_id,db)
-    if not asset:raise ValueError('Сначала подключите оригинал через импорт с диска/NAS.')
+    if not asset:
+        from services.storage_service import StorageService
+        with db.cursor() as cur:
+            cur.execute('SELECT filename,crs FROM orthophotos WHERE id=%s',(ortho_id,));legacy=cur.fetchone()
+        if not legacy:raise ValueError('Слой больше не существует.')
+        path=Path(StorageService().get_local_file_path(legacy['filename']))
+        source={'root_id':'__managed_orthophotos','key':legacy['filename'],'fingerprint':imports.fingerprint(path),'source_crs':None,'recipe':1}
+        asset={'source':source,'kind':'source'}
+        sig=hashlib.sha256(json.dumps(source,sort_keys=True).encode()).hexdigest()
+        with db.cursor(write=True) as cur:
+            cur.execute('INSERT INTO raster_sources(ortho_id,signature,asset,projection_id,warning) VALUES (%s,%s,%s,%s,%s) ON CONFLICT(ortho_id) DO NOTHING',(ortho_id,sig,Json(asset),legacy['crs'] or 'Unknown',''))
+        asset=imports.asset_record(ortho_id,db)
     imports.asset_path(asset)
     with db.cursor() as cur:
         cur.execute('SELECT filename FROM orthophotos WHERE id=%s',(ortho_id,));row=cur.fetchone()
         if not row:raise ValueError('Слой больше не существует.')
         title=row['filename']
     sig=signature(asset,max_zoom)
-    source={'asset':base_asset(asset),'ortho_id':ortho_id,'title':'Для карты: '+title,'max_zoom':max_zoom,'signature':sig}
+    source={'asset':base_asset(asset),'ortho_id':ortho_id,'title':'COG для браузера: '+title,'max_zoom':max_zoom,'signature':sig}
     with db.cursor(write=True) as cur:
         cur.execute('''INSERT INTO raster_display_jobs(id,owner_id,idempotency_key,source) VALUES (%s,%s,%s,%s)
             ON CONFLICT(owner_id,idempotency_key) DO NOTHING RETURNING *''',(str(uuid.uuid4()),owner_id,f'{ortho_id}:{sig}',Json(source)))

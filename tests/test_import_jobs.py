@@ -24,6 +24,9 @@ class ImportIntegrationTests(unittest.TestCase):
         workspace_tests.WorkspaceIntegrationTests.setUp(self)
         self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
         self.folder=Path(self.temp.name)
+        import config
+        for key,value in [('MEDIA_ROOT',str(self.folder/'media')),('TEMP_FOLDER',str(self.folder/'temp'))]:
+            patcher=patch.object(config,key,value);patcher.start();self.addCleanup(patcher.stop)
         env={'LOCAL_SOURCE_ROOTS':json.dumps({'local':str(self.folder/'sources')}),
              'IMPORT_PRODUCTS_DIR':str(self.folder/'products'),'IMPORT_STAGING_DIR':str(self.folder/'staging'),'RASTER_TILE_CACHE_DIR':str(self.folder/'tile-cache')}
         (self.folder/'sources').mkdir()
@@ -127,12 +130,17 @@ class ImportIntegrationTests(unittest.TestCase):
             cur.execute('SELECT status,attempts FROM import_jobs WHERE id=%s',(str(claims[0]['id']),));row=cur.fetchone()
             self.assertEqual(row['status'],'queued');self.assertEqual(row['attempts'],0)
 
-    def test_web_upload_registers_without_processing_and_rejects_invalid_data(self):
+    def test_web_upload_queues_registration_and_reports_invalid_data_in_background(self):
         response=self.editor.post('/api/imports/uploads',data={'file':(BytesIO(self.cog.read_bytes()),'uploaded.tif')},content_type='multipart/form-data')
-        self.assertEqual(response.status_code,201,response.get_data(as_text=True))
-        self.assertIn('ortho_id',response.json['result']);self.assertIsNone(jobs.claim(self.db))
+        self.assertEqual(response.status_code,202,response.get_data(as_text=True))
+        self.assertEqual(response.json['job']['status'],'queued')
+        result=job_worker.execute(jobs.claim_next(self.db),self.db)
+        self.assertIn('ortho_id',result)
         response=self.editor.post('/api/imports/uploads',data={'file':(BytesIO(b'not a raster'),'fake.tif')},content_type='multipart/form-data')
-        self.assertEqual(response.status_code,400);self.assertIsNone(jobs.claim(self.db))
+        self.assertEqual(response.status_code,202)
+        identifier=response.json['job']['id']
+        self.assertIsNone(job_worker.execute(jobs.claim_next(self.db),self.db))
+        self.assertEqual(self.editor.get('/api/imports/jobs/'+identifier).json['job']['status'],'failed')
         self.assertEqual(self.editor.post('/api/imports/uploads',data={'file':(BytesIO(b'x'),'bad.zip')}).status_code,400)
 
     def test_unregister_keeps_source_and_allows_fresh_registration(self):
@@ -150,8 +158,9 @@ class ImportIntegrationTests(unittest.TestCase):
         controller=object.__new__(OrthoController);controller.db=self.db
         self.app.add_url_rule('/api/upload_ortho',view_func=controller.upload_ortho,methods=['POST'])
         response=self.editor.post('/api/upload_ortho',data={'files':(BytesIO(self.cog.read_bytes()),'old-form.tif')},content_type='multipart/form-data')
-        self.assertEqual(response.status_code,201,response.get_data(as_text=True))
-        self.assertIn('ortho_id',response.json['result']);self.assertIsNone(jobs.claim(self.db))
+        self.assertEqual(response.status_code,202,response.get_data(as_text=True))
+        self.assertEqual(response.json['job']['status'],'queued')
+        self.assertIn('ortho_id',job_worker.execute(jobs.claim_next(self.db),self.db))
 
     def test_tile_gateway_requests_png_for_local_assets_and_rejects_stale_sources(self):
         self.enqueue();result=job_worker.execute(jobs.claim(self.db),self.db)

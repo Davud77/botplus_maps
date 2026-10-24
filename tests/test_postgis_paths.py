@@ -144,18 +144,26 @@ class PostgisPathTests(unittest.TestCase):
         data = output.getvalue()
         with tempfile.TemporaryDirectory() as directory:
             store = FileStorage(directory)
-            with patch.object(self.controller, 'storage', store):
+            import media_worker,config
+            from server import config as controller_config
+            with patch.object(self.controller,'storage',store),patch.object(config,'MEDIA_ROOT',directory),patch.object(controller_config,'MEDIA_ROOT',directory):
                 for _ in range(2):
                     response = self.client.post('/api/upload', data={'files': (io.BytesIO(data), '../../same.jpg')}, content_type='multipart/form-data')
                     self.assertEqual(response.status_code, 200)
                     self.assertEqual(response.get_json()['failed_uploads'], [])
+                    with self.db.cursor(write=True) as cur:
+                        cur.execute("SELECT id FROM media_import_jobs WHERE status='queued' AND source->>'title'='../../same.jpg' ORDER BY created_at DESC LIMIT 1")
+                        identifier=cur.fetchone()['id']
+                        cur.execute("UPDATE media_import_jobs SET status='running',lease_token=%s,lease_until=NOW()+INTERVAL '90 seconds' WHERE id=%s RETURNING *",(str(uuid4()),str(identifier)))
+                        job=cur.fetchone()
+                    media_worker.execute(job,self.db)
                 with self.db.cursor() as cursor:
-                    cursor.execute('SELECT id,filename,path FROM public.photos_4326 ORDER BY id')
+                    cursor.execute('SELECT id,filename,path,source_ref FROM public.photos_4326 ORDER BY id')
                     rows = cursor.fetchall()
                 self.assertEqual(len(rows), 2)
                 self.assertNotEqual(rows[0]['filename'], rows[1]['filename'])
                 for row in rows:
-                    self.assertEqual(store.path(row['filename']).read_bytes(), data)
+                    self.assertEqual((Path(directory)/'panoramas'/'incoming'/row['source_ref']['key']).read_bytes(), data)
                     self.assertEqual(row['path'], 'panoramas/' + row['filename'])
                     info = self.client.get(f"/api/pano_info/{row['id']}").get_json()
                     self.assertEqual(info['media_type'], 'photo')
@@ -173,8 +181,8 @@ class PostgisPathTests(unittest.TestCase):
                 store.save_file(io.BytesIO(b'hidden'), 'not-registered.jpg')
                 self.assertEqual(self.client.get('/api/panoramas/not-registered.jpg').status_code, 404)
                 self.assertEqual(self.client.delete(f"/api/pano_info/{rows[0]['id']}").status_code, 200)
-                self.assertFalse(store.path(rows[0]['filename']).exists())
-                self.assertTrue(store.path(rows[1]['filename']).exists())
+                self.assertFalse((Path(directory)/'panoramas'/'incoming'/rows[0]['source_ref']['key']).exists())
+                self.assertTrue((Path(directory)/'panoramas'/'incoming'/rows[1]['source_ref']['key']).exists())
 
     def test_ortho_crud_preserves_footprint_and_releases_every_operation(self):
         record = Ortho("scope.tif", crs="EPSG:4326", is_cog=True,

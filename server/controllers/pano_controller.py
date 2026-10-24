@@ -99,107 +99,8 @@ class PanoController:
 
     @cross_origin()
     def get_panoramas(self):
-        """
-        Сверхбыстрая отдача панорам. Формирование JSON происходит прямо в PostgreSQL (C-level).
-        """
-        try:
-            north = request.args.get('north', type=float)
-            south = request.args.get('south', type=float)
-            east = request.args.get('east', type=float)
-            west = request.args.get('west', type=float)
-            zoom = request.args.get('zoom', type=int)
-            limit = request.args.get('limit', type=int, default=50000)
-
-            grid_size = None
-
-            # Строгая логика зумов:
-            if zoom is not None and zoom <= 17:
-                grids = {
-                    # Зум 0-10: Очень сильная кластеризация (~2000 км -> ~11 км). 1 кластер на город/регион.
-                    0: 20.0, 1: 10.0, 2: 5.0, 3: 2.5, 4: 1.5,
-                    5: 1.0, 6: 0.8, 7: 0.6, 8: 0.4, 9: 0.2, 10: 0.1,
-
-                    # Зум 11-17: Умеренная кластеризация (~5 км -> ~50 метров). Несколько на улицу.
-                    11: 0.05, 12: 0.025, 13: 0.012, 14: 0.006,
-                    15: 0.003, 16: 0.0015, 17: 0.0005
-                }
-                grid_size = grids.get(zoom, 0.0005)
-
-            if north is not None and south is not None:
-                if grid_size:
-                    # PostgreSQL сам группирует и собирает JSON массив
-                    query = """
-                        SELECT COALESCE(json_agg(json_build_object(
-                            'id', sub.id,
-                            'lat', sub.lat,
-                            'lng', sub.lng,
-                            'count', sub.count
-                        )), '[]'::json)
-                        FROM (
-                            SELECT
-                                MIN(id) as id,
-                                ROUND(AVG(ST_Y(geom))::numeric, 6) AS lat,
-                                ROUND(AVG(ST_X(geom))::numeric, 6) AS lng,
-                                COUNT(*) as count
-                            FROM public.photos_4326
-                            WHERE deleted_at IS NULL AND geom && ST_MakeEnvelope(%s, %s, %s, %s, 4326)
-                            GROUP BY ST_SnapToGrid(geom, %s)
-                            LIMIT %s
-                        ) sub;
-                    """
-                    params = (west, south, east, north, grid_size, limit)
-                else:
-                    # Сырые точки (Зум 18+)
-                    query = """
-                        SELECT COALESCE(json_agg(json_build_object(
-                            'id', sub.id,
-                            'lat', sub.lat,
-                            'lng', sub.lng,
-                            'count', 1
-                        )), '[]'::json)
-                        FROM (
-                            SELECT
-                                id,
-                                ROUND(ST_Y(geom)::numeric, 6) as lat,
-                                ROUND(ST_X(geom)::numeric, 6) as lng
-                            FROM public.photos_4326
-                            WHERE deleted_at IS NULL AND geom && ST_MakeEnvelope(%s, %s, %s, %s, 4326)
-                            ORDER BY id DESC
-                            LIMIT %s
-                        ) sub;
-                    """
-                    params = (west, south, east, north, limit)
-            else:
-                # Дефолтный ответ без BBOX
-                query = """
-                    SELECT COALESCE(json_agg(json_build_object(
-                        'id', id,
-                        'lat', ROUND(ST_Y(geom)::numeric, 6),
-                        'lng', ROUND(ST_X(geom)::numeric, 6),
-                        'count', 1
-                    )), '[]'::json)
-                    FROM (
-                        SELECT id, geom FROM public.photos_4326 WHERE deleted_at IS NULL ORDER BY id DESC LIMIT %s
-                    ) sub;
-                """
-                params = (limit,)
-
-            with self.db.cursor(dict_rows=False) as cursor:
-                cursor.execute(query, params)
-                result = cursor.fetchone()[0]
-
-            # Возвращаем напрямую
-            if isinstance(result, str):
-                return Response(result, mimetype='application/json')
-            elif isinstance(result, dict) or isinstance(result, list):
-                return jsonify(result)
-            else:
-                return Response(json.dumps(result), mimetype='application/json')
-
-        except Exception as e:
-            logger.error(f"Error getting panoramas: {e}")
-            traceback.print_exc()
-            return jsonify({"error": str(e)}), 500
+        from services.panorama_index import markers
+        return markers(self.db,allow_world=True)
 
     def source_file(self, row):
         source=row.get('source_ref') if isinstance(row,dict) else None
@@ -287,45 +188,43 @@ class PanoController:
                 original_name = file.filename or ''
                 mime_type = mimetypes.guess_type(original_name)[0] or 'image/jpeg'
                 if Path(original_name).suffix.lower() not in {'.jpg','.jpeg','.webp'}: raise ValueError('Поддерживаются JPEG и WebP.')
-                probe=Image.open(file.stream)
-                metadata={'width':probe.width,'height':probe.height,'media_type':media_kind(probe.width,probe.height,probe.info.get('xmp',b''))}
-                if request.form.get('only_360')=='true' and metadata['media_type']!='panorama':raise ValueError('Файл не является полной панорамой 360°.')
+                from flask import g
+                from psycopg2.extras import Json
                 tags=request.form.get('tags','')
                 if len(tags)>2000:raise ValueError('Теги: не более 2000 символов.')
-                file.stream.seek(0)
-                # Parse EXIF on Werkzeug's seekable spooled stream, not a full read.
-                lat, lon, alt, direction, dt = self._parse_exif_data(file.stream)
-                if lat is None or lon is None:
-                    raise ValueError("В файле нет GPS-координат (EXIF)")
-                identifier = uuid.uuid4().hex
-                safe_name = secure_filename(original_name.replace('\\', '/').rsplit('/', 1)[-1])[:160] or 'panorama.jpg'
-                new_filename = f"{identifier[:2]}/{identifier[2:4]}/{identifier}_{safe_name}"
-                file.stream.seek(0)
-                self.storage.save_file(file.stream, new_filename, content_type=mime_type)
-                saved = True
-                self._insert_pano_db(new_filename, f"panoramas/{new_filename}", lat, lon, alt, direction, dt, metadata=metadata, tags=tags)
+                new_filename=uuid.uuid4().hex+Path(original_name).suffix.lower()
+                staging=FileStorage(Path(config.MEDIA_ROOT)/'panoramas'/'incoming')
+                staging.save_file(file.stream,new_filename)
+                saved=True
+                with self.db.cursor(write=True) as cur:
+                    cur.execute('INSERT INTO media_import_jobs(id,owner_id,source) VALUES (%s,%s,%s)',
+                        (str(uuid.uuid4()),g.current_user_id,Json({'root_id':'__media_uploads','key':new_filename,
+                            'title':original_name,'only_360':request.form.get('only_360')=='true','tags':tags})))
                 successful.append(original_name)
             except Exception as error:
                 if saved:
                     try:
-                        self.storage.delete_file(new_filename)
+                        staging.delete_file(new_filename)
                     except OSError:
                         logger.exception('Could not clean up unregistered panorama')
                 failed.append(file.filename)
                 failed_reasons.append(str(error))
-        return jsonify({"message": "Upload complete", "successful_uploads": successful,
+        return jsonify({"message": "Queued for background import", "successful_uploads": successful,
                         "failed_uploads": failed, "skipped_files": failed_reasons})
 
     @cross_origin()
     def delete_pano(self, pano_id):
         try:
             with self.db.cursor(write=True) as cursor:
-                cursor.execute("DELETE FROM public.photos_4326 WHERE id = %s RETURNING filename", (pano_id,))
+                cursor.execute("DELETE FROM public.photos_4326 WHERE id = %s RETURNING filename,source_ref", (pano_id,))
                 res = cursor.fetchone()
             if not res:
                 return jsonify({"error": "Not found"}), 404
             # File I/O happens after the DB transaction is released.
-            self.storage.delete_file(res["filename"])
+            source=res.get('source_ref')
+            if source and source.get('root_id')=='__media_uploads':
+                FileStorage(Path(config.MEDIA_ROOT)/'panoramas'/'incoming').delete_file(source['key'])
+            elif not source:self.storage.delete_file(res["filename"])
             return jsonify({"status": "deleted"})
         except Exception as e:
             return jsonify({"error": str(e)}), 500

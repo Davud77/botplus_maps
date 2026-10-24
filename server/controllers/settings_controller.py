@@ -34,11 +34,20 @@ def add_crs():
 
 @settings_blueprint.patch('/settings/coordinate-systems/<path:code>')
 def update_crs(code):
-    require_admin();data=body();definition=map_settings.parse_crs(data.get('definition'))
+    require_admin();data=body()
+    if not data or set(data)-{'name','definition'}:abort(400)
+    name=data.get('name')
+    if 'name' in data and (not isinstance(name,str) or not 1<=len(name.strip())<=120):abort(400,description='Название проекции: от 1 до 120 символов.')
+    definition=map_settings.parse_crs(data['definition']) if 'definition' in data else None
     with Database().cursor(write=True) as cursor:
-        cursor.execute('UPDATE coordinate_systems SET definition=%s,resolved=TRUE WHERE id=%s AND NOT builtin RETURNING id,name',(definition,code))
-        row=cursor.fetchone()
+        cursor.execute('SELECT * FROM coordinate_systems WHERE id=%s FOR UPDATE',(code,));row=cursor.fetchone()
         if not row:abort(404)
+        if 'definition' in data and row['builtin']:abort(403,description='Определение встроенной проекции нельзя менять.')
+        if 'name' in data:
+            cursor.execute('UPDATE coordinate_systems SET name=%s WHERE id=%s',(name.strip(),code))
+        if 'definition' in data:
+            cursor.execute('UPDATE coordinate_systems SET definition=%s,resolved=TRUE WHERE id=%s',(definition,code))
+        cursor.execute('SELECT * FROM coordinate_systems WHERE id=%s',(code,));row=cursor.fetchone()
     return jsonify(coordinate_system=row)
 
 

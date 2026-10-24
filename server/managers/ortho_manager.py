@@ -36,6 +36,7 @@ class OrthoManager:
                 "ALTER TABLE orthophotos ADD COLUMN IF NOT EXISTS is_cog BOOLEAN DEFAULT FALSE",
                 "ALTER TABLE orthophotos ADD COLUMN IF NOT EXISTS geometry geometry(MultiPolygon, 4326)",
                 "ALTER TABLE orthophotos ADD COLUMN IF NOT EXISTS preview_filename TEXT",
+                "ALTER TABLE orthophotos ADD COLUMN IF NOT EXISTS display_name VARCHAR(240)",
             ):
                 cursor.execute(statement)
 
@@ -47,7 +48,7 @@ class OrthoManager:
                        ST_XMin(geometry) as wgs_west,
                        ST_YMin(geometry) as wgs_south,
                        ST_XMax(geometry) as wgs_east,
-                       ST_YMax(geometry) as wgs_north
+                       ST_YMax(geometry) as wgs_north, display_name
                 FROM orthophotos ORDER BY id DESC
             """
             cursor.execute(query)
@@ -101,6 +102,7 @@ class OrthoManager:
                 preview_filename=r_preview,
                 wgs84_bounds=wgs84_bounds # Передаем в модель
             )
+            ortho.display_name = row.get("display_name") if isinstance(row,dict) else row[13]
             orthos.append(ortho)
 
         return orthos
@@ -113,7 +115,7 @@ class OrthoManager:
                        ST_XMin(geometry) as wgs_west,
                        ST_YMin(geometry) as wgs_south,
                        ST_XMax(geometry) as wgs_east,
-                       ST_YMax(geometry) as wgs_north
+                       ST_YMax(geometry) as wgs_north, display_name
                 FROM orthophotos WHERE id = %s
             """
             cursor.execute(query, (ortho_id,))
@@ -166,6 +168,7 @@ class OrthoManager:
                 preview_filename=r_preview,
                 wgs84_bounds=wgs84_bounds # Передаем в модель
             )
+            ortho.display_name = row.get("display_name") if isinstance(row,dict) else row[13]
             return ortho
         return None
 
@@ -212,7 +215,7 @@ class OrthoManager:
             set_clause = []
             values = []
             for field, value in updated_fields.items():
-                if field in ['filename', 'bounds', 'url', 'crs', 'is_visible', 'is_cog', 'preview_filename']:
+                if field in ['display_name', 'filename', 'bounds', 'url', 'crs', 'is_visible', 'is_cog', 'preview_filename']:
                     set_clause.append(f"{field} = %s")
                     values.append(value)
 

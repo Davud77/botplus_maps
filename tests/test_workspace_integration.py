@@ -196,10 +196,23 @@ class WorkspaceIntegrationTests(unittest.TestCase):
             with self.subTest(config=config):
                 self.assertEqual(self.editor.post('/api/maps',json={'title':'invalid','config':config}).status_code,400)
 
-    def test_panorama_catalog_is_not_accidentally_published(self):
-        record = self.create_map(config={'show_panoramas':True})
-        response = self.editor.post(f"/api/maps/{record['id']}/publication",json={'published':True,'revision':1})
-        self.assertEqual(response.status_code,400)
+    def test_public_panoramas_require_active_publication_and_enabled_layer(self):
+        record=self.publish(self.create_map(config={'show_panoramas':True,'layer_settings':[{'key':'panoramas','panorama':{'color':'#123456'}}]}))
+        anonymous=self.app.test_client();base='/api/public/maps/'+record['public_slug']
+        self.assertTrue(anonymous.get(base).json['map']['config']['show_panoramas'])
+        with patch('services.panorama_index.markers',side_effect=lambda db:jsonify(points=True)) as markers,patch('services.panorama_coverage.coverage',side_effect=lambda db:jsonify(lines=True)) as coverage:
+            self.assertEqual(anonymous.get(base+'/panoramas?zoom=18').status_code,200)
+            self.assertEqual(anonymous.get(base+'/panoramas/coverage').status_code,200)
+            markers.assert_called_once();coverage.assert_called_once()
+        disabled=self.publish(self.create_map())
+        off='/api/public/maps/'+disabled['public_slug']
+        for suffix in ['/panoramas','/panoramas/coverage','/panoramas/1','/panoramas/1/image']:
+            self.assertEqual(anonymous.get(off+suffix).status_code,404)
+        response=self.editor.post('/api/maps/'+record['id']+'/publication',json={'published':False,'revision':record['revision']})
+        self.assertEqual(response.status_code,200)
+        for suffix in ['/panoramas','/panoramas/coverage','/panoramas/1','/panoramas/1/image']:
+            self.assertEqual(anonymous.get(base+suffix).status_code,404)
+        self.assertEqual(anonymous.get('/api/panoramas').status_code,401)
 
     def test_settings_permissions_custom_catalogs_and_defaults(self):
         for client in [self.viewer,self.editor]:
@@ -240,6 +253,16 @@ class WorkspaceIntegrationTests(unittest.TestCase):
         for bad in [[{'key':'ortho:3'}],[{'key':'ortho:1','opacity':2}],[{'key':'ortho:1','style':{'color':'red'}}],[{'key':'ortho:1','visible':'false'}],[{'key':'ortho:1'},{'key':'ortho:1'}]]:
             self.assertEqual(self.editor.put('/api/maps/'+created['id'],json={'title':'Bad style','revision':public['revision'],'config':{**config,'layer_settings':bad}}).status_code,400)
 
+    def test_panorama_style_roundtrips_and_rejects_invalid_settings(self):
+        settings={'mode':'auto','pointZoom':20,'detail':'precise','color':'#123456','outlineColor':'#ffffff','outlineWidth':3,'weight':5,'pointColor':'#19a9e5','pointRadius':6}
+        config={'show_panoramas':True,'layer_settings':[{'key':'panoramas','panorama':settings}]}
+        created=self.create_map(config=config)
+        actual=self.editor.get('/api/maps/'+created['id']).json['map']['config']
+        self.assertEqual(actual['layer_settings'],config['layer_settings'])
+        for invalid in [{'pointZoom':17},{'weight':99},{'detail':'unknown'},{'color':'red'},{'pointRadius':True},{'pointZoom':18.5}]:
+            response=self.editor.post('/api/maps',json={'title':'Bad panorama settings','config':{**config,'layer_settings':[{'key':'panoramas','panorama':invalid}]}})
+            self.assertEqual(response.status_code,400)
+
     def test_basemap_order_visibility_and_per_layer_coordinates_are_persisted(self):
         db_name=extensions.parse_dsn(self.dsn)['dbname']
         config={'base_layer':'google_maps','orthophoto_ids':[1],
@@ -261,3 +284,36 @@ class WorkspaceIntegrationTests(unittest.TestCase):
         for layer in [{'key':'basemap','coordinate_system':'EPSG:9999999'}, {'key':'basemap','coordinate_system':None}]:
             self.assertEqual(self.editor.post('/api/maps',json={'title':'Invalid CRS','config':{**config,'layer_settings':[layer]}}).status_code,400)
         self.assertEqual(self.editor.post('/api/maps',json={'title':'Missing background','config':{'base_layer':'none','layer_settings':[{'key':'basemap'}]}}).status_code,400)
+
+    def test_map_delete_checks_owner_and_revision_and_revokes_publication(self):
+        record=self.publish(self.create_map())
+        url='/api/maps/'+record['id']
+        self.assertEqual(self.other.delete(url,json={'revision':record['revision']}).status_code,403)
+        self.assertEqual(self.viewer.delete(url,json={'revision':record['revision']}).status_code,403)
+        self.assertEqual(self.editor.delete(url,json={'revision':record['revision']-1}).status_code,409)
+        with self.db.cursor() as cur:
+            cur.execute('SELECT count(*) AS n FROM orthophotos');before=cur.fetchone()['n']
+        self.assertEqual(self.editor.delete(url,json={'revision':record['revision']}).status_code,200)
+        self.assertEqual(self.editor.get(url).status_code,404)
+        self.assertEqual(self.app.test_client().get('/api/public/maps/'+record['public_slug']).status_code,404)
+        with self.db.cursor() as cur:
+            cur.execute('SELECT count(*) AS n FROM orthophotos');self.assertEqual(cur.fetchone()['n'],before)
+
+    def test_new_map_defaults_and_catalog_order(self):
+        data=self.editor.get('/api/settings/map').json
+        self.assertEqual(data['defaults'],{'basemap':'osm','coordinate_system':'EPSG:4326'})
+        self.assertEqual(data['basemaps'][0]['id'],'osm')
+        self.assertEqual(data['coordinate_systems'][0]['id'],'EPSG:4326')
+        config=self.create_map()['config']
+        self.assertEqual(config['base_layer'],'osm');self.assertEqual(config['coordinate_system'],'EPSG:4326')
+
+    def test_map_rename_is_independent_of_missing_data_sources(self):
+        record=self.create_map()
+        with self.db.cursor(write=True) as cur:
+            cur.execute("UPDATE maps SET config=jsonb_set(config,'{orthophoto_ids}','[999999]'::jsonb) WHERE id=%s",(record['id'],))
+        response=self.editor.patch('/api/maps/'+record['id'],json={'title':'Новое название','revision':record['revision']})
+        self.assertEqual(response.status_code,200,response.json)
+        self.assertEqual(response.json['map']['title'],'Новое название')
+        self.assertEqual(response.json['map']['config']['orthophoto_ids'],[999999])
+        self.assertEqual(self.other.patch('/api/maps/'+record['id'],json={'title':'Чужое','revision':response.json['map']['revision']}).status_code,403)
+        self.assertEqual(self.editor.patch('/api/maps/'+record['id'],json={'title':'Устаревшее','revision':record['revision']}).status_code,409)

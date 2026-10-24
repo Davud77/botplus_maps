@@ -5,6 +5,7 @@ import './MediaViewer.css';
 
 interface PanoramaViewerProps {
   markerId: string;
+  endpoint?: string;
   isExpanded: boolean;
   onDataLoad?: (data: { title: string; date: string; alt: string }) => void;
 }
@@ -14,7 +15,7 @@ interface Asset {
   info: { filename: string; display_name?: string; width: number; height: number; media_type: Mode; direction?: number };
 }
 
-const PanoramaViewer: React.FC<PanoramaViewerProps> = ({ markerId, isExpanded, onDataLoad }) => {
+const PanoramaViewer: React.FC<PanoramaViewerProps> = ({ markerId, isExpanded, onDataLoad, endpoint }) => {
   const viewerRef = useRef<HTMLDivElement | null>(null);
   const viewerInstanceRef = useRef<any>(null);
   const onDataLoadRef = useRef(onDataLoad);
@@ -31,13 +32,13 @@ const PanoramaViewer: React.FC<PanoramaViewerProps> = ({ markerId, isExpanded, o
     setAsset(null); setMode(null); setZoom(1); setError(null);
     const load = async () => {
       try {
-        const response = await fetch(`/api/pano_info/${markerId}`, { signal: controller.signal });
+        const response = await fetch(endpoint || `/api/pano_info/${markerId}`, { signal: controller.signal });
         if (!response.ok) throw new Error(`Не удалось получить сведения: ${response.status}`);
         const info = await response.json();
         if (!active) return;
         onDataLoadRef.current?.({ title: info.display_name || info.filename || 'Фотография',
           date: info.timestamp || info.upload_date || 'Дата не указана', alt: Number(info.altitude || 0).toFixed(1) });
-        const image = await fetch(`/api/pano_info/${markerId}/download`, { signal: controller.signal });
+        const image = await fetch(endpoint ? `${endpoint}/image` : `/api/pano_info/${markerId}/download`, { signal: controller.signal });
         if (!image.ok) throw new Error(`Не удалось загрузить изображение: ${image.status}`);
         const blob = await image.blob();
         if (!active) return;
@@ -64,7 +65,7 @@ const PanoramaViewer: React.FC<PanoramaViewerProps> = ({ markerId, isExpanded, o
       active = false; controller.abort();
       if (url) URL.revokeObjectURL(url);
     };
-  }, [markerId]);
+  }, [markerId,endpoint]);
 
   const selectedMode = mode || asset?.info.media_type || 'photo';
   useEffect(() => {

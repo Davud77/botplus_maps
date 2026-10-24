@@ -11,19 +11,19 @@ export default function ImportJobs() {
  useEffect(()=>{workspaceRequest<{sources:{id:string;name:string}[];upload_limit_bytes:number}>('/imports/sources').then(r=>{setSources(r.sources);setLimit(r.upload_limit_bytes);}).catch(e=>setError(e.message));},[]);
  const choose=(root:string,key:string)=>setSelection(root?{root,key}:null);
  async function submit(e:React.FormEvent){e.preventDefault();setError('');setNotice('');setPending(true);try{
-  const results:{ortho_id:number;projection?:string;warning?:string;existing?:boolean}[]=[];
+  const results:{id:string;title:string}[]=[];
   if(mode==='local'){
-   if(!selection)throw new Error('Выберите файл в хранилище.');
-   const r=await workspaceRequest<{result:typeof results[number]}>('/imports/register','POST',{root_id:selection.root,key:selection.key,title});results.push(r.result);
+   if(!selection)throw new Error('Выберите файл или папку в хранилище.');
+   const r=await workspaceRequest<{job:typeof results[number]}>('/imports/register','POST',{root_id:selection.root,key:selection.key,title});results.push(r.job);
   }else{
    if(!files.length)throw new Error('Выберите GeoTIFF.');if(files.length>100)throw new Error('До 100 файлов за один выбор.');
    for(const file of files){if(file.size>limit)throw new Error(`${file.name}: файл больше веб-лимита. Выберите его на NAS.`);const body=new FormData();body.append('file',file);body.append('title',title||file.name);setProgress(0);
-    const value=await new Promise<{result:typeof results[number]}>((resolve,reject)=>{const xhr=new XMLHttpRequest();xhr.open('POST',`${API_BASE}/api/imports/files`);xhr.withCredentials=true;xhr.upload.onprogress=e=>{if(e.lengthComputable)setProgress(Math.round(e.loaded/e.total*100));};xhr.onload=()=>{try{const r=JSON.parse(xhr.responseText);if(xhr.status>=200&&xhr.status<300)resolve(r);else reject(new Error(r.message||'Ошибка импорта.'));}catch(e){reject(e);}};xhr.onerror=()=>reject(new Error('Передача прервана. Проверьте каталог перед повтором.'));xhr.send(body);});results.push(value.result);
+    const value=await new Promise<{job:typeof results[number]}>((resolve,reject)=>{const xhr=new XMLHttpRequest();xhr.open('POST',`${API_BASE}/api/imports/files`);xhr.withCredentials=true;xhr.upload.onprogress=e=>{if(e.lengthComputable)setProgress(Math.round(e.loaded/e.total*100));};xhr.onload=()=>{try{const r=JSON.parse(xhr.responseText);if(xhr.status>=200&&xhr.status<300)resolve(r);else reject(new Error(r.message||'Ошибка импорта.'));}catch(e){reject(e);}};xhr.onerror=()=>reject(new Error('Передача прервана. Проверьте каталог перед повтором.'));xhr.send(body);});results.push(value.job);
    }
   }
-  setNotice(results.map(r=>`ОФП №${r.ortho_id}${r.projection?` · ${r.projection}`:''}: ${r.existing?'уже в каталоге':'импортирован без обработки'}. ${r.warning||''}`).join('\n'));
+  setNotice(`В очередь добавлено заданий: ${results.length}. Выполнение и прогресс — в разделе «Задания».`);
  }catch(e){setError((e as Error).message);}finally{setPending(false);}}
- return <section className="ws-card"><div className="ws-section-kicker">ЛОКАЛЬНЫЕ ДАННЫЕ</div><h2>Импорт геоданных</h2><p>Загрузите оригиналы или подключите их с NAS. Импорт не меняет файлы и не запускает обработку. Подготовка COG и журналы доступны отдельно в «Заданиях».</p>
+ return <section className="ws-card"><div className="ws-section-kicker">ЛОКАЛЬНЫЕ ДАННЫЕ</div><h2>Импорт геоданных</h2><p>Загрузите оригиналы или подключите их с NAS. Импорт выполняется в фоне, по общей очереди. Прогресс и журналы доступны в «Заданиях».</p>
  <div className="ws-import-types" aria-label="Тип данных">{types.map(t=><button type="button" key={t.id} aria-pressed={kind===t.id} disabled={pending} onClick={()=>{setKind(t.id);setSelection(null);setError('');setNotice('');}}><strong>{t.name}</strong><small>{t.description}</small></button>)}</div>
  <div className="ws-tabs" aria-label="Способ импорта"><button disabled={pending} className={mode==='upload'?'active':''} onClick={()=>setMode('upload')}>Загрузить файл</button><button disabled={pending} className={mode==='local'?'active':''} onClick={()=>setMode('local')}>С диска / NAS</button></div>
  {mode==='local'&&<SourcePicker sources={sources} kind={kind} onSelect={choose}/>}

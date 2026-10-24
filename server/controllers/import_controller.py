@@ -79,3 +79,47 @@ def action(job_id,action):
             jobs.event(cur,job_id,'Задание повторно поставлено в очередь.')
         else: abort(404)
     return jsonify(status='ok')
+
+
+@imports_blueprint.get('/tasks')
+def all_tasks():
+    editor()
+    result=[]
+    with Database().cursor() as cur:
+        for kind,table in jobs.TABLES.items():
+            cur.execute(f'''SELECT j.* FROM {table} j WHERE (%s OR j.owner_id=%s)
+                AND NOT EXISTS(SELECT 1 FROM task_dismissals d WHERE d.owner_id=%s AND d.kind=%s
+                    AND d.job_id=j.id AND d.dismissed_at>=j.updated_at AND j.status NOT IN ('queued','running'))''',
+                (g.current_user['role']=='admin',g.current_user_id,g.current_user_id,kind))
+            for row in cur.fetchall():
+                if kind=='media':
+                    item={'id':str(row['id']),'title':'Импорт панорам: '+row['source'].get('title',row['source']['key']),
+                          'status':row['status'],'progress':100 if row['status']=='succeeded' else (min(99,round(row['processed']*100/row['total'])) if row.get('total') else None),
+                          'message':row['message'],'created_at':row['created_at'],
+                          'counts':{k:row[k] for k in ('processed','imported','skipped','failed')}}
+                elif kind=='display':
+                    from display_jobs import serialize
+                    item=serialize(row)
+                else:
+                    item=jobs.serialize(row)
+                    if row['source'].get('operation')=='register-folder' and row.get('result'):
+                        item['counts']={**row['result'],'skipped':0}
+                item['kind']=kind;result.append(item)
+    rank={'running':0,'queued':1}
+    result.sort(key=lambda j:(rank.get(j['status'],2),j['created_at'],j['id']))
+    return jsonify(jobs=result)
+
+
+@imports_blueprint.post('/tasks/<kind>/<uuid:job_id>/done')
+def dismiss_task(kind,job_id):
+    editor()
+    table=jobs.TABLES.get(kind)
+    if not table:abort(404)
+    with Database().cursor(write=True) as cur:
+        cur.execute(f'SELECT owner_id,status FROM {table} WHERE id=%s FOR UPDATE',(str(job_id),))
+        row=cur.fetchone()
+        if not row or (row['owner_id']!=g.current_user_id and g.current_user['role']!='admin'):abort(404)
+        if row['status'] in {'queued','running'}:abort(409)
+        cur.execute('''INSERT INTO task_dismissals(owner_id,kind,job_id) VALUES (%s,%s,%s)
+            ON CONFLICT(owner_id,kind,job_id) DO UPDATE SET dismissed_at=NOW()''',(g.current_user_id,kind,str(job_id)))
+    return jsonify(ok=True)

@@ -18,6 +18,10 @@ class DisplayPreparationTests(unittest.TestCase):
         for module in [display_jobs,display_controller]:
             p=patch.object(module,'Database',return_value=self.db);p.start();self.addCleanup(p.stop)
         self.app.register_blueprint(display_controller.display_blueprint,url_prefix='/api')
+        from controllers.ortho_controller import OrthoController
+        from managers.ortho_manager import OrthoManager
+        controller=OrthoController.__new__(OrthoController);controller.db=self.db;controller.ortho_manager=OrthoManager(self.db,ensure_schema=False)
+        self.app.add_url_rule('/api/cog/<int:ortho_id>',view_func=controller.process_ortho_cog,methods=['POST'])
         self.enqueue();self.identifier=job_worker.execute(import_jobs.claim(self.db),self.db)['ortho_id']
     def start(self,client=None):
         response=(client or self.editor).post(f'/api/raster-display/orthophotos/{self.identifier}',json={})
@@ -93,3 +97,25 @@ class DisplayPreparationTests(unittest.TestCase):
         with self.db.cursor(write=True) as c:c.execute("UPDATE raster_display_jobs SET lease_until=NOW()-INTERVAL '1 second' WHERE id=%s",(old['id'],))
         current=self.claim();self.assertNotEqual(old['lease_token'],current['lease_token'])
         self.assertIsNone(display_jobs.execute(old,self.db));self.assertIsNotNone(display_jobs.execute(current,self.db))
+
+    def test_cog_button_uses_browser_preparation_even_for_cog_original(self):
+        response=self.editor.post(f'/api/cog/{self.identifier}',json={})
+        self.assertEqual(response.status_code,202,response.json)
+        self.assertEqual(response.json['task_id'],self.start()['id'])
+        self.assertEqual(self.viewer.post(f'/api/cog/{self.identifier}').status_code,403)
+        self.assertIsNotNone(display_jobs.execute(self.claim(),self.db))
+        self.assertIsNotNone(display_jobs.display_path(import_jobs.asset_record(self.identifier,self.db),20,2))
+
+    def test_legacy_managed_ortho_can_prepare_browser_cog(self):
+        from services.storage_service import StorageService
+        before=self.cog.read_bytes()
+        StorageService().upload_file('legacy.tif',self.cog)
+        with self.db.cursor(write=True) as cur:
+            cur.execute("INSERT INTO orthophotos(filename,crs,is_cog) VALUES ('legacy.tif','EPSG:4326',TRUE) RETURNING id")
+            identifier=cur.fetchone()['id']
+        job=display_jobs.enqueue(self.ids['editor'],identifier,db=self.db)
+        self.assertEqual(job['status'],'queued')
+        self.assertIsNotNone(display_jobs.execute(self.claim(),self.db))
+        asset=import_jobs.asset_record(identifier,self.db)
+        self.assertIsNotNone(display_jobs.display_path(asset,20,2))
+        self.assertEqual(import_jobs.asset_path(asset).read_bytes(),before)

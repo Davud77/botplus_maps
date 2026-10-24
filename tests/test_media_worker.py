@@ -56,3 +56,35 @@ class MediaWorkerTests(unittest.TestCase):
                 with self.assertRaises(ValueError):worker.source_path('test','../outside.jpg')
             with db.cursor(write=True) as cur:
                 cur.execute("DELETE FROM public.photos_4326 WHERE filename LIKE '%sphere.jpg'");cur.execute("DELETE FROM media_import_jobs WHERE source->>'root_id'='test'")
+
+    def test_web_panorama_upload_only_enqueues_then_worker_reads_metadata(self):
+        from io import BytesIO
+        from flask import g
+        from server import config as controller_config
+        db=Database(os.environ['TEST_DATABASE_URL'])
+        controller=PanoController.__new__(PanoController);controller.db=db;controller._ensure_table()
+        app=Flask(__name__)
+        @app.before_request
+        def identify():g.current_user_id=1
+        app.add_url_rule('/upload',view_func=controller.upload_pano_files,methods=['POST'])
+        with tempfile.TemporaryDirectory() as folder:
+            stream=BytesIO()
+            exif=piexif.dump({'GPS':{piexif.GPSIFD.GPSLatitudeRef:b'N',piexif.GPSIFD.GPSLatitude:((43,1),(0,1),(0,1)),piexif.GPSIFD.GPSLongitudeRef:b'E',piexif.GPSIFD.GPSLongitude:((47,1),(0,1),(0,1))}})
+            Image.new('RGB',(1024,512),'blue').save(stream,format='JPEG',exif=exif);stream.seek(0)
+            with patch.object(controller_config,'MEDIA_ROOT',folder),patch.object(worker.config,'MEDIA_ROOT',folder):
+                response=app.test_client().post('/upload',data={'files':(stream,'queued-sphere.jpg'),'only_360':'true','tags':'survey'},content_type='multipart/form-data')
+                self.assertEqual(response.status_code,200)
+                self.assertEqual(response.json['successful_uploads'],['queued-sphere.jpg'])
+                with db.cursor(write=True) as cur:
+                    cur.execute("SELECT * FROM media_import_jobs WHERE source->>'title'='queued-sphere.jpg' ORDER BY created_at DESC LIMIT 1")
+                    queued=cur.fetchone();self.assertEqual(queued['status'],'queued');self.assertEqual(queued['processed'],0)
+                    cur.execute("UPDATE media_import_jobs SET status='running',lease_token=%s,lease_until=NOW()+INTERVAL '90 seconds' WHERE id=%s RETURNING *",(str(uuid4()),str(queued['id'])))
+                    job=cur.fetchone()
+                worker.execute(job,db)
+                with db.cursor() as cur:
+                    cur.execute('SELECT status,imported,total FROM media_import_jobs WHERE id=%s',(str(queued['id']),));result=cur.fetchone()
+                    self.assertEqual(result['status'],'succeeded');self.assertEqual(result['imported'],1);self.assertEqual(result['total'],1)
+                    cur.execute("SELECT tags FROM public.photos_4326 WHERE source_ref->>'key'=%s",(job['source']['key'],));self.assertEqual(cur.fetchone()['tags'],'survey')
+                with db.cursor(write=True) as cur:
+                    cur.execute("DELETE FROM public.photos_4326 WHERE source_ref->>'key'=%s",(job['source']['key'],))
+                    cur.execute('DELETE FROM media_import_jobs WHERE id=%s',(str(queued['id']),))

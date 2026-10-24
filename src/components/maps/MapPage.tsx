@@ -64,9 +64,9 @@ function MapStateObserver({ mapRef, onViewChange, onZoomChange }: {
   return null;
 }
 
-interface MapPageProps { initialConfig?: MapConfig; readOnly?: boolean; documentControls?: React.ReactNode;
+interface MapPageProps { diagnostics?: boolean; initialConfig?: MapConfig; readOnly?: boolean; documentControls?: React.ReactNode;
   onViewChange?: (view: MapConfig['view']) => void; onPanoramasChange?: (enabled: boolean) => void; }
-const MapPage: React.FC<MapPageProps> = ({ initialConfig, readOnly = false, documentControls, onViewChange, onPanoramasChange }) => {
+const MapPage: React.FC<MapPageProps> = ({ initialConfig, readOnly = false, diagnostics = false, documentControls, onViewChange, onPanoramasChange }) => {
   // Global Stores
   const { activePanel, closeAll } = useUIStore();
   const { baseLayerUrl, baseDefinition } = useMapStore();
@@ -164,7 +164,7 @@ const MapPage: React.FC<MapPageProps> = ({ initialConfig, readOnly = false, docu
         />
       </div>
 
-      <RasterLoadingStatus />
+      {diagnostics && <RasterLoadingStatus />}
       {/* 2. SIDE PANELS */}
       <div className="ui-overlay-layer">
         {activePanel === 'settings' && documentControls && <BasePanel title="Настройки карты" onClose={closeAll}>{documentControls}</BasePanel>}
@@ -224,6 +224,9 @@ const MapPage: React.FC<MapPageProps> = ({ initialConfig, readOnly = false, docu
         zoom={initialConfig?.view.zoom ?? 5}
         className="main-map-container"
         zoomControl={false}
+        zoomAnimation
+        wheelPxPerZoomLevel={100}
+        wheelDebounceTime={60}
         maxZoom={23}
         preferCanvas={true} // Use Canvas instead of one SVG node per point.
       >
@@ -237,7 +240,7 @@ const MapPage: React.FC<MapPageProps> = ({ initialConfig, readOnly = false, docu
         <OrthoTileLayer />
 
         {showPanoLayer && presentations.find(item=>item.key==='panoramas')?.visible!==false && (
-          <LayerPane name="panoramas-overlay" style={{zIndex:400+presentations.length-Math.max(0,presentations.findIndex(item=>item.key==='panoramas')),opacity:presentations.find(item=>item.key==='panoramas')?.opacity??1}}><PanoLayer pane="panoramas-overlay" selectedMarker={selectedMarker} onMarkerClick={handleMarkerClick} /></LayerPane>
+          <LayerPane name="panoramas-overlay" style={{zIndex:400+presentations.length-Math.max(0,presentations.findIndex(item=>item.key==='panoramas')),opacity:presentations.find(item=>item.key==='panoramas')?.opacity??1}}><PanoLayer options={presentations.find(item=>item.key==='panoramas')?.panorama} pane="panoramas-overlay" selectedMarker={selectedMarker} onMarkerClick={handleMarkerClick} /></LayerPane>
         )}
 
         {/* --- Events --- */}

@@ -1,225 +1,79 @@
-// src/components/maps/layers/PanoLayer.tsx
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { useMap, Marker, CircleMarker } from 'react-leaflet';
+import React,{useState,useEffect,useCallback,useMemo,useRef} from 'react';
+import {useMap,CircleMarker,Polyline} from 'react-leaflet';
 import debounce from 'lodash/debounce';
-import L, { LatLngBounds } from 'leaflet';
-// Убедитесь, что этот путь верный в вашей структуре проекта
-
-// --- Типы ---
-interface MarkerType {
-  id: string;
-  lat: number;
-  lng: number;
-  count: number; 
+import L,{LatLngBounds} from 'leaflet';
+import {PanoramaSettings,defaultPanoramaSettings,usePanoramaRuntime} from '../../../utils/panoramaSettings';
+import {workspaceRequest} from '../../../utils/workspaceApi';
+interface MarkerType {id:string;lat:number;lng:number;count:number;cluster?:boolean;}
+interface Props {coverageEndpoint?:string;publicView?:boolean;endpoint?:string;query?:string;pane?:string;selectedMarker?:string|null;onMarkerClick?:(marker:MarkerType)=>void;togglePanoLayer?:(markers:MarkerType[])=>void;options?:Partial<PanoramaSettings>;}
+type Lines=[number,number][][];
+export default function PanoLayer({endpoint='/api/panoramas',query='',pane='overlayPane',selectedMarker=null,onMarkerClick,togglePanoLayer,options,coverageEndpoint='/api/media/coverage',publicView=false}:Props){
+ const settings=useMemo(()=>({...defaultPanoramaSettings,...options}),[options]);
+ const {mode,pointZoom,detail}=settings;
+ const map=useMap();const renderer=useMemo(()=>L.canvas({pane,padding:.3}),[pane]);
+ const [coverage,setCoverage]=useState<Lines>([]);const [markers,setMarkers]=useState<MarkerType[]>([]);
+ const revision=usePanoramaRuntime(s=>s.revision);const jobId=usePanoramaRuntime(s=>s.jobId);
+ const generation=useRef(0);const controller=useRef<AbortController|null>(null);
+ const loaded=useRef<{bounds:LatLngBounds;zoom:number;key:string}|null>(null);
+ const lineCache=useRef<{bounds:LatLngBounds;key:string;lines:Lines}|null>(null);
+ const cancel=useCallback(()=>{generation.current++;controller.current?.abort();},[]);
+ useEffect(()=>{
+  if(!jobId||publicView)return;
+  let live=true;let timer:ReturnType<typeof setTimeout>;
+  const poll=async()=>{
+   try{const {job}=await workspaceRequest<{job:{status:string;progress:number;message:string}}>(`/imports/jobs/${jobId}`);if(!live)return;
+    const state=usePanoramaRuntime.getState();
+    if(['succeeded','failed','cancelled'].includes(job.status)){state.finish(job.status==='succeeded'?'Покрытие перестроено.':job.message);return;}
+    state.progress(`${job.message} · ${job.progress}%`);timer=setTimeout(poll,2000);
+   }catch(e){if(live)usePanoramaRuntime.getState().finish((e as Error).message);}
+  };poll();return()=>{live=false;clearTimeout(timer);};
+ },[jobId,publicView]);
+ const fetchView=useCallback(async(bounds:LatLngBounds,zoom:number)=>{
+  const key=`${endpoint}:${coverageEndpoint}?${query}:${mode}:${pointZoom}:${detail}:${revision}`;
+  if(loaded.current?.key===key&&loaded.current.zoom===zoom&&loaded.current.bounds.contains(bounds))return;
+  const sequence=++generation.current;controller.current?.abort();controller.current=new AbortController();
+  if(zoom<3){loaded.current=null;setMarkers([]);setCoverage([]);return;}
+  const area=bounds.pad(.3);const points=mode==='points'||zoom>=pointZoom;
+  const params=new URLSearchParams(query);params.set('west',String(area.getWest()));params.set('east',String(area.getEast()));params.set('south',String(area.getSouth()));params.set('north',String(area.getNorth()));params.set('zoom',String(Math.floor(zoom)));
+  try{
+   if(points){
+    params.set('limit','1000');params.set('points','1');
+    const response=await fetch(`${endpoint}?${params}`,{signal:controller.current.signal});if(!response.ok)throw new Error(`Панорамы: ${response.status}`);
+    const data=await response.json();if(sequence!==generation.current)return;
+    const rows:MarkerType[]=Array.isArray(data)?data.filter(p=>!p.cluster&&p.count===1&&typeof p.lat==='number'&&typeof p.lng==='number').map(p=>({...p,id:String(p.id)})):[];
+    setMarkers(rows);setCoverage([]);togglePanoLayer?.(rows);
+   }else{
+    const cached=lineCache.current;
+    if(cached?.key===key&&cached.bounds.contains(bounds)){
+     setCoverage(cached.lines);setMarkers([]);
+    }else{
+     params.set('lines','1');params.set('detail',detail);
+     const response=await fetch(`${coverageEndpoint}?${params}`,{signal:controller.current.signal});if(!response.ok)throw new Error(`Покрытие: ${response.status}`);
+     const geometry=await response.json();if(sequence!==generation.current)return;
+     const source=geometry.type==='LineString'?[geometry.coordinates]:geometry.type==='MultiLineString'?geometry.coordinates:[];
+     const lines:Lines=source.map((line:number[][])=>line.map(([lng,lat])=>[lat,lng] as [number,number]));
+     lineCache.current={bounds:area,key,lines};setCoverage(lines);setMarkers([]);
+    }
+   }
+   loaded.current={bounds:area,zoom,key};
+  }catch(e){if((e as Error).name!=='AbortError')console.error('Панорамы:',e);}
+ },[endpoint,coverageEndpoint,query,mode,pointZoom,detail,revision,togglePanoLayer]);
+ const delayedFetch=useMemo(()=>debounce((bounds:LatLngBounds,zoom:number)=>fetchView(bounds,zoom),160),[fetchView]);
+ useEffect(()=>{
+  const start=()=>{delayedFetch.cancel();cancel();};
+  const end=()=>delayedFetch(map.getBounds(),map.getZoom());
+  map.on('zoomstart',start);map.on('moveend',end);map.on('zoomend',end);end();
+  return()=>{map.off('zoomstart',start);map.off('moveend',end);map.off('zoomend',end);delayedFetch.cancel();cancel();loaded.current=null;};
+ },[map,delayedFetch,cancel]);
+ const openPoints=(event:L.LeafletMouseEvent)=>{
+  L.DomEvent.stopPropagation(event);
+  map.flyTo(event.latlng,Math.min(map.getMaxZoom(),Math.max(18,pointZoom)),{animate:true,duration:.85,easeLinearity:.25});
+ };
+ return <>
+  {coverage.length>0&&<>
+   {settings.outlineWidth>0&&<Polyline pane={pane} renderer={renderer} positions={coverage} pathOptions={{color:settings.outlineColor,weight:settings.weight+settings.outlineWidth*2,opacity:.95,lineCap:'round',lineJoin:'round'}} eventHandlers={{click:openPoints}}/>}
+   <Polyline pane={pane} renderer={renderer} positions={coverage} pathOptions={{color:settings.color,weight:settings.weight,opacity:1,lineCap:'round',lineJoin:'round'}} eventHandlers={{click:openPoints}}/>
+  </>}
+  {markers.map(marker=><CircleMarker key={marker.id} pane={pane} renderer={renderer} center={[marker.lat,marker.lng]} radius={settings.pointRadius} pathOptions={{fillColor:selectedMarker===marker.id?'#ff3b30':settings.pointColor,color:settings.outlineColor,weight:1.5,fillOpacity:1}} eventHandlers={{click:event=>{L.DomEvent.stopPropagation(event);onMarkerClick?.(marker);}}}/>)}
+ </>;
 }
-
-interface PanoLayerProps {
-  endpoint?: string; query?: string;
-  pane?: string;
-  selectedMarker?: string | null;
-  onMarkerClick?: (marker: MarkerType) => void;
-  togglePanoLayer?: (newMarkers: MarkerType[]) => void;
-}
-
-const MIN_ZOOM_LEVEL = 3; 
-const MAX_MARKERS_PER_REQUEST = 50000; 
-const API_ENDPOINT = '/api/panoramas'; 
-
-// Красивая и независимая иконка для серверного кластера
-const createClusterIcon = (count: number) => {
-  let size = 40;
-  let bgColor = 'rgba(110, 204, 57, 0.7)'; // Зеленый
-  let borderColor = 'rgba(110, 204, 57, 1)';
-
-  if (count > 100) {
-    size = 46;
-    bgColor = 'rgba(240, 194, 12, 0.8)'; // Желтый
-    borderColor = 'rgba(240, 194, 12, 1)';
-  }
-  if (count > 1000) {
-    size = 54;
-    bgColor = 'rgba(241, 128, 23, 0.8)'; // Оранжевый
-    borderColor = 'rgba(241, 128, 23, 1)';
-  }
-
-  const html = `
-    <div style="
-      background-color: ${bgColor};
-      border: 2px solid ${borderColor};
-      width: ${size}px;
-      height: ${size}px;
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: #fff;
-      text-shadow: 0px 1px 2px rgba(0,0,0,0.8);
-      font-weight: bold;
-      font-family: Arial, sans-serif;
-      font-size: 13px;
-      box-shadow: 0 3px 6px rgba(0,0,0,0.3);
-    ">
-      ${count > 9999 ? '10k+' : count}
-    </div>
-  `;
-
-  return L.divIcon({
-    html,
-    className: '', // Убрали сторонние классы, чтобы не мешали
-    iconSize: L.point(size, size),
-    iconAnchor: L.point(size / 2, size / 2),
-  });
-};
-
-const PanoLayer: React.FC<PanoLayerProps> = ({
-  endpoint = API_ENDPOINT, query = '', selectedMarker = null, pane = 'overlayPane',
-  onMarkerClick,
-  togglePanoLayer,
-}) => {
-  const [markers, setMarkers] = useState<MarkerType[]>([]);
-  const map = useMap();
-  const renderer=useMemo(()=>L.canvas({pane}),[pane]);
-
-  const abortControllerRef = useRef<AbortController | null>(null);
-
-  // --- Функция загрузки данных ---
-  const fetchMarkersInBounds = useCallback(
-    async (bounds: LatLngBounds, currentZoom: number) => {
-      if (currentZoom < MIN_ZOOM_LEVEL) {
-        setMarkers([]);
-        return;
-      }
-
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-      }
-      abortControllerRef.current = new AbortController();
-
-      try {
-        const url = new URL(endpoint, window.location.origin);
-        new URLSearchParams(query).forEach((value,key)=>url.searchParams.set(key,value));
-        
-        // Берем область карты с запасом 20%, чтобы избежать "прострелов" при легком скролле
-        const paddedBounds = bounds.pad(0.2);
-
-        url.searchParams.append('north', paddedBounds.getNorth().toString());
-        url.searchParams.append('south', paddedBounds.getSouth().toString());
-        url.searchParams.append('east', paddedBounds.getEast().toString());
-        url.searchParams.append('west', paddedBounds.getWest().toString());
-        url.searchParams.append('zoom', currentZoom.toString());
-        url.searchParams.append('limit', MAX_MARKERS_PER_REQUEST.toString());
-
-        const response = await fetch(url.toString(), {
-          signal: abortControllerRef.current.signal,
-        });
-
-        const contentType = response.headers.get("content-type");
-        if (contentType && contentType.includes("text/html")) return; 
-
-        if (!response.ok) throw new Error(`HTTP error: ${response.status}`);
-
-        const data = await response.json();
-
-        if (Array.isArray(data)) {
-          // ВАЖНО: В новом бэкенде поля называются lat и lng (для экономии трафика)
-          const updatedMarkers = data
-            .filter((item: any) => typeof item.lat === 'number' && typeof item.lng === 'number')
-            .map((item: any) => ({
-              id: String(item.id),
-              lat: item.lat,
-              lng: item.lng,
-              count: item.count || 1,
-            }));
-
-          // ПОЛНАЯ ЗАМЕНА СОСТОЯНИЯ (Без бесконечного накопления в памяти)
-          setMarkers(updatedMarkers);
-          
-          if (togglePanoLayer) {
-             setTimeout(() => togglePanoLayer(updatedMarkers), 0);
-          }
-        }
-      } catch (error: any) {
-        if (error.name !== 'AbortError') console.error('Error fetching panoramas:', error);
-      }
-    },
-    [togglePanoLayer,endpoint,query]
-  );
-
-  // --- Debounce ---
-  const debouncedFetch = useMemo(
-    () => debounce((bounds: LatLngBounds, zoom: number) => {
-        fetchMarkersInBounds(bounds, zoom);
-    }, 250), // Задержка 250мс идеальна для UX: быстро, но не спамит сервер
-    [fetchMarkersInBounds]
-  );
-
-  // --- Эффекты карты ---
-  useEffect(() => {
-    if (!map) return;
-
-    const handleMapEvent = () => {
-      debouncedFetch(map.getBounds(), map.getZoom());
-    };
-
-    map.on('moveend', handleMapEvent);
-    map.on('zoomend', handleMapEvent);
-
-    if (map.getZoom() >= MIN_ZOOM_LEVEL) handleMapEvent();
-
-    return () => {
-      map.off('moveend', handleMapEvent);
-      map.off('zoomend', handleMapEvent);
-      debouncedFetch.cancel();
-      if (abortControllerRef.current) abortControllerRef.current.abort();
-    };
-  }, [map, debouncedFetch]);
-
-  // --- Рендер ---
-  return (
-    <React.Fragment>
-      {markers.map((marker) => {
-        // 1. Если сервер вернул кластер (Зумы 0-17)
-        if (marker.count > 1) {
-          return (
-            <Marker pane={pane}
-              key={`cluster-${marker.id}-${marker.lat}-${marker.lng}`}
-              position={[marker.lat, marker.lng]}
-              icon={createClusterIcon(marker.count)}
-              eventHandlers={{
-                click: (e) => {
-                  L.DomEvent.stopPropagation(e);
-                  // Приближаем карту ровно в центр кластера
-                  map.setView([marker.lat, marker.lng], map.getZoom() + 2);
-                },
-              }}
-            />
-          );
-        }
-
-        // 2. Если сервер вернул сырую точку (Зумы 18-23). 
-        // CircleMarker uses the map Canvas renderer; dense datasets still need tile-based rendering.
-        return (
-          <CircleMarker pane={pane} renderer={renderer}
-            key={`raw-${marker.id}`}
-            center={[marker.lat, marker.lng]}
-            radius={6} // Размер точки в пикселях
-            pathOptions={{
-              fillColor: selectedMarker === marker.id ? '#ff3b30' : '#2db7f5', // Красный при выборе, иначе голубой
-              color: '#ffffff', // Белая обводка для контраста
-              weight: 1.5,
-              fillOpacity: 1
-            }}
-            eventHandlers={{
-              click: (e) => {
-                L.DomEvent.stopPropagation(e);
-                if (onMarkerClick) onMarkerClick(marker);
-              },
-            }}
-          />
-        );
-      })}
-    </React.Fragment>
-  );
-};
-
-export default PanoLayer;

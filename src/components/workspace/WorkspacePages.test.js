@@ -1,4 +1,5 @@
 import React from 'react';
+import '@testing-library/jest-dom';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import Home from '../Home';
 import ProfilePage from '../ProfilePage';
@@ -61,4 +62,12 @@ test('administrator assigns a role through the protected API', async () => {
   fireEvent.change(select, { target: { value: 'editor' } });
   await waitFor(() => expect(workspaceRequest).toHaveBeenCalledWith('/users/2','PATCH',{ role: 'editor' }));
   await screen.findByText('Права пользователя обновлены.');
+});
+
+test('map cards keep editor and publication links without a rename action',async()=>{
+ workspaceRequest.mockResolvedValue({maps:[{id:'saved',title:'Карта',description:'Описание',revision:4,can_edit:true,public_slug:'public-map',updated_at:'2026-10-23'}],total:1});
+ render(<Home/>);await screen.findByRole('heading',{name:'Карта'});
+ expect(screen.queryByRole('button',{name:'Переименовать'})).toBeNull();
+ expect(screen.getByRole('link',{name:/Открыть редактор/})).toHaveAttribute('href','/maps/saved');
+ expect(screen.getByRole('link',{name:/Публикация/})).toHaveAttribute('href','/p/public-map');
 });

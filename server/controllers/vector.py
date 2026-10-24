@@ -62,7 +62,8 @@ def list_databases():
         host = connection_settings.get("host", "")
         port = int(connection_settings.get("port") or 5432)
 
-        results = [{'id': n, 'name': n, 'host': host, 'port': port, 'status': 'connected', 'type': 'internal'} for (n,) in dbs]
+        app_db=application_database()
+        results = [{'can_delete':n!=app_db,'id': n, 'name': n, 'host': host, 'port': port, 'status': 'connected', 'type': 'internal'} for (n,) in dbs]
         cur.close()
         return jsonify(results)
     except Exception as e:
@@ -123,6 +124,7 @@ def list_layers(db_name):
             return jsonify([])
 
         layers = []
+        app_db=application_database()
         for row in rows:
             schema, table, geom_type, srid = row
             full_table_name = sql.Identifier(schema, table).as_string(conn)
@@ -131,6 +133,7 @@ def list_layers(db_name):
             count = count_res[0] if count_res else 0
 
             layers.append({
+                'can_delete':not (db_name==app_db and schema=='public' and table in APP_TABLES),
                 'id': f"{schema}.{table}",
                 'schema': schema,
                 'tableName': table,
@@ -558,3 +561,100 @@ def get_layer_style(db_name, schema, table_name):
         return jsonify({'error': str(e)}), 500
     finally:
         if conn: release_db_connection(conn, db_name)
+
+
+# Profile management uses quoted identifiers and refuses application/system data.
+from contextlib import contextmanager
+
+@contextmanager
+def management_cursor(db_name,*,write=False):
+    connection=database.connect(db_name)
+    try:
+        with connection.cursor() as cur:
+            database.configure_transaction(cur,read_only=not write)
+            yield cur
+        if write:connection.commit()
+    finally:Database.release(connection)
+
+
+def application_database():
+    with database.cursor() as cur:
+        cur.execute('SELECT current_database() AS name')
+        return cur.fetchone()['name']
+
+
+def protected_schema(name):
+    return name in {'public','information_schema','topology','tiger','tiger_data'} or name.startswith('pg_')
+
+
+APP_TABLES={'app_installation','users','maps','orthophotos','ortholist','photos_4326','panorama_folders','media_import_jobs','media_import_sources','system_events','import_jobs','import_assets','import_events','raster_sources','raster_display_jobs','raster_display_events','coordinate_systems','basemaps','map_defaults','task_dismissals'}
+
+
+def identifier_name(value):
+    import re
+    return isinstance(value,str) and re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]{0,62}',value) is not None
+
+
+@vector_bp.route('/vector/schemas/<db_name>',methods=['GET','POST'])
+def manage_schemas(db_name):
+    from flask import abort,g
+    if request.method=='POST':
+        if g.current_user['role']=='viewer':abort(403)
+        body=request.get_json(silent=True)
+        if not isinstance(body,dict):abort(400)
+        name=body.get('name')
+        if not identifier_name(name) or protected_schema(name):abort(400,description='Укажите название пользовательской схемы: латинские буквы, цифры и подчёркивание.')
+        try:
+            with management_cursor(db_name,write=True) as cur:
+                cur.execute(sql.SQL('CREATE SCHEMA {}').format(sql.Identifier(name)))
+        except psycopg2.errors.DuplicateSchema:abort(409,description='Схема уже существует.')
+        return jsonify(status='ok',name=name),201
+    with management_cursor(db_name) as cur:
+        cur.execute("SELECT nspname AS name FROM pg_namespace WHERE nspname NOT LIKE 'pg_%' AND nspname<>'information_schema' ORDER BY nspname")
+        rows=cur.fetchall()
+    return jsonify(schemas=[{'name':r['name'],'can_delete':not protected_schema(r['name'])} for r in rows])
+
+
+@vector_bp.delete('/vector/schemas/<db_name>/<schema>')
+def delete_schema(db_name,schema):
+    from flask import abort
+    from services.permissions import require_admin
+    require_admin()
+    if protected_schema(schema):abort(403,description='Системную схему удалить нельзя.')
+    try:
+        with management_cursor(db_name,write=True) as cur:
+            cur.execute(sql.SQL('DROP SCHEMA {} RESTRICT').format(sql.Identifier(schema)))
+    except psycopg2.errors.DependentObjectsStillExist:abort(409,description='Схема не пуста. Сначала удалите её слои и другие объекты.')
+    except psycopg2.errors.InvalidSchemaName:abort(404,description='Схема не найдена.')
+    return jsonify(status='ok')
+
+
+@vector_bp.delete('/vector/layers/<db_name>/<schema>/<table>')
+def delete_layer(db_name,schema,table):
+    from flask import abort
+    from services.permissions import require_admin
+    require_admin()
+    if schema.startswith('pg_') or schema=='information_schema' or (db_name==application_database() and schema=='public' and table in APP_TABLES):abort(403,description='Системные таблицы приложения удалить нельзя.')
+    try:
+        with management_cursor(db_name,write=True) as cur:
+            cur.execute(sql.SQL('DROP TABLE {}.{} RESTRICT').format(sql.Identifier(schema),sql.Identifier(table)))
+    except psycopg2.errors.DependentObjectsStillExist:abort(409,description='Слой используется другими объектами или расширением PostgreSQL.')
+    except psycopg2.errors.UndefinedTable:abort(404,description='Слой не найден.')
+    return jsonify(status='ok')
+
+
+@vector_bp.delete('/vector/databases/<db_name>')
+def delete_database(db_name):
+    from flask import abort
+    from services.permissions import require_admin
+    require_admin()
+    if db_name in {'postgres','template0','template1',application_database()}:abort(403,description='Рабочую и системные базы удалить нельзя.')
+    conn=None
+    try:
+        conn=get_db_connection('postgres',autocommit=True)
+        if not conn:abort(503)
+        with conn.cursor() as cur:cur.execute(sql.SQL('DROP DATABASE {}').format(sql.Identifier(db_name)))
+    except psycopg2.errors.ObjectInUse:abort(409,description='База используется. Закройте подключения и повторите удаление.')
+    except psycopg2.errors.InvalidCatalogName:abort(404,description='База не найдена.')
+    finally:release_db_connection(conn)
+    return jsonify(status='ok')

@@ -6,7 +6,7 @@ services:
       LOCAL_SOURCE_ROOTS: '{"nas":"/sources/local"}'
     volumes: &nas_volumes !override
       - type: bind
-        source: ${NAS_DATA_DIR:?Set NAS_DATA_DIR to the mounted NAS system/work directory}
+        source: ${NAS_DATA_DIR:-/volume1/botplusmaps/system/work}
         target: /app/data
         bind:
           create_host_path: false
@@ -32,7 +32,7 @@ services:
   titiler:
     volumes: !override
       - type: bind
-        source: ${NAS_DATA_DIR}
+        source: ${NAS_DATA_DIR:-/volume1/botplusmaps/system/work}
         target: /app/data
         read_only: true
         bind:

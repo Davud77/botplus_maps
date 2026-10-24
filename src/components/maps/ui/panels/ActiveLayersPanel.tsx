@@ -27,7 +27,7 @@ export function ActiveLayersPanel({onClose,onRemovePanos}: {onClose:()=>void;onR
   const info=(key:string)=>{
     if(key==='basemap')return {kind:'basemap' as const,name:baseDefinition?.name || baseLayerId};
     if(key==='panoramas')return {kind:'panoramas' as const,name:'Панорамы'};
-    if(key.startsWith('ortho:'))return {kind:'ortho' as const,name:orthoImages.find(o=>o.id===+key.slice(6))?.filename || `Ортофото ${key.slice(6)}`};
+    if(key.startsWith('ortho:')){const ortho=orthoImages.find(o=>o.id===+key.slice(6));return {kind:'ortho' as const,name:ortho?.display_name||ortho?.filename||`Ортофото ${key.slice(6)}`};}
     return {kind:'vector' as const,name:layerSources[key.slice(7)]?.tableName || key.slice(7)};
   };
   const selected=layers.find(item=>item.key===editing);

@@ -77,8 +77,8 @@ services:
       MEDIA_ROOT: /app/data/media
       TMPDIR: /app/data/temp
       CPL_TMPDIR: /app/data/temp
-      IMPORT_STAGING_DIR: /app/data/import-staging
-      IMPORT_PRODUCTS_DIR: /app/data/import-products
+      IMPORT_STAGING_DIR: /app/data/media/orthophotos/originals
+      IMPORT_PRODUCTS_DIR: /app/data/media/orthophotos/products
       LOCAL_SOURCE_ROOTS: '{"local":"/sources/local"}'
 
       # Настройки TiTiler
@@ -107,7 +107,7 @@ services:
     image: ${BOTPLUS_IMAGE:-botplus-maps:local}
     restart: unless-stopped
     command: [python, server/job_worker.py]
-    mem_limit: 1g
+    mem_limit: 1536m
     cpus: 2.0
     environment: *app_environment
     volumes:
@@ -122,8 +122,8 @@ services:
     image: ${BOTPLUS_IMAGE:-botplus-maps:local}
     restart: unless-stopped
     command: [python, server/media_worker.py]
-    mem_limit: 512m
-    cpus: 1.0
+    mem_limit: 1536m
+    cpus: 2.0
     environment: *app_environment
     volumes:
       - ${HOST_DATA_DIR:-./data}:/app/data

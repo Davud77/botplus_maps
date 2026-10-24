@@ -59,10 +59,31 @@ def browse():
     return jsonify(entries=entries,key=current,parent=str(path.parent.relative_to(root)) if path!=root else None,next_offset=after+len(entries) if more else None)
 
 
-def register(root_id,key,title='',db=None):
+def register(root_id,key,title='',db=None,lease=None):
     from osgeo import gdal,osr
     gdal.UseExceptions();osr.SetPROJEnableNetwork(False)
     db=db or Database();path=jobs.resolve_source(root_id,key,internal=True);before=jobs.fingerprint(path)
+    if root_id!='__uploads':
+        import shutil
+        folder=jobs.staging_root();folder.mkdir(parents=True,exist_ok=True)
+        managed=folder/(hashlib.sha256(json.dumps([root_id,key,before],sort_keys=True).encode()).hexdigest()+'.tif')
+        if not managed.exists():
+            temporary=managed.with_name(managed.name+'.'+str(uuid4())+'.tmp')
+            try:
+                copied=0;last=-1
+                with path.open('rb') as origin,temporary.open('xb') as target:
+                    while chunk:=origin.read(8*1024*1024):
+                        target.write(chunk);copied+=len(chunk)
+                        percent=5+int(65*copied/max(1,before['st_size']))
+                        if lease and percent!=last:
+                            lease.progress(percent,'Копирование ортофотоплана в хранилище');last=percent
+                    target.flush();os.fsync(target.fileno())
+                if jobs.fingerprint(path)!=before:raise ValueError('Исходник изменился во время копирования.')
+                os.replace(temporary,managed)
+            finally:temporary.unlink(missing_ok=True)
+        title=title or path.name
+        root_id='__uploads';key=managed.name;path=managed;before=jobs.fingerprint(path)
+    if lease:lease.progress(75,'Проверка ортофотоплана',record=True)
     source={'root_id':root_id,'key':key,'fingerprint':before,'source_crs':None,'recipe':1}
     sig=hashlib.sha256(json.dumps(source,sort_keys=True).encode()).hexdigest()
     dataset=gdal.OpenEx(str(path),gdal.OF_RASTER|gdal.OF_READONLY,allowed_drivers=['GTiff'])
@@ -71,30 +92,24 @@ def register(root_id,key,title='',db=None):
     report=None;warning=''
     try:report=inspect_raster(path)
     except (ValueError,RuntimeError):warning='Нет определённой проекции или привязки. Файл сохранён; положение на карте пока неизвестно.'
-    if report and not is_cog:warning='Исходник подключён без обработки. Для быстрого просмотра можно отдельно подготовить COG в «Заданиях».'
+    if report and not is_cog:warning='Оригинал сохранён. Для быстрого просмотра выберите «В формат COG» в каталоге ортофотопланов.'
     if jobs.fingerprint(path)!=before:raise ValueError('Файл изменился во время импорта.')
     with db.cursor(write=True) as c:
         c.execute('SELECT pg_advisory_xact_lock(%s)',(941027005,))
+        if lease:
+            c.execute("SELECT 1 FROM import_jobs WHERE id=%s AND lease_token=%s AND status='running' AND lease_until>NOW() AND NOT cancel_requested FOR UPDATE",(str(lease.job['id']),str(lease.job['lease_token'])))
+            if not c.fetchone():raise ValueError('Регистрация отменена или аренда задания завершена.')
         c.execute('SELECT ortho_id FROM import_assets WHERE signature=%s UNION ALL SELECT ortho_id FROM raster_sources WHERE signature=%s LIMIT 1',(sig,sig));existing=c.fetchone()
         if existing:return {'ortho_id':existing['ortho_id'],'existing':True}
-        c.execute('SELECT id,name,definition,resolved FROM coordinate_systems');catalog=c.fetchall();projection=None
-        if definition:
-            source_srs=osr.SpatialReference();source_srs.SetFromUserInput(definition)
-            for entry in catalog:
-                if not entry['definition'] or not entry['resolved']:continue
-                candidate=osr.SpatialReference()
-                try:
-                    if candidate.SetFromUserInput(entry['definition'])==0 and source_srs.IsSame(candidate):projection=entry;break
-                except RuntimeError:continue
-        if projection is None:
-            c.execute("SELECT nextval('unknown_projection_sequence') AS number");name='unknown_'+str(c.fetchone()['number'])
-            c.execute('INSERT INTO coordinate_systems(id,name,definition,resolved) VALUES (%s,%s,%s,%s) RETURNING *',(name,name,definition,bool(definition and report)));projection=c.fetchone()
+        from services.map_settings import ensure_projection
+        projection=ensure_projection(c,definition)
         c.execute('''INSERT INTO orthophotos(filename,bounds,crs,is_visible,is_cog,geometry) VALUES
             (%s,%s,%s,FALSE,%s,CASE WHEN %s IS NULL THEN NULL ELSE ST_Multi(ST_GeomFromText(%s,4326)) END) RETURNING id''',
             (title.strip()[:120] or path.name,json.dumps(report['native_bounds']) if report else None,projection['id'],is_cog,report['footprint_wkt'] if report else None,report['footprint_wkt'] if report else None))
         identifier=c.fetchone()['id'];asset={'source':source,'kind':'source'}
         c.execute('INSERT INTO raster_sources VALUES (%s,%s,%s,%s,%s)',(identifier,sig,Json(asset),projection['id'],warning))
         event(c,f'Импортирован ортофотоплан №{identifier} без обработки; проекция {projection["id"]}.')
+    create_preview(identifier,path,db)
     return {'ortho_id':identifier,'projection':projection['name'],'warning':warning,'width':width,'height':height,'existing':False}
 
 
@@ -104,9 +119,17 @@ def register_source():
     if not isinstance(body,dict):abort(400)
     if any(not isinstance(body.get(k),str) or len(body[k])>4096 for k in ('root_id','key')) or not isinstance(body.get('title',''),str):abort(400)
     if body['root_id'].startswith('__'):abort(400)
-    try:value=register(body.get('root_id'),body.get('key'),body.get('title',''))
+    try:
+        operation='register'
+        try:jobs.resolve_source(body['root_id'],body['key'])
+        except ValueError:
+            from media_worker import source_path
+            _,folder=source_path(body['root_id'],body['key'])
+            if not folder.is_dir():raise ValueError('Выберите GeoTIFF или папку ортофотопланов.')
+            operation='register-folder'
+        value=jobs.enqueue_operation(g.current_user_id,operation,body.get('title') or ('Импорт ОФП: ' if operation=='register-folder' else '')+Path(body['key']).name,body)
     except (ValueError,OSError,RuntimeError) as e:abort(400,description=str(e) if isinstance(e,ValueError) else 'Файл недоступен или не является GeoTIFF.')
-    return jsonify(result=value),201
+    return jsonify(job=jobs.serialize(value)),202
 
 
 @data_import_blueprint.post('/imports/files')
@@ -122,8 +145,8 @@ def upload_original(field_name='file'):
                 if not chunk:break
                 target.write(chunk)
             target.flush();os.fsync(target.fileno())
-        result=register('__uploads',key,request.form.get('title') or file.filename or '');saved=True
-        return jsonify(result=result),201
+        job=jobs.enqueue_operation(g.current_user_id,'register',request.form.get('title') or file.filename or key,{'root_id':'__uploads','key':key,'title':request.form.get('title') or file.filename or ''});saved=True
+        return jsonify(job=jobs.serialize(job)),202
     except (ValueError,RuntimeError) as e:abort(400,description=str(e))
     finally:
         if not saved:path.unlink(missing_ok=True)
@@ -166,3 +189,43 @@ def system_logs():
         snapshot=json.loads(path.read_text())
     except (OSError,ValueError):snapshot={'entries':[],'collected_at':None}
     return jsonify(events=events,services=snapshot.get('entries',[])[:1000],collected_at=snapshot.get('collected_at'))
+
+
+def raster_files(folder):
+    for parent,dirs,names in os.walk(folder,followlinks=False):
+        dirs[:]=sorted(n for n in dirs if not n.startswith(('@','#','.')) and not (Path(parent)/n).is_symlink())
+        for name in sorted(names):
+            path=Path(parent)/name
+            if path.suffix.lower() in {'.tif','.tiff'} and not path.is_symlink():yield path
+
+
+def create_preview(ortho_id,path,db):
+    from osgeo import gdal
+    import config
+    from storage import FileStorage
+    import tempfile
+    name=f'previews/{ortho_id}-{uuid4().hex}.png'
+    try:
+        Path(config.TEMP_FOLDER).mkdir(parents=True,exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=config.TEMP_FOLDER) as folder:
+            output=Path(folder)/'preview.png'
+            dataset=gdal.Open(str(path))
+            width=min(400,dataset.RasterXSize)
+            height=max(1,round(dataset.RasterYSize*width/dataset.RasterXSize))
+            height=min(400,height)
+            width=max(1,round(dataset.RasterXSize*height/dataset.RasterYSize))
+            bands=list(range(1,min(dataset.RasterCount,3)+1))
+            options={'format':'PNG','width':width,'height':height,'resampleAlg':'nearest','bandList':bands,'outputType':gdal.GDT_Byte}
+            if dataset.GetRasterBand(1).DataType!=gdal.GDT_Byte:options['scaleParams']=[[]]
+            preview=gdal.Translate(str(output),dataset,options=gdal.TranslateOptions(**options))
+            if preview is None:raise ValueError('Не удалось создать превью.')
+            preview=None;dataset=None
+            storage=FileStorage(Path(config.MEDIA_ROOT)/'orthophotos');storage.upload_file(name,output)
+        with db.cursor(write=True) as cur:
+            cur.execute('UPDATE orthophotos SET preview_filename=%s WHERE id=%s RETURNING id',(name,ortho_id))
+            published=cur.fetchone()
+            event(cur,f'Превью ортофотоплана №{ortho_id} создано автоматически.')
+        if not published:storage.delete_file(name)
+    except Exception as exc:
+        with db.cursor(write=True) as cur:
+            event(cur,f'Оригинал №{ortho_id} сохранён; превью не создано: {type(exc).__name__}.')

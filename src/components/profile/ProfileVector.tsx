@@ -1,58 +1,26 @@
-import React, { FC, useCallback, useEffect, useState } from 'react';
-import { fetchVectorDbs, fetchVectorLayers, createVectorDb, createVectorLayer, VectorDbItem } from '../../utils/api';
-import { useAuth } from '../../hooks/useAuth';
-
-const ProfileVector: FC = () => {
-  const { user } = useAuth();
-  const editable = user?.role !== 'viewer';
-  const [databases, setDatabases] = useState<VectorDbItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
-  const [showDatabaseForm, setShowDatabaseForm] = useState(false);
-  const [databaseName, setDatabaseName] = useState('');
-  const [layerDatabase, setLayerDatabase] = useState<string | null>(null);
-  const [layerName, setLayerName] = useState('');
-  const [geometry, setGeometry] = useState('POINT');
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const dbs = await fetchVectorDbs();
-      const rows = await Promise.all(dbs.map(async db => {
-        try { return { ...db, layers: await fetchVectorLayers(db.name) }; }
-        catch { return { ...db, layers: [], status: 'error' as const }; }
-      }));
-      setDatabases(rows.sort((a,b) => a.name.localeCompare(b.name)));
-    } catch (e) { setError((e as Error).message); }
-    finally { setLoading(false); }
-  }, []);
-  useEffect(() => { load(); }, [load]);
-  async function createDatabase(event: React.FormEvent) {
-    event.preventDefault(); setPending(true); setError(''); setNotice('');
-    try { await createVectorDb(databaseName); setShowDatabaseForm(false); setDatabaseName(''); setNotice('База данных создана.'); await load(); }
-    catch (e) { setError((e as Error).message); }
-    finally { setPending(false); }
-  }
-  async function createLayer(event: React.FormEvent) {
-    event.preventDefault(); if (!layerDatabase) return;
-    setPending(true); setError(''); setNotice('');
-    try { await createVectorLayer(layerDatabase, layerName, geometry); setLayerDatabase(null); setLayerName(''); setNotice('Слой создан.'); await load(); }
-    catch (e) { setError((e as Error).message); }
-    finally { setPending(false); }
-  }
-  return <div className="ws-postgis">
-    <div className="ws-page-heading"><div><div className="ws-section-kicker">ВЕКТОРНЫЕ ДАННЫЕ</div><h2>PostGIS</h2><p>Базы данных, схемы и пространственные слои.</p></div>
-      <div className="ws-postgis-actions"><button className="ws-secondary" disabled={loading || pending} onClick={() => { setError(''); load(); }}>Обновить</button>{user?.role === 'admin' && <button className="ws-primary" disabled={pending} onClick={() => setShowDatabaseForm(value => !value)}>Создать базу</button>}</div></div>
-    {error && <p role="alert" className="ws-notice ws-error">{error}</p>}{notice && <p role="status" className="ws-notice">{notice}</p>}
-    {showDatabaseForm && user?.role === 'admin' && <form className="ws-postgis-form" onSubmit={createDatabase}><div><label htmlFor="postgis-db-name">Название базы</label><input id="postgis-db-name" value={databaseName} maxLength={63} required pattern="[a-zA-Z][a-zA-Z0-9]*" placeholder="Например, survey2026" disabled={pending} onChange={e => setDatabaseName(e.target.value)} /><small>Латинские буквы и цифры, первая — буква.</small></div><button className="ws-primary" disabled={pending}>Создать</button><button type="button" className="ws-secondary" disabled={pending} onClick={() => setShowDatabaseForm(false)}>Отмена</button></form>}
-    {loading ? <p role="status">Загрузка PostGIS…</p> : !databases.length ? <div className="ws-postgis-empty">Доступных баз данных пока нет.</div> : databases.map(db => {
-      const schemas = Array.from(new Set((db.layers || []).map(layer => layer.schema || 'public'))).sort();
-      return <article className="ws-postgis-database" key={db.id}><div className="ws-postgis-heading"><div><h3>{db.name}</h3><p>{db.type === 'internal' ? 'Локальная база' : 'Внешняя база'} · {(db.layers || []).length} слоёв</p></div><span className={`ws-badge ${db.status === 'connected' ? 'green' : ''}`}>{db.status === 'connected' ? 'Подключена' : 'Недоступна'}</span>{editable && db.status === 'connected' && <button className="ws-secondary" disabled={pending} onClick={() => { setLayerDatabase(db.name); setLayerName(''); setGeometry('POINT'); }}>Создать слой</button>}</div>
-        {layerDatabase === db.name && <form className="ws-postgis-form" onSubmit={createLayer}><div><label htmlFor="postgis-layer-name">Название таблицы</label><input id="postgis-layer-name" required maxLength={63} pattern="[a-zA-Z_][a-zA-Z0-9_]*" value={layerName} placeholder="Например, survey_points" disabled={pending} onChange={e => setLayerName(e.target.value)} /><small>Схема public · проекция EPSG:4326</small></div><div><label htmlFor="postgis-geometry">Геометрия</label><select id="postgis-geometry" value={geometry} disabled={pending} onChange={e => setGeometry(e.target.value)}><option value="POINT">Точки</option><option value="LINESTRING">Линии</option><option value="POLYGON">Полигоны</option></select></div><button className="ws-primary" disabled={pending}>Создать</button><button type="button" className="ws-secondary" disabled={pending} onClick={() => setLayerDatabase(null)}>Отмена</button></form>}
-        {db.status === 'error' ? <p role="status">Не удалось прочитать слои. Проверьте подключение и обновите список.</p> : !schemas.length ? <p className="ws-postgis-empty">Пространственных слоёв пока нет.</p> : schemas.map(schema => <section className="ws-postgis-schema" key={schema}><div className="ws-postgis-schema-title"><span>Схема</span><strong>{schema}</strong></div><div className="ws-postgis-table"><table><thead><tr><th>Таблица</th><th>Геометрия</th><th>Проекция</th><th>Объектов</th></tr></thead><tbody>{(db.layers || []).filter(layer => (layer.schema || 'public') === schema).sort((a,b) => a.tableName.localeCompare(b.tableName)).map(layer => <tr key={layer.id}><td><strong>{layer.tableName}</strong></td><td><span className="ws-badge">{layer.geometryType}</span></td><td>{layer.srid ? `EPSG:${layer.srid}` : 'Не задана'}</td><td>{layer.featureCount == null || layer.featureCount < 0 ? '—' : layer.featureCount.toLocaleString('ru-RU')}</td></tr>)}</tbody></table></div></section>)}
-      </article>;
-    })}
-  </div>;
+import React,{FC,useCallback,useEffect,useState} from 'react';
+import {fetchVectorDbs,fetchVectorLayers,createVectorDb,createVectorLayer,VectorDbItem} from '../../utils/api';
+import {workspaceRequest} from '../../utils/workspaceApi';
+import {useAuth} from '../../hooks/useAuth';
+interface Schema {name:string;can_delete:boolean;}
+type DatabaseView=VectorDbItem&{schemas:Schema[]};
+const ProfileVector:FC=()=>{
+ const {user}=useAuth();const editable=user?.role!=='viewer';const admin=user?.role==='admin';
+ const [databases,setDatabases]=useState<DatabaseView[]>([]);const [loading,setLoading]=useState(true);const [pending,setPending]=useState(false);const [error,setError]=useState('');const [notice,setNotice]=useState('');
+ const [form,setForm]=useState<{type:'database'|'schema'|'layer';db?:string;schema?:string}|null>(null);const [name,setName]=useState('');const [geometry,setGeometry]=useState('POINT');const [schema,setSchema]=useState('public');
+ const load=useCallback(async()=>{setLoading(true);try{const dbs=await fetchVectorDbs();const rows=await Promise.all(dbs.map(async db=>{try{const [layers,result]=await Promise.all([fetchVectorLayers(db.name),workspaceRequest<{schemas:Schema[]}>(`/vector/schemas/${encodeURIComponent(db.name)}`)]);return {...db,layers,schemas:result.schemas};}catch{return {...db,layers:[],schemas:[],status:'error' as const};}}));setDatabases(rows.sort((a,b)=>a.name.localeCompare(b.name)));}catch(e){setError((e as Error).message);}finally{setLoading(false);}},[]);
+ useEffect(()=>{load();},[load]);
+ function open(value:NonNullable<typeof form>){setForm(value);setName('');setSchema(value.schema||'public');setGeometry('POINT');}
+ async function run(action:()=>Promise<unknown>,message:string){setPending(true);setError('');setNotice('');try{await action();setNotice(message);setForm(null);await load();}catch(e){setError((e as Error).message);}finally{setPending(false);}}
+ function submit(e:React.FormEvent){e.preventDefault();if(!form)return;if(form.type==='database')run(()=>createVectorDb(name),'База данных создана.');else if(form.type==='schema')run(()=>workspaceRequest(`/vector/schemas/${encodeURIComponent(form.db!)}`,'POST',{name}),'Схема создана.');else run(()=>createVectorLayer(form.db!,name,geometry,schema),'Слой создан.');}
+ function remove(path:string,label:string){if(window.confirm(`Удалить ${label}? Данные будут удалены окончательно.`))run(()=>workspaceRequest(path,'DELETE'),'Удалено.');}
+ const path=(db:string)=>encodeURIComponent(db);
+ function editor(db?:DatabaseView){if(!form||(form.type==='database'?!!db:form.db!==db?.name))return null;return <form className="ws-postgis-form" onSubmit={submit}><div><label htmlFor="postgis-object-name">{form.type==='database'?'Название базы':form.type==='schema'?'Название схемы':'Название таблицы'}</label><input id="postgis-object-name" required maxLength={63} pattern={form.type==='database'?'[a-zA-Z][a-zA-Z0-9]*':'[a-zA-Z_][a-zA-Z0-9_]*'} value={name} disabled={pending} onChange={e=>setName(e.target.value)}/></div>{form.type==='layer'&&<><div><label htmlFor="postgis-layer-schema">Схема</label><select id="postgis-layer-schema" value={schema} onChange={e=>setSchema(e.target.value)}>{db?.schemas.map(s=><option key={s.name}>{s.name}</option>)}</select></div><div><label htmlFor="postgis-geometry">Геометрия</label><select id="postgis-geometry" value={geometry} onChange={e=>setGeometry(e.target.value)}><option value="POINT">Точки</option><option value="LINESTRING">Линии</option><option value="POLYGON">Полигоны</option></select></div></>}<button className="ws-primary" disabled={pending}>Создать</button><button type="button" className="ws-secondary" disabled={pending} onClick={()=>setForm(null)}>Отмена</button></form>;}
+ return <div className="ws-postgis"><div className="ws-page-heading"><div><h2>PostGIS</h2><p>Базы данных, схемы и пространственные слои.</p></div><div className="ws-postgis-actions"><button className="ws-secondary" disabled={loading||pending} onClick={load}>Обновить</button>{admin&&<button className="ws-primary" disabled={pending} onClick={()=>open({type:'database'})}>Создать базу</button>}</div></div>
+  {error&&<p role="alert" className="ws-notice ws-error">{error}</p>}{notice&&<p role="status" className="ws-notice">{notice}</p>}{editor()}
+  {loading?<p role="status">Загрузка PostGIS…</p>:databases.map(db=><article className="ws-postgis-database" key={db.id}><div className="ws-postgis-heading"><div><h3>{db.name}</h3><p>{db.layers?.length||0} слоёв · {db.schemas.length} схем</p></div><span className="ws-badge">{db.status==='connected'?'Подключена':'Недоступна'}</span>{editable&&db.status==='connected'&&<><button className="ws-secondary" disabled={pending} onClick={()=>open({type:'schema',db:db.name})}>Создать схему</button><button className="ws-secondary" disabled={pending} onClick={()=>open({type:'layer',db:db.name})}>Создать слой</button></>}{admin&&db.can_delete&&<button className="ws-secondary" disabled={pending} onClick={()=>remove(`/vector/databases/${path(db.name)}`,`базу «${db.name}»`)}>Удалить базу</button>}</div>{editor(db)}
+   {db.status==='error'?<p>Не удалось прочитать базу.</p>:db.schemas.map(s=><section className="ws-postgis-schema" key={s.name}><div className="ws-postgis-schema-title"><span>Схема</span><strong>{s.name}</strong>{admin&&s.can_delete&&<button className="ws-secondary" disabled={pending} onClick={()=>remove(`/vector/schemas/${path(db.name)}/${path(s.name)}`,`схему «${s.name}» (она должна быть пустой)`)}>Удалить схему</button>}</div>{!db.layers?.some(l=>l.schema===s.name)?<p className="ws-postgis-empty">Схема пуста.</p>:<div className="ws-postgis-table"><table><thead><tr><th>Таблица</th><th>Геометрия</th><th>Проекция</th><th>Объектов</th>{admin&&<th>Действия</th>}</tr></thead><tbody>{db.layers?.filter(l=>l.schema===s.name).map(layer=><tr key={layer.id}><td><strong>{layer.tableName}</strong></td><td>{layer.geometryType}</td><td>EPSG:{layer.srid||'—'}</td><td>{layer.featureCount>=0?layer.featureCount.toLocaleString('ru-RU'):'—'}</td>{admin&&<td>{layer.can_delete!==false&&<button className="ws-secondary" disabled={pending} aria-label={`Удалить слой ${s.name}.${layer.tableName}`} onClick={()=>remove(`/vector/layers/${path(db.name)}/${path(s.name)}/${path(layer.tableName)}`,`слой «${s.name}.${layer.tableName}»`)}>Удалить слой</button>}</td>}</tr>)}</tbody></table></div>}</section>)}
+  </article>)}
+ </div>;
 };
 export default ProfileVector;

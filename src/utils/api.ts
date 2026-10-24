@@ -31,6 +31,7 @@ export interface PanoItem {
 
 // Ортофотопланы
 export interface OrthoItem {
+  display_name?: string;
   id: number;
   filename: string;
   url: string;
@@ -48,6 +49,7 @@ export interface OrthoItem {
     west: number;
   } | null;
   crs?: string;        
+  crs_name?: string;
   display_ready?: boolean;
   is_cog?: boolean; // Статус COG
   upload_date?: string;
@@ -76,6 +78,7 @@ export interface VectorLayerItem {
   geometryType: string;
   featureCount: number;
   srid?: number;
+  can_delete?: boolean;
 }
 
 export interface VectorDbItem {
@@ -86,6 +89,7 @@ export interface VectorDbItem {
   status: 'connected' | 'error';
   type: 'internal' | 'external';
   layers?: VectorLayerItem[];
+  can_delete?: boolean;
 }
 
 // Bounding Box для запросов по области
@@ -253,8 +257,8 @@ export async function getTaskStatus(taskId: string): Promise<TaskStatusResponse>
   return apiGet<TaskStatusResponse>(`/api/tasks/${taskId}`);
 }
 
-export async function reprojectOrtho(id: number): Promise<TaskStartResponse> {
-  return apiPost<TaskStartResponse>(`/api/orthophotos/${id}/reproject`);
+export async function reprojectOrtho(id: number, target_crs: string = "EPSG:3857"): Promise<TaskStartResponse> {
+  return apiPost<TaskStartResponse>(`/api/orthophotos/${id}/reproject`, {target_crs});
 }
 
 export async function processOrthoCog(id: number): Promise<TaskStartResponse> {
@@ -287,9 +291,10 @@ export async function fetchVectorLayers(dbName: string): Promise<VectorLayerItem
 export async function createVectorLayer(
   dbName: string, 
   tableName: string, 
-  geomType: string
+  geomType: string,
+  schema = "public"
 ): Promise<ApiOk> {
-  return apiPost<ApiOk>("/api/vector/layers/create", { dbName, tableName, geomType });
+  return apiPost<ApiOk>("/api/vector/layers/create", { dbName, tableName, geomType, schema });
 }
 
 export async function fetchLayerData(

@@ -1751,7 +1751,6 @@ h3 { margin: 0; color: var(--color-text); }
 /* Основной контейнер */
 .ortho-container {
   overflow-y: auto;
-  max-height: calc(100vh - 180px);
   display: flex;
   flex-direction: column;
 }
@@ -2458,3 +2457,45 @@ h3 { margin: 0; color: var(--color-text); }
   z-index: 2000;
   pointer-events: none; /* Чтобы не перекрывал клики по карте */
 }
+/* The orthophoto catalog uses the full workspace height; pages contain 50 rows. */
+.ortho-container { max-height: none; min-height: 0; overflow: visible; display: flex; flex-direction: column; }
+.ortho-container .ortho-table-wrapper { flex: 1; min-height: 0; max-height: none; overflow: auto; }
+.ortho-container .ws-pagination { margin-top: auto; padding-top: 16px; }
+
+.ws-column-settings { margin: 12px 0; padding: 16px; border: 1px solid var(--color-border, #ddd); border-radius: 10px; }
+.ws-column-setting { display: flex; align-items: center; gap: 8px; padding: 4px 0; max-width: 460px; }
+.ws-column-setting label { flex: 1; display: flex; align-items: center; gap: 8px; }
+
+.ortho-container .preview-wrapper { width: 148px; height: 94px; padding: 6px; box-sizing: border-box; border: 1px solid var(--color-border, #dce3e9); border-radius: 12px; background: linear-gradient(145deg, var(--color-surface, #f8fafc), var(--color-bg, #e7edf3)); box-shadow: 0 3px 10px #0f172a0c; }
+.ortho-container .preview-image { width: 100%; height: 100%; object-fit: contain; border-radius: 7px; transition: transform .2s ease; }
+.ortho-container .preview-wrapper:hover .preview-image { transform: scale(1.04); }
+.ortho-edit-menu { position: relative; }
+.ortho-edit-actions { position: absolute; z-index: 20; top: calc(100% + 8px); left: 0; min-width: 240px; display: grid; gap: 6px; padding: 10px; border: 1px solid var(--color-border, #ddd); border-radius: 12px; background: var(--color-bg, #fff); box-shadow: 0 10px 30px #0002; }
+.ortho-edit-actions a { padding: 10px; }
+.ws-media-count { padding: 8px 0; }
+
+/* Orthophoto catalog: image and title form a single compact identity cell. */
+.ortho-container .ortho-header-actions {display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;}
+.ortho-upload {margin-left:auto;text-decoration:none;white-space:nowrap;}
+.ortho-container .ortho-title-column {min-width:340px;}
+.ortho-identity {display:flex;align-items:center;gap:16px;min-width:300px;}
+.ortho-container .ortho-identity .preview-wrapper {flex:0 0 112px;width:112px;height:76px;padding:0;border-radius:8px;background:#111827;box-shadow:none;overflow:hidden;}
+.ortho-container .ortho-identity .preview-image {display:block;width:100%;height:100%;object-fit:contain;border-radius:0;}
+.ortho-title {display:flex;flex-direction:column;gap:6px;min-width:0;max-width:360px;}
+.ortho-title strong {font-size:14px;line-height:1.4;font-weight:600;overflow-wrap:anywhere;}
+.ortho-title small {font-size:12px;line-height:1.4;color:var(--color-text-light);overflow-wrap:anywhere;}
+.ortho-container .ortho-status {min-width:150px;max-width:200px;}
+.ortho-status-text {font-size:13px;line-height:1.5;color:var(--color-text-light);}
+.ortho-container .cell-bounds {font-size:12px;font-variant-numeric:tabular-nums;line-height:1.5;white-space:nowrap;}
+.ortho-editor {margin:0 0 20px;max-width:640px;}
+.ortho-editor h3 {margin-top:0;}
+.ortho-editor label {display:flex;flex-direction:column;gap:8px;margin-bottom:16px;}
+.ortho-editor input,.ortho-editor select {width:100%;padding:10px;border:1px solid var(--color-border);border-radius:8px;color:inherit;background:var(--color-surface);}
+
+.settings-catalog h2 {margin:0 0 10px;font-size:20px;}
+.settings-catalog-description {color:var(--color-text-light);font-size:13px;line-height:1.7;margin-bottom:22px;}
+.settings-catalog-symbol {flex:0 0 64px;width:64px;height:48px;border-radius:8px;display:grid;place-items:center;background:var(--color-surface-alt);color:var(--color-primary);border:1px solid var(--color-border);font-weight:650;font-size:14px;}
+.settings-catalog-definition {display:block;max-width:360px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:var(--color-text-light);}
+.settings-catalog-type {font-size:13px;}
+.settings-catalog .ortho-editor {margin-top:20px;}
+.settings-catalog pre,.settings-catalog-url {overflow-wrap:anywhere;white-space:pre-wrap;font-size:12px;}

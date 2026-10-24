@@ -31,7 +31,7 @@ export const OrthoTileLayer = () => {
         return (
           <LayerPane key={id} name={`ortho-overlay-${id}`} style={{zIndex:400+layers.length-Math.max(order,0),opacity:presentation?.opacity??1}}><RasterTileLayer
             key={id}
-            telemetryKey={`ortho:${id}`} label={ortho.filename}
+            telemetryKey={`ortho:${id}`} label={ortho.display_name||ortho.filename}
             url={tileUrl}
             maxZoom={24}
             maxNativeZoom={21}

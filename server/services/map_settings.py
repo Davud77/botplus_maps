@@ -32,14 +32,14 @@ def initialize_catalogs(cursor):
         id INTEGER PRIMARY KEY CHECK(id=1), coordinate_system TEXT NOT NULL REFERENCES coordinate_systems(id),
         basemap TEXT NOT NULL REFERENCES basemaps(id)
     )''')
-    cursor.execute("INSERT INTO map_defaults VALUES (1,'EPSG:4326','google_maps') ON CONFLICT DO NOTHING")
+    cursor.execute("INSERT INTO map_defaults VALUES (1,'EPSG:4326','osm') ON CONFLICT DO NOTHING")
 
 
 def settings():
     with Database().cursor() as cursor:
-        cursor.execute('SELECT * FROM coordinate_systems ORDER BY builtin DESC,name')
+        cursor.execute("SELECT * FROM coordinate_systems ORDER BY (id='EPSG:4326') DESC,builtin DESC,name")
         crs = cursor.fetchall()
-        cursor.execute('SELECT * FROM basemaps ORDER BY builtin DESC,name')
+        cursor.execute("SELECT * FROM basemaps ORDER BY (id='osm') DESC,builtin DESC,name")
         basemaps = cursor.fetchall()
         cursor.execute('SELECT coordinate_system,basemap FROM map_defaults WHERE id=1')
         defaults = cursor.fetchone()
@@ -98,3 +98,31 @@ def validate_basemap(data):
     if data.get('scheme','xyz') not in ['xyz','tms'] or type(data.get('max_zoom',22)) is not int or not 0<=data.get('max_zoom',22)<=24:
         abort(400,description='Проверьте схему тайлов и максимальный масштаб (0–24).')
     return name.strip(),url,escape(attribution),data.get('scheme','xyz'),data.get('max_zoom',22)
+
+
+def ensure_projection(cursor,definition):
+    """Keep stable catalog IDs on every imported raster; names are read at display time."""
+    from osgeo import osr
+    cursor.execute('SELECT pg_advisory_xact_lock(%s)',(941027005,))
+    if definition:
+        cursor.execute('SELECT * FROM coordinate_systems WHERE id=%s',(definition,))
+        known=cursor.fetchone()
+        if known:return dict(known)
+    source=None
+    if definition and definition!='Unknown':
+        try:
+            candidate=osr.SpatialReference()
+            if candidate.SetFromUserInput(definition)==0:source=candidate
+        except RuntimeError:pass
+    if source:
+        cursor.execute("SELECT * FROM coordinate_systems WHERE definition<>'' ORDER BY builtin DESC,id")
+        for row in cursor.fetchall():
+            candidate=osr.SpatialReference()
+            try:
+                if candidate.SetFromUserInput(row['definition'])==0 and source.IsSame(candidate):return dict(row)
+            except RuntimeError:continue
+    cursor.execute("SELECT nextval('unknown_projection_sequence') AS number")
+    name='unknown_'+str(cursor.fetchone()['number'])
+    cursor.execute('INSERT INTO coordinate_systems(id,name,definition,resolved) VALUES (%s,%s,%s,%s) RETURNING *',
+                   (name,name,source.ExportToWkt() if source else '',source is not None))
+    return dict(cursor.fetchone())

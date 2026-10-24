@@ -68,3 +68,10 @@ test('a texture failure is visible and the downloaded image remains available in
   expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   expect(fetch).toHaveBeenCalledTimes(2);
 });
+
+test('public viewer requests only publication-scoped metadata and image',async()=>{
+ responses('photo',2704,2028);
+ render(<PanoramaViewer markerId="7" endpoint="/api/public/maps/shared/panoramas/7" isExpanded={false}/>);
+ await screen.findByRole('img');
+ expect(fetch.mock.calls.map(([url])=>url)).toEqual(['/api/public/maps/shared/panoramas/7','/api/public/maps/shared/panoramas/7/image']);
+});

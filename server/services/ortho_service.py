@@ -10,6 +10,7 @@ from io import BytesIO
 from PIL import Image
 from osgeo import gdal
 from models.ortho import Ortho
+from werkzeug.utils import secure_filename
 import config  # [NEW] Импортируем конфигурацию для доступа к .env
 
 # Включаем исключения GDAL, чтобы отлавливать ошибки в try/except
@@ -30,9 +31,15 @@ class OrthoService:
             try: os.makedirs(self.temp_dir, exist_ok=True)
             except: pass
 
+    def catalog_projection(self,definition):
+        from services.map_settings import ensure_projection
+        with self.db.cursor(write=True) as cur:return ensure_projection(cur,definition)['id']
+
     def get_all(self):
         orthos = self.manager.get_all_orthos()
         with self.db.cursor() as cur:
+            cur.execute('SELECT id,name FROM coordinate_systems')
+            projection_names={row['id']:row['name'] for row in cur.fetchall()}
             cur.execute("""SELECT ortho_id FROM import_assets WHERE asset ? 'display'
                 UNION ALL SELECT ortho_id FROM raster_sources s WHERE asset ? 'display'
                 AND NOT EXISTS(SELECT 1 FROM import_assets a WHERE a.ortho_id=s.ortho_id)""")
@@ -51,11 +58,13 @@ class OrthoService:
             results.append({
                 "id": o.id,
                 "filename": o.filename,
+                "display_name": getattr(o,"display_name",None) or o.filename,
                 "url": f"/api/orthophotos/{o.id}/download",
                 "preview_url": f"/api/orthophotos/{o.id}/preview" if getattr(o, 'preview_filename', None) else None,
                 "bounds": b if b else {"north": 0, "south": 0, "east": 0, "west": 0},
                 "wgs84_bounds": getattr(o, 'wgs84_bounds', None),
                 "crs": crs_val,
+                "crs_name": projection_names.get(crs_val,crs_val),
                 "is_visible": getattr(o, 'is_visible', False),
                 "is_cog": getattr(o, 'is_cog', False),
                 "display_ready": o.id in display_ready,
@@ -92,7 +101,7 @@ class OrthoService:
 
                 # 1. Сбор метаданных
                 bounds = self.gdal.get_bounds(temp_file_path)
-                crs = self.gdal.get_crs(temp_file_path)
+                crs = self.catalog_projection(self.gdal.get_crs(temp_file_path))
                 is_cog = self.gdal.check_is_cog(temp_file_path)
                 footprint_wkt = self.gdal.get_footprint_wkt(temp_file_path)
                 logs.append(f"Границы: {bounds}, CRS: {crs}, COG: {is_cog}")
@@ -169,18 +178,25 @@ class OrthoService:
         ortho = self.manager.get_ortho_by_id(ortho_id)
         if not ortho: return None
 
-        task_id = str(uuid.uuid4())
+        if not getattr(self,'worker_task_id',None):
+            from flask import g
+            import import_jobs
+            return str(import_jobs.enqueue_operation(g.current_user_id,'cog','COG: '+ortho.filename,{'ortho_id':ortho_id},self.db)['id'])
+        task_id = self.worker_task_id
         self.tasks.save_state(task_id, {"status": "pending", "progress": 0, "filename": ortho.filename})
 
         def worker():
-            local_path = os.path.join(self.temp_dir, ortho.filename)
+            local_path = os.path.join(self.temp_dir, "source.tif")
             cog_path = None
             try:
                 self.tasks.save_state(task_id, {"status": "processing", "progress": 2, "message": "Подготовка рабочего файла..."})
-                self.storage.download_file(ortho.filename, local_path)
+                import import_jobs, shutil
+                asset=import_jobs.asset_record(ortho_id,self.db)
+                if asset:shutil.copyfile(import_jobs.asset_path(asset),local_path)
+                else:self.storage.download_file(ortho.filename, local_path)
 
-                name_part, ext = os.path.splitext(ortho.filename)
-                new_filename = f"{name_part}_v2.tif" if "_cog" in name_part else f"{name_part}_cog.tif"
+                name_part, ext = os.path.splitext(secure_filename(ortho.filename) or "orthophoto.tif")
+                new_filename = f"{name_part}_{task_id[:8]}_cog.tif"
                 cog_path = os.path.join(self.temp_dir, new_filename)
 
                 # Нативный GDAL с коллбэком прогресса
@@ -205,7 +221,7 @@ class OrthoService:
 
                 # Обновляем метаданные и загружаем результат
                 bounds = self.gdal.get_bounds(cog_path)
-                crs = self.gdal.get_crs(cog_path)
+                crs = self.catalog_projection(self.gdal.get_crs(cog_path))
                 is_cog = self.gdal.check_is_cog(cog_path)
                 geom_wkt = self.gdal.get_footprint_wkt(cog_path)
 
@@ -235,34 +251,50 @@ class OrthoService:
                     try: os.remove(cog_path)
                     except: pass
 
-        threading.Thread(target=worker).start()
+        worker()
         return task_id
 
-    def start_reproject_process(self, ortho_id):
-        """Перепроецирование в Web Mercator (EPSG:3857) с сохранением COG"""
+    def start_reproject_process(self, ortho_id, target_crs="EPSG:3857"):
+        """Create a reprojected copy in a selected catalog CRS."""
+        with self.db.cursor() as cur:
+            cur.execute('SELECT * FROM coordinate_systems WHERE id=%s',(target_crs,))
+            target=cur.fetchone()
+        if not target or not target['definition']:raise ValueError('Для целевой проекции не задано определение.')
         ortho = self.manager.get_ortho_by_id(ortho_id)
         if not ortho: return None
 
-        task_id = str(uuid.uuid4())
+        if not getattr(self,'worker_task_id',None):
+            from flask import g
+            import import_jobs
+            return str(import_jobs.enqueue_operation(g.current_user_id,'reproject','Смена системы координат: '+ortho.filename,{'ortho_id':ortho_id,'target_crs':target_crs},self.db)['id'])
+        task_id = self.worker_task_id
         self.tasks.save_state(task_id, {"status": "pending", "progress": 0, "filename": ortho.filename})
 
         def worker():
-            local_path = os.path.join(self.temp_dir, ortho.filename)
+            local_path = os.path.join(self.temp_dir, "source.tif")
             output_path = None
             try:
                 self.tasks.save_state(task_id, {"status": "processing", "progress": 2, "message": "Подготовка рабочего файла..."})
-                self.storage.download_file(ortho.filename, local_path)
+                import import_jobs, shutil
+                asset=import_jobs.asset_record(ortho_id,self.db)
+                if asset:shutil.copyfile(import_jobs.asset_path(asset),local_path)
+                else:self.storage.download_file(ortho.filename, local_path)
 
-                name_part, ext = os.path.splitext(ortho.filename)
+                name_part, ext = os.path.splitext(secure_filename(ortho.filename) or "orthophoto.tif")
                 clean_name = name_part.replace("_cog", "").replace("_3857", "")
-                new_filename = f"{clean_name}_3857_cog.tif"
+                new_filename = f"{clean_name}_{task_id[:8]}_reprojected.tif"
                 output_path = os.path.join(self.temp_dir, new_filename)
 
                 # Нативный GDAL Warp с коллбэком прогресса
-                cb = self._create_progress_callback(task_id, message="Перепроецирование в 3857...")
+                cb = self._create_progress_callback(task_id, message="Перепроецирование: "+target["name"])
 
+                with self.db.cursor() as cur:
+                    cur.execute('SELECT definition FROM coordinate_systems WHERE id=%s',(ortho.crs,))
+                    source_projection=cur.fetchone()
+                source_options={'srcSRS':source_projection['definition']} if source_projection and source_projection['definition'] else {}
                 warp_options = gdal.WarpOptions(
-                    dstSRS="EPSG:3857",
+                    **source_options,
+                    dstSRS=target["definition"],
                     resampleAlg="cubic",
                     format="COG",
                     creationOptions=[
@@ -290,7 +322,7 @@ class OrthoService:
                     filename=new_filename,
                     bounds=json.dumps(new_bounds),
                     url=None,
-                    crs="EPSG:3857",
+                    crs=target_crs,
                     is_visible=False,
                     is_cog=is_cog,
                     geometry_wkt=geom_wkt,
@@ -310,7 +342,7 @@ class OrthoService:
                     try: os.remove(output_path)
                     except: pass
 
-        threading.Thread(target=worker).start()
+        worker()
         return task_id
 
     def start_preview_process(self, ortho_id):
@@ -318,18 +350,25 @@ class OrthoService:
         ortho = self.manager.get_ortho_by_id(ortho_id)
         if not ortho: return None
 
-        task_id = str(uuid.uuid4())
+        if not getattr(self,'worker_task_id',None):
+            from flask import g
+            import import_jobs
+            return str(import_jobs.enqueue_operation(g.current_user_id,'preview','Создание превью: '+ortho.filename,{'ortho_id':ortho_id},self.db)['id'])
+        task_id = self.worker_task_id
         self.tasks.save_state(task_id, {"status": "pending", "progress": 0, "filename": ortho.filename})
 
         def worker():
-            local_path = os.path.join(self.temp_dir, ortho.filename)
+            local_path = os.path.join(self.temp_dir, "source.tif")
             preview_path = None
             try:
                 self.tasks.save_state(task_id, {"status": "processing", "progress": 10, "message": "Скачивание исходника..."})
-                self.storage.download_file(ortho.filename, local_path)
+                import import_jobs, shutil
+                asset=import_jobs.asset_record(ortho_id,self.db)
+                if asset:shutil.copyfile(import_jobs.asset_path(asset),local_path)
+                else:self.storage.download_file(ortho.filename, local_path)
 
-                name_part, ext = os.path.splitext(ortho.filename)
-                preview_filename = f"{name_part}_preview.png"
+                name_part, ext = os.path.splitext(secure_filename(ortho.filename) or "orthophoto.tif")
+                preview_filename = f"{name_part}_{task_id[:8]}_preview.png"
                 preview_path = os.path.join(self.temp_dir, preview_filename)
 
                 cb = self._create_progress_callback(task_id, message="Генерация превью...")
@@ -362,7 +401,7 @@ class OrthoService:
                     try: os.remove(preview_path)
                     except: pass
 
-        threading.Thread(target=worker).start()
+        worker()
         return task_id
 
     def proxy_tile(self, ortho_id, z, x, y, scale=1, image_format='png', metrics=None):

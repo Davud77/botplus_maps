@@ -70,35 +70,27 @@ class OrthoController:
         if self.local_asset(ortho_id): abort(409,description='Локальный слой уже подготовлен импортом. Для другой подготовки создайте новое задание; оригинал не меняется.')
 
     def process_ortho_cog(self, ortho_id):
-        self.require_legacy(ortho_id)
-        # 1. Проверяем состояние файла перед запуском
-        ortho = self.ortho_manager.get_ortho_by_id(ortho_id)
-        if not ortho:
-            return jsonify({"error": "Ortho not found"}), 404
-
-        if getattr(ortho, 'is_cog', False):
-            return jsonify({"error": "Файл уже является COG. Конвертация не требуется."}), 400
-
-        # 2. Запускаем задачу
-        task_id = self.ortho_service.start_cog_process(ortho_id)
-        if not task_id:
-            return jsonify({"error": "Не удалось запустить процесс"}), 500
-
-        return jsonify({"task_id": task_id, "status": "started"}), 202
+        from controllers.import_controller import editor
+        import display_jobs
+        editor()
+        if not self.ortho_manager.get_ortho_by_id(ortho_id):abort(404)
+        try:job=display_jobs.enqueue(g.current_user_id,ortho_id,db=self.db)
+        except (ValueError,OSError) as error:abort(400,description=str(error))
+        return jsonify(task_id=str(job['id']),status=job['status']),202
 
     def reproject_ortho(self, ortho_id):
-        self.require_legacy(ortho_id)
         # 1. Проверяем проекцию файла перед запуском
         ortho = self.ortho_manager.get_ortho_by_id(ortho_id)
         if not ortho:
             return jsonify({"error": "Ortho not found"}), 404
 
-        crs = getattr(ortho, 'crs', '')
-        if crs and ("3857" in crs or "Pseudo-Mercator" in crs or "Google" in crs):
-            return jsonify({"error": "Файл уже находится в проекции Web Mercator (EPSG:3857)."}), 400
-
-        # 2. Запускаем задачу
-        task_id = self.ortho_service.start_reproject_process(ortho_id)
+        from services.map_settings import coordinate_system
+        target=(request.get_json(silent=True) or {}).get('target_crs','EPSG:3857')
+        if not isinstance(target,str):abort(400)
+        projection=coordinate_system(target)
+        if not projection['definition']:abort(400,description='Сначала задайте определение целевой проекции в настройках карт.')
+        if ortho.crs==target:abort(400,description='Ортофотоплан уже использует выбранную проекцию.')
+        task_id = self.ortho_service.start_reproject_process(ortho_id,target)
         if not task_id:
              return jsonify({"error": "Не удалось запустить процесс"}), 500
 
@@ -110,12 +102,16 @@ class OrthoController:
             return jsonify({"error": "Not found"}), 404
 
         b = json.loads(ortho.bounds) if ortho.bounds else None
+        with self.db.cursor() as cur:
+            cur.execute('SELECT name FROM coordinate_systems WHERE id=%s',(ortho.crs,));projection=cur.fetchone()
         return jsonify({
             "id": ortho.id,
             "filename": ortho.filename,
+            "display_name": getattr(ortho,"display_name",None) or ortho.filename,
             "url": f"/api/orthophotos/{ortho.id}/download",
             "bounds": b,
             "crs": getattr(ortho, 'crs', None),
+            "crs_name": projection['name'] if projection else ortho.crs,
             "is_visible": getattr(ortho, 'is_visible', False)
         }), 200
 
@@ -132,7 +128,6 @@ class OrthoController:
 
     # [NEW] Хендлеры для превью
     def generate_preview(self, ortho_id):
-        self.require_legacy(ortho_id)
         task_id = self.ortho_service.start_preview_process(ortho_id)
         if not task_id:
             return jsonify({"error": "Ortho not found or failed to start"}), 404
@@ -145,8 +140,15 @@ class OrthoController:
         return self.storage_service.send_file(ortho.preview_filename)
 
     def update_ortho(self, ortho_id):
+        data=request.get_json(silent=True)
+        if not isinstance(data,dict):abort(400)
+        if not self.ortho_manager.get_ortho_by_id(ortho_id):abort(404)
+        if 'display_name' in data:
+            name=data['display_name']
+            if not isinstance(name,str) or not 1<=len(name.strip())<=240:abort(400,description='Название должно содержать от 1 до 240 символов.')
+            data['display_name']=name.strip()
         try:
-            self.ortho_manager.update_ortho(ortho_id, request.json)
+            self.ortho_manager.update_ortho(ortho_id, data)
             return jsonify({"status": "success"}), 200
         except Exception as e:
             return jsonify({"error": str(e)}), 500

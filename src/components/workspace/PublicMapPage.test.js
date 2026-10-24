@@ -1,0 +1,21 @@
+import React from 'react';
+import {render,screen,fireEvent} from '@testing-library/react';
+import '@testing-library/jest-dom';
+jest.mock('react-router-dom',()=>({useParams:()=>({slug:'shared'}),Link:({to,...props})=>require('react').createElement('a',{href:to,...props})}),{virtual:true});
+import PublicMapPage from './PublicMapPage';
+import {workspaceRequest} from '../../utils/workspaceApi';
+jest.mock('../../utils/workspaceApi',()=>({workspaceRequest:jest.fn(),legacyBasemap:()=>null}));
+jest.mock('react-leaflet',()=>({MapContainer:({children})=><div>{children}</div>,TileLayer:()=>null}));
+jest.mock('../maps/layers/RasterTileLayer',()=>({__esModule:true,default:()=>null,RasterLoadingStatus:()=>null}));
+jest.mock('../maps/layers/VectorTileLayer',()=>()=>null);
+jest.mock('../maps/layers/LayerPane',()=>({LayerPane:({children})=><div>{children}</div>}));
+jest.mock('../maps/layers/PanoLayer',()=>({endpoint,coverageEndpoint,options,onMarkerClick})=><button onClick={()=>onMarkerClick({id:'7'})} data-color={options.color} data-coverage={coverageEndpoint}>{endpoint}</button>);
+jest.mock('../maps/ui/viewers/PanoramaViewer',()=>({endpoint})=><output>{endpoint}</output>);
+test('published panoramas use public routes, saved styling and a closable viewer',async()=>{
+ workspaceRequest.mockResolvedValue({map:{title:'Публикация',config:{view:{center:[43,47],zoom:18},base_layer:'none',orthophoto_ids:[],vector_layers:[],show_panoramas:true,layer_settings:[{key:'panoramas',panorama:{color:'#112233'}}]}}});
+ render(<PublicMapPage/>);
+ const layer=await screen.findByRole('button',{name:'/api/public/maps/shared/panoramas'});
+ expect(layer).toHaveAttribute('data-color','#112233');expect(layer).toHaveAttribute('data-coverage','/api/public/maps/shared/panoramas/coverage');
+ fireEvent.click(layer);expect(screen.getByText('/api/public/maps/shared/panoramas/7')).toBeInTheDocument();
+ fireEvent.click(screen.getByRole('button',{name:'Закрыть панораму'}));expect(screen.queryByText('/api/public/maps/shared/panoramas/7')).toBeNull();
+});

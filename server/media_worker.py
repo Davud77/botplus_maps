@@ -16,7 +16,7 @@ from services.media_metadata import read_media_metadata
 from controllers.pano_controller import PanoController
 from werkzeug.utils import secure_filename
 
-STOP = threading.Event()
+from job_worker import STOP
 log = logging.getLogger(__name__)
 
 
@@ -24,7 +24,7 @@ def source_path(root_id, key):
     if not isinstance(root_id,str) or not isinstance(key,str) or '\\' in key or '\x00' in key: raise ValueError('Укажите путь внутри источника.')
     relative=PurePosixPath(key or '.')
     if relative.is_absolute() or '..' in relative.parts: raise ValueError('Разрешён только относительный путь.')
-    root=import_jobs.roots().get(root_id)
+    root=(Path(config.MEDIA_ROOT)/'panoramas'/'incoming') if root_id=='__media_uploads' else import_jobs.roots().get(root_id)
     if root is None: raise ValueError('Источник не подключён.')
     root=root.resolve(strict=True);path=(root/str(relative)).resolve(strict=True)
     if not path.is_relative_to(root): raise ValueError('Файл находится вне подключённого источника.')
@@ -72,6 +72,8 @@ def execute(job,db=None):
     parser=object.__new__(PanoController);last_error=''
     try:
         source=job['source'];root,path=source_path(source['root_id'],source['key'])
+        total=sum(1 for _ in files(path))
+        with db.cursor(write=True) as c:c.execute('UPDATE media_import_jobs SET total=%s WHERE id=%s AND lease_token=%s',(total,jid,token))
         for original in files(path):
             if STOP.is_set() or lost.is_set():raise InterruptedError('Обработка прервана; повтор продолжит импорт без дубликатов.')
             counts['processed']+=1;new_key=None;published=False
@@ -86,7 +88,7 @@ def execute(job,db=None):
                 if source.get('only_360',True) and metadata['media_type']!='panorama':counts['skipped']+=1;continue
                 with original.open('rb') as stream:lat,lon,alt,direction,dt=parser._parse_exif_data(stream)
                 if lat is None or lon is None:raise ValueError('Нет GPS-координат в EXIF.')
-                uid=uuid4().hex;safe=secure_filename(original.name)[:160] or 'panorama.jpg';new_key=f'{uid[:2]}/{uid[2:4]}/{uid}_{safe}'
+                uid=uuid4().hex;safe=secure_filename(source.get('title') or original.name)[:160] or 'panorama.jpg';new_key=f'{uid[:2]}/{uid[2:4]}/{uid}_{safe}'
                 if import_jobs.fingerprint(original)!=before:raise ValueError('Исходник изменился во время импорта.')
                 with db.cursor(write=True) as c:
                     c.execute("SELECT id FROM media_import_jobs WHERE id=%s AND lease_token=%s AND lease_until>NOW() AND NOT cancel_requested FOR UPDATE",(jid,token))
@@ -98,33 +100,36 @@ def execute(job,db=None):
                         c.execute('''INSERT INTO public.photos_4326 (filename,path,geom,latitude,longitude,altitude,direction,"timestamp",directory,media_type,width,height,source_ref)
                             VALUES (%s,%s,ST_SetSRID(ST_MakePoint(%s,%s,%s),4326),%s,%s,%s,%s,%s,'panoramas',%s,%s,%s,%s) RETURNING id''',
                             (new_key,'panoramas/'+new_key,float(lon),float(lat),float(alt or 0),str(lat),str(lon),alt,direction,dt,metadata['media_type'],metadata['width'],metadata['height'],Json({'root_id':source['root_id'],'key':key,'fingerprint':before})))
-                        identifier=c.fetchone()['id'];c.execute('INSERT INTO media_import_sources VALUES (%s,%s)',(sig,identifier));published=True;counts['imported']+=1
+                        identifier=c.fetchone()['id']
+                        if source.get('tags'):c.execute('UPDATE public.photos_4326 SET tags=%s WHERE id=%s',(source['tags'],identifier))
+                        c.execute('INSERT INTO media_import_sources VALUES (%s,%s)',(sig,identifier));published=True;counts['imported']+=1
             except InterruptedError:raise
             except Exception as e:
                 counts['failed']+=1;last_error=f'{original.name}: {type(e).__name__}'
                 log.warning('Media import %s failed for one source: %s',jid,type(e).__name__)
+                with db.cursor(write=True) as c:c.execute("INSERT INTO system_events(service,level,message) VALUES ('media-worker','error',%s)",(last_error,))
             finally:
                 with db.cursor(write=True) as c:
                     c.execute('''UPDATE media_import_jobs SET processed=%s,imported=%s,skipped=%s,failed=%s,message=%s,updated_at=NOW()
                         WHERE id=%s AND lease_token=%s''',(counts['processed'],counts['imported'],counts['skipped'],counts['failed'],last_error or 'Импорт файлов с NAS',jid,token))
+            if counts['processed']%100==0:
+                from services.panorama_coverage import refresh
+                refresh(db)
+        from services.panorama_coverage import refresh
+        refresh(db)
         with db.cursor(write=True) as c:
+            c.execute("INSERT INTO system_events(service,message) VALUES ('media-worker',%s)",(f'Импорт панорам завершён: {counts}',))
             c.execute("UPDATE media_import_jobs SET status='succeeded',message=%s,lease_token=NULL,lease_until=NULL,updated_at=NOW() WHERE id=%s AND lease_token=%s AND lease_until>NOW() AND NOT cancel_requested",('Завершено с ошибками' if counts['failed'] else 'Импорт завершён',jid,token))
     except Exception as e:
         with db.cursor(write=True) as c:
+            c.execute("INSERT INTO system_events(service,level,message) VALUES ('media-worker','error',%s)",(f'Задание {jid}: {type(e).__name__}',))
             c.execute("UPDATE media_import_jobs SET status=CASE WHEN cancel_requested THEN 'cancelled' WHEN %s THEN 'queued' ELSE 'failed' END,message=%s,lease_token=NULL,lease_until=NULL,updated_at=NOW() WHERE id=%s AND lease_token=%s",(STOP.is_set() or lost.is_set(),str(e)[:250] if isinstance(e,InterruptedError) else 'Источник недоступен. Проверьте подключение NAS.',jid,token))
     finally:done.set();thread.join(timeout=2)
 
 
 def main():
-    logging.basicConfig(level=logging.INFO)
-    signal.signal(signal.SIGTERM,lambda *_:STOP.set());signal.signal(signal.SIGINT,lambda *_:STOP.set())
-    db=Database()
-    while not STOP.is_set():
-        try:
-            job=claim(db)
-            if job:execute(job,db)
-            else:STOP.wait(2)
-        except Exception:log.exception('Media queue unavailable');STOP.wait(5)
+    from job_worker import main as run_queue
+    run_queue()
 
 
 if __name__=='__main__':main()

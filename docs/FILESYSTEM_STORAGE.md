@@ -10,14 +10,12 @@ botplusmaps/
   system/work/
     media/panoramas/ab/cd/<uuid>_<имя>.jpg
     media/orthophotos/               # файлы прежних импортов и их превью
-    import-staging/                 # исходники веб-импорта растров
-    import-products/                # подготовленные COG
     legacy-uploads/                 # совместимые рабочие пути старого профиля
     temp/                           # временные файлы и multipart-spooling
     tasks/                          # статусы прежних операций
 ```
 
-`MEDIA_ROOT=/app/data/media`. Файлы фотографий и панорам размещаются в `panoramas`; отдельной новой модели фотоколлекций этот этап не добавляет. Современный растровый импорт сохраняет ссылки на разрешённые исходники в PostgreSQL: готовый COG может читаться напрямую из `projects/`, без копии. Неконвертированный GeoTIFF сохраняется как исходник, производный COG создаётся отдельно. Выбор CRS не переписывает оригинал.
+`MEDIA_ROOT=/app/data/media`. Файлы фотографий и панорам размещаются в `panoramas`; отдельной новой модели фотоколлекций этот этап не добавляет. Импорт из профиля копирует ортофотопланы в `media/orthophotos/originals`, а ссылки на сохранённые файлы записывает в PostgreSQL. Прежние слои со ссылками на `projects/` продолжают читаться. Неконвертированный GeoTIFF сохраняется как исходник, производный COG создаётся отдельно. Выбор CRS не переписывает оригинал.
 
 ## Подключение
 
@@ -27,15 +25,15 @@ botplusmaps/
 
 ```dotenv
 NAS_SOURCE_DIR=/srv/botplus/sources
-NAS_DATA_DIR=/srv/botplus/work
-NAS_UPLOADS_DIR=/srv/botplus/work/legacy-uploads
+NAS_DATA_DIR=/volume1/botplusmaps/system/work
+NAS_UPLOADS_DIR=/volume1/botplusmaps/system/work/legacy-uploads
 ```
 
 ```sh
-mkdir -p /srv/botplus/work/legacy-uploads /srv/botplus/work/temp
+mkdir -p /volume1/botplusmaps/system/work/legacy-uploads /volume1/botplusmaps/system/work/temp
 # Источник /srv/botplus/sources уже должен быть подключён с NAS.
 docker compose --env-file .env.local -f compose.local.yml -f compose.nas.yml config --quiet
-docker compose --env-file .env.local -f compose.local.yml -f compose.nas.yml up --build -d
+docker compose --env-file .env.local -f compose.local.yml -f compose.nas.yml up --build -d --remove-orphans
 ```
 
 Одинаковые пути `/sources/local` и `/app/data` обязательны в API/worker/TiTiler. БД остаётся в `local_postgres`, TiTiler не публикует порт. Overlay не меняет loopback-доступ приложения; LAN/HTTPS настраиваются отдельно.
@@ -70,3 +68,21 @@ python scripts/migrate_minio.py --target /app/data/media --apply
 ## Просмотр фото и панорам
 
 Обычные снимки отображаются плоско с сохранением пропорций и увеличением. Сферический просмотр используется для полных панорам 2:1 (GPano или крупный equirectangular экспорт). Для неоднозначного снимка 2:1 можно выбрать «Фото». Кадрированные панорамы другого формата отображаются как фото до отдельной подготовки. Разрешение сферической геометрии берётся из файла, а не фиксируется в 4000 пикселей. `display_name` в API скрывает технический UUID/путь; `filename` остаётся совместимым ключом хранения.
+
+
+### Единая очередь и ортофото
+
+Все worker-процессы выбирают задания из общей очереди по времени создания.
+Одновременно выполняется одно задание: импорт ортофото, COG, смена проекции,
+превью, подготовка для карты или импорт панорам. Закрытие страницы не останавливает работу.
+«Готово» скрывает завершённую карточку для пользователя, сохраняя запись и журналы.
+
+При `NAS_DATA_DIR=/volume1/botplusmaps/system/work` новые ортофото сохраняются в
+`/volume1/botplusmaps/system/work/media/orthophotos`: `originals/` для оригиналов,
+`products/` для производных; COG и перепроецированные слои также находятся внутри
+`orthophotos/`. NAS-оригиналы копируются worker-процессом до регистрации.
+Старые файлы в `import-staging/` и `import-products/` остаются доступны по прежним
+ссылкам; автоматический перенос существующих данных не выполняется.
+После обновления необходимо пересобрать приложение и перезапустить app и все worker-сервисы.
+
+Отдельный `display-worker` больше не нужен: задания подготовки для карты забирает общая очередь. При обновлении Compose используйте `--remove-orphans`, чтобы остановить прежний сервис.

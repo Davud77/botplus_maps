@@ -3,17 +3,37 @@ import '@testing-library/jest-dom';
 import {render,screen,fireEvent,waitFor} from '@testing-library/react';
 import TasksPanel from './TasksPanel';
 import {workspaceRequest} from '../../utils/workspaceApi';
+import {addOperationLog} from '../../utils/operationLogs';
 let mockRole='admin';
 jest.mock('../../hooks/useAuth',()=>({useAuth:()=>({user:{role:mockRole}})}));
 jest.mock('../../utils/workspaceApi',()=>({workspaceRequest:jest.fn()}));
-beforeEach(()=>{mockRole='admin';workspaceRequest.mockReset();workspaceRequest.mockImplementation(path=>Promise.resolve(path==='/system/logs'?{events:[{at:'Thu, 22 Oct 2026 10:00:00 GMT',service:'import',message:'Исходник зарегистрирован'}],services:[{at:'2026-10-22T11:00:00Z',service:'app',message:'Поздняя запись'}],collected_at:null}:path==='/imports/registered'?{items:[{ortho_id:7,filename:'survey.tif',projection_id:'unknown_1',warning:'Исходник',is_cog:false}]}:{jobs:[]}));});
-test('preparation starts only on explicit action and system logs live in tasks',async()=>{render(<TasksPanel/>);expect(await screen.findByText('survey.tif')).toBeInTheDocument();expect(workspaceRequest.mock.calls.some(([p,m])=>m==='POST')).toBe(false);expect(screen.queryByRole('log')).toBeNull();fireEvent.click(screen.getByRole('tab',{name:'Логи'}));expect(await screen.findByText('Исходник зарегистрирован')).toBeInTheDocument();expect(screen.queryByText('survey.tif')).toBeNull();const log=screen.getByRole('log').textContent;expect(log.indexOf('Поздняя запись')).toBeLessThan(log.indexOf('Исходник зарегистрирован'));fireEvent.click(screen.getByRole('tab',{name:'Задания'}));fireEvent.click(screen.getByRole('button',{name:'Подготовить отдельный COG'}));await waitFor(()=>expect(workspaceRequest).toHaveBeenCalledWith('/imports/rasters/7/prepare','POST',{}));});
-test('editor does not request administrator system logs',async()=>{mockRole='editor';render(<TasksPanel/>);await screen.findByText('survey.tif');expect(screen.queryByRole('heading',{name:'Системные журналы'})).toBeNull();expect(workspaceRequest.mock.calls.some(([p])=>p==='/system/logs')).toBe(false);});
-test('map preparation is a separate cancellable job and never starts on opening tasks',async()=>{
- const original=workspaceRequest.getMockImplementation();
- workspaceRequest.mockImplementation(path=>path==='/raster-display/jobs'?Promise.resolve({jobs:[{id:'map-job',title:'Для карты: survey.tif',status:'running',progress:35,message:'Подготовка производной'}]}):original(path));
- render(<TasksPanel/>);expect(await screen.findByText('Для карты: survey.tif')).toBeInTheDocument();
- expect(workspaceRequest.mock.calls.some(([p,m])=>m==='POST')).toBe(false);
- fireEvent.click(screen.getByRole('button',{name:'Отменить подготовку'}));
- await waitFor(()=>expect(workspaceRequest).toHaveBeenCalledWith('/raster-display/jobs/map-job/cancel','POST',{}));
+const jobs=[{kind:'import',id:'done',title:'Готовый слой',status:'succeeded',progress:100,message:'Готово'},
+ {kind:'media',id:'next',title:'Панорамы',status:'queued',progress:null,message:'Ожидание'},
+ {kind:'display',id:'active',title:'Подготовка карты',status:'running',progress:35,message:'Обработка'}];
+beforeEach(()=>{mockRole='admin';sessionStorage.clear();workspaceRequest.mockReset();workspaceRequest.mockImplementation(path=>Promise.resolve(path==='/system/logs'?{events:[{at:'2026-10-22T10:00:00Z',service:'import',message:'Исходник зарегистрирован'}],services:[]}:{jobs}));});
+test('one list orders running, queued and finished jobs and dismisses finished cards',async()=>{
+ render(<TasksPanel/>);await screen.findByText('Готовый слой');
+ expect(screen.getAllByRole('article').map(e=>e.querySelector('strong').textContent)).toEqual(['Подготовка карты','Панорамы','Готовый слой']);
+ expect(screen.getByRole('progressbar',{name:'Прогресс Подготовка карты'})).toHaveAttribute('value','35');
+ expect(screen.queryByText('Подключённые оригиналы')).toBeNull();expect(screen.queryByRole('button',{name:'Обновить задания'})).toBeNull();
+ expect(workspaceRequest.mock.calls.some(([,m])=>m==='POST')).toBe(false);
+ workspaceRequest.mockImplementation(path=>Promise.resolve({jobs:jobs.filter(j=>j.id!=='done')}));
+ fireEvent.click(screen.getByRole('button',{name:'Готово'}));
+ await waitFor(()=>expect(screen.queryByText('Готовый слой')).toBeNull());
+ expect(workspaceRequest).toHaveBeenCalledWith('/tasks/import/done/done','POST',{});
+});
+test('logs combine the orthophoto journal with server events',async()=>{
+ addOperationLog('Список успешно обновлен. Загружено файлов: 11');render(<TasksPanel/>);
+ fireEvent.click(screen.getByRole('tab',{name:'Логи'}));
+ expect(await screen.findByText('Исходник зарегистрирован')).toBeInTheDocument();
+ expect(screen.getByRole('log')).toHaveTextContent('Загружено файлов: 11');
+});
+test('editors can read local logs without requesting administrator logs',async()=>{
+ mockRole='editor';render(<TasksPanel/>);fireEvent.click(screen.getByRole('tab',{name:'Логи'}));
+ expect(await screen.findByRole('log')).toBeInTheDocument();expect(workspaceRequest.mock.calls.some(([p])=>p==='/system/logs')).toBe(false);
+});
+test('cancel uses the correct endpoint for the common card',async()=>{
+ render(<TasksPanel/>);await screen.findByText('Подготовка карты');
+ fireEvent.click(screen.getAllByRole('button',{name:'Отменить'})[0]);
+ await waitFor(()=>expect(workspaceRequest).toHaveBeenCalledWith('/raster-display/jobs/active/cancel','POST',{}));
 });

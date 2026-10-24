@@ -79,7 +79,7 @@ def validate_config(value):
     if not isinstance(presentations,list) or len(presentations)>258: abort(400)
     seen = set()
     for item in presentations:
-        if not isinstance(item,dict) or set(item)-{'key','visible','opacity','style','coordinate_system'}: abort(400)
+        if not isinstance(item,dict) or set(item)-{'key','visible','opacity','style','coordinate_system','panorama'}: abort(400)
         key=item.get('key')
         if not isinstance(key,str) or key not in allowed or key in seen: abort(400,description='Неверный список слоёв карты.')
         seen.add(key)
@@ -87,6 +87,16 @@ def validate_config(value):
             if not isinstance(item['coordinate_system'],str): abort(400)
             map_settings.coordinate_system(item['coordinate_system'])
         if type(item.get('visible',True)) is not bool or not numeric(item.get('opacity',1)) or not 0<=item.get('opacity',1)<=1: abort(400)
+        if 'panorama' in item:
+            pano=item['panorama']
+            if key!='panoramas' or not isinstance(pano,dict) or set(pano)-{'mode','pointZoom','detail','color','weight','outlineColor','outlineWidth','pointColor','pointRadius'}: abort(400)
+            if not isinstance(pano.get('mode','auto'),str) or pano.get('mode','auto') not in {'auto','points'}: abort(400)
+            if not isinstance(pano.get('detail','balanced'),str) or pano.get('detail','balanced') not in {'fast','balanced','precise'}: abort(400)
+            for field in ['color','outlineColor','pointColor']:
+                if field in pano and (not isinstance(pano[field],str) or not re.fullmatch(r'#[0-9a-fA-F]{6}',pano[field])): abort(400)
+            for field,minimum,maximum in [('pointZoom',18,22),('weight',1,12),('outlineWidth',0,8),('pointRadius',2,12)]:
+                if field in pano and (not numeric(pano[field]) or not minimum<=pano[field]<=maximum): abort(400)
+            if 'pointZoom' in pano and type(pano['pointZoom']) is not int: abort(400)
         style=item.get('style',{})
         if not isinstance(style,dict) or set(style)-{'color','weight','fillOpacity','radius'}: abort(400)
         if 'color' in style and (not isinstance(style['color'],str) or not re.fullmatch(r'#[0-9a-fA-F]{6}',style['color'])): abort(400)
@@ -168,6 +178,31 @@ def get_map(map_id):
     return jsonify(map=serialize(document(map_id)))
 
 
+@maps_blueprint.patch('/maps/<uuid:map_id>')
+def update_metadata(map_id):
+    data=body()
+    if set(data)-{'title','description','revision'}:abort(400)
+    if type(data.get('revision')) is not int:abort(400,description='Укажите версию карты.')
+    with Database().cursor(write=True) as cursor:
+        row=document(map_id,True,cursor)
+        if data['revision']!=row['revision']:return jsonify(message='Карта изменена в другом окне. Обновите страницу.'),409
+        title,description=title_and_description({'title':data.get('title',row['title']),'description':data.get('description',row['description'])})
+        cursor.execute('UPDATE maps SET title=%s,description=%s,revision=revision+1,updated_at=NOW() WHERE id=%s RETURNING *',(title,description,str(map_id)))
+        row=cursor.fetchone()
+    return jsonify(map=serialize(row))
+
+
+@maps_blueprint.delete('/maps/<uuid:map_id>')
+def delete_map(map_id):
+    data=body()
+    if type(data.get('revision')) is not int:abort(400,description='Укажите версию карты.')
+    with Database().cursor(write=True) as cursor:
+        row=document(map_id,True,cursor)
+        if data['revision']!=row['revision']:return jsonify(message='Карта изменена. Обновите страницу перед удалением.'),409
+        cursor.execute('DELETE FROM maps WHERE id=%s',(str(map_id),))
+    return jsonify(ok=True)
+
+
 @maps_blueprint.put('/maps/<uuid:map_id>')
 def save_map(map_id):
     # Check ownership before catalog validation / other database connections.
@@ -196,8 +231,6 @@ def publish_map(map_id):
         row = document(map_id, True, cursor)
         if data['revision'] != row['revision']:
             return jsonify(message='Версия карты изменилась. Обновите страницу.'), 409
-        if data['published'] and row['config']['show_panoramas']:
-            return jsonify(message='Публичные панорамы пока не поддерживаются. Отключите слой панорам перед публикацией.'), 400
         snapshot = {'title': row['title'], 'description': row['description'], 'config': row['config']} if data['published'] else None
         slug = (row['public_slug'] or secrets.token_urlsafe(24)) if snapshot else None
         cursor.execute('''UPDATE maps SET public_slug=%s,published_snapshot=%s,revision=revision+1,updated_at=NOW()
@@ -267,3 +300,59 @@ def public_coordinates(slug, layer_key):
     item=next((item for item in config.get('layer_settings',[]) if item['key']==layer_key),{})
     from controllers.settings_controller import coordinate_response
     return coordinate_response(item.get('coordinate_system','EPSG:3857' if layer_key=='basemap' else 'EPSG:4326'))
+
+
+def panorama_publication(slug):
+    config=publication(slug)['config']
+    if not config.get('show_panoramas'):abort(404)
+
+
+@maps_blueprint.get('/public/maps/<slug>/panoramas')
+def public_panorama_markers(slug):
+    panorama_publication(slug)
+    from services.panorama_index import markers
+    return markers(Database())
+
+
+@maps_blueprint.get('/public/maps/<slug>/panoramas/coverage')
+def public_panorama_coverage(slug):
+    panorama_publication(slug)
+    from services.panorama_coverage import coverage
+    return coverage(Database())
+
+
+def public_panorama_row(slug,pano_id):
+    panorama_publication(slug)
+    with Database().cursor() as cur:
+        cur.execute('SELECT id,filename,source_ref,width,height,media_type,altitude,direction,"timestamp" FROM public.photos_4326 WHERE id=%s AND deleted_at IS NULL',(pano_id,))
+        row=cur.fetchone()
+    if not row:abort(404)
+    return row
+
+
+@maps_blueprint.get('/public/maps/<slug>/panoramas/<int:pano_id>')
+def public_panorama_info(slug,pano_id):
+    row=public_panorama_row(slug,pano_id)
+    from services.media_metadata import display_name
+    return jsonify(id=row['id'],display_name=display_name(row['filename']),width=row['width'],height=row['height'],
+        media_type=row['media_type'],altitude=float(row['altitude'] or 0),direction=float(row['direction'] or 0),
+        timestamp=row['timestamp'].isoformat() if row['timestamp'] else None)
+
+
+@maps_blueprint.get('/public/maps/<slug>/panoramas/<int:pano_id>/image')
+def public_panorama_image(slug,pano_id):
+    row=public_panorama_row(slug,pano_id)
+    from controllers.pano_controller import PanoController
+    from storage import FileStorage
+    from pathlib import Path
+    from flask import send_file
+    from werkzeug.exceptions import HTTPException
+    import config,mimetypes
+    controller=PanoController.__new__(PanoController)
+    controller.storage=FileStorage(Path(config.MEDIA_ROOT)/'panoramas')
+    try:
+        response=send_file(controller.source_file(row),mimetype=mimetypes.guess_type(row['filename'])[0] or 'image/jpeg',max_age=0)
+        response.headers['Cache-Control']='no-store'
+        return response
+    except HTTPException:raise
+    except (OSError,ValueError):abort(404,description='Изображение недоступно.')

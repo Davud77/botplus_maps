@@ -35,9 +35,14 @@ def initialize(cur):
         cancel_requested BOOLEAN NOT NULL DEFAULT FALSE, lease_token UUID, lease_until TIMESTAMPTZ,
         attempts INTEGER NOT NULL DEFAULT 0, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())''')
+    cur.execute('ALTER TABLE media_import_jobs ADD COLUMN IF NOT EXISTS total BIGINT')
     cur.execute('CREATE INDEX IF NOT EXISTS media_import_claim_idx ON media_import_jobs(status,lease_until,created_at)')
     cur.execute('''CREATE TABLE IF NOT EXISTS media_import_sources (
         signature TEXT PRIMARY KEY, photo_id INTEGER NOT NULL REFERENCES public.photos_4326(id) ON DELETE CASCADE)''')
+    from services.panorama_index import initialize as initialize_index
+    initialize_index(cur)
+    from services.panorama_coverage import initialize as initialize_coverage
+    initialize_coverage(cur)
 
 
 def filters():
@@ -61,18 +66,25 @@ def filters():
 def catalog():
     where, values = filters()
     try:
-        limit = min(100, max(1, int(request.args.get('limit', 50))))
+        limit = min(200, max(1, int(request.args.get('limit', 200))))
         after = int(request.args.get('after', 0))
     except ValueError: abort(400)
+    count_where,count_values=where,list(values)
     if after: where += ' AND id<%s'; values.append(after)
     with database.cursor() as cur:
+        if not count_values and count_where in ('deleted_at IS NULL','deleted_at IS NOT NULL'):
+            from services.panorama_index import totals
+            counts=totals(cur);total=counts['trash_total' if request.args.get('trash')=='1' else 'active_total']
+        else:
+            cur.execute('SELECT count(*) AS n FROM public.photos_4326 WHERE '+count_where,count_values)
+            total=cur.fetchone()['n']
         cur.execute('''SELECT id,filename,folder_id,tags,media_type,width,height,
             ST_Y(geom) AS latitude,ST_X(geom) AS longitude,"timestamp",deleted_at
             FROM public.photos_4326 WHERE ''' + where + ' ORDER BY id DESC LIMIT %s', values + [limit + 1])
         rows = cur.fetchall()
     more = len(rows) > limit
     items = [{**dict(row), 'name': display_name(row['filename'])} for row in rows[:limit]]
-    return jsonify(items=items, next_cursor=items[-1]['id'] if more else None)
+    return jsonify(items=items, next_cursor=items[-1]['id'] if more else None,total=total)
 
 
 @media_blueprint.get('/media/folders')
@@ -123,9 +135,11 @@ def bulk():
     ids, action = body.get('ids'), body.get('action')
     if not isinstance(ids, list) or not 1 <= len(ids) <= 500 or any(type(i) is not int or i <= 0 for i in ids): abort(400)
     ids = list(set(ids))
+    removed=[]
     with database.cursor(write=True) as cur:
-        cur.execute('SELECT id FROM public.photos_4326 WHERE id=ANY(%s) FOR UPDATE', (ids,))
-        if len(cur.fetchall()) != len(ids): abort(404, description='Часть выбранных файлов уже недоступна. Обновите список.')
+        cur.execute('SELECT id,deleted_at FROM public.photos_4326 WHERE id=ANY(%s) FOR UPDATE', (ids,))
+        rows=cur.fetchall()
+        if len(rows) != len(ids): abort(404, description='Часть выбранных файлов уже недоступна. Обновите список.')
         if action == 'move':
             folder = body.get('folder_id')
             if folder is not None:
@@ -134,16 +148,61 @@ def bulk():
                 if not cur.fetchone(): abort(404, description='Папка не найдена.')
             cur.execute('UPDATE public.photos_4326 SET folder_id=%s WHERE id=ANY(%s)', (folder, ids))
         elif action == 'trash':
-            cur.execute('UPDATE public.photos_4326 SET deleted_at=COALESCE(deleted_at,NOW()) WHERE id=ANY(%s)', (ids,))
+            cur.execute('UPDATE public.photos_4326 SET deleted_at=NOW() WHERE id=ANY(%s) AND deleted_at IS NULL', (ids,))
         elif action == 'restore':
-            cur.execute('UPDATE public.photos_4326 SET deleted_at=NULL WHERE id=ANY(%s)', (ids,))
+            cur.execute('UPDATE public.photos_4326 SET deleted_at=NULL WHERE id=ANY(%s) AND deleted_at IS NOT NULL', (ids,))
+        elif action == 'purge':
+            if any(row['deleted_at'] is None for row in rows):abort(409,description='Окончательно удалить можно только записи из корзины.')
+            cur.execute('DELETE FROM public.photos_4326 WHERE id=ANY(%s) RETURNING filename,source_ref',(ids,))
+            removed=cur.fetchall()
         elif action == 'tags':
             tags = body.get('tags')
             if not isinstance(tags, str) or len(tags) > 2000: abort(400)
             cur.execute('UPDATE public.photos_4326 SET tags=%s WHERE id=ANY(%s)', (tags, ids))
         else: abort(400)
-        cur.execute("INSERT INTO system_events(service,message) VALUES ('catalog',%s)",(f'{action}: {len(ids)} selected records',))
-    return jsonify(status='ok', affected=len(ids))
+        affected=len(removed) if action=='purge' else cur.rowcount
+        cur.execute("INSERT INTO system_events(service,message) VALUES ('catalog',%s)",(f'{action}: {affected} selected records',))
+        from services.panorama_index import totals as catalog_totals
+        totals=catalog_totals(cur)
+    cleanup_media_files(removed)
+    return jsonify(status='ok', affected=affected,**totals)
+
+
+def cleanup_media_files(rows):
+    """Only managed copies belong to the catalog; read-only NAS sources remain."""
+    from pathlib import Path
+    import config
+    from storage import FileStorage
+    for row in rows:
+        source=row.get('source_ref')
+        try:
+            if source and source.get('root_id')=='__media_uploads':
+                FileStorage(Path(config.MEDIA_ROOT)/'panoramas'/'incoming').delete_file(source['key'])
+            elif not source:
+                FileStorage(Path(config.MEDIA_ROOT)/'panoramas').delete_file(row['filename'])
+        except (OSError,ValueError) as exc:
+            with database.cursor(write=True) as cur:
+                cur.execute("INSERT INTO system_events(service,level,message) VALUES ('catalog','error',%s)",
+                    ('Запись удалена; очистка файла требует повтора: '+type(exc).__name__,))
+
+
+@media_blueprint.post('/media/trash/empty')
+def empty_trash():
+    if g.current_user['role']=='viewer':abort(403)
+    with database.cursor() as cur:
+        cur.execute('SELECT NOW() AS cutoff');cutoff=cur.fetchone()['cutoff']
+    count=0
+    while True:
+        with database.cursor(write=True) as cur:
+            cur.execute("""DELETE FROM public.photos_4326 WHERE id IN
+                (SELECT id FROM public.photos_4326 WHERE deleted_at<=%s ORDER BY id LIMIT 500 FOR UPDATE)
+                RETURNING filename,source_ref""",(cutoff,))
+            rows=cur.fetchall()
+        if not rows:break
+        count+=len(rows);cleanup_media_files(rows)
+    with database.cursor(write=True) as cur:
+        cur.execute("INSERT INTO system_events(service,message) VALUES ('catalog',%s)",(f'Корзина очищена: {count} записей.',))
+    return jsonify(status='ok',affected=count)
 
 
 @media_blueprint.get('/media/bounds')
@@ -151,6 +210,11 @@ def bounds():
     where, values = filters()
     with database.cursor() as cur:
         cur.execute('SET LOCAL statement_timeout=3000')
+        if where=='deleted_at IS NULL' and not values:
+            size=360/2**11
+            cur.execute('SELECT min(x)*%s AS west,min(y)*%s AS south,(max(x)+1)*%s AS east,(max(y)+1)*%s AS north FROM public.panorama_spatial_cells WHERE level=8',(size,size,size,size))
+            row=cur.fetchone()
+            return jsonify(bounds=dict(row) if row and row['west'] is not None else None)
         cur.execute('SELECT ST_XMin(b) AS west,ST_YMin(b) AS south,ST_XMax(b) AS east,ST_YMax(b) AS north FROM (SELECT ST_Extent(geom) AS b FROM public.photos_4326 WHERE ' + where + ') extent', values)
         row = cur.fetchone()
     return jsonify(bounds=dict(row) if row and row['west'] is not None else None)
@@ -158,23 +222,16 @@ def bounds():
 
 @media_blueprint.get('/media/markers')
 def markers():
-    where, values = filters()
-    try:
-        west, south, east, north = [float(request.args[k]) for k in ('west','south','east','north')]
-        zoom = min(24, max(0, int(request.args.get('zoom', 5))))
-        if not all(math.isfinite(v) for v in (west,south,east,north)): raise ValueError()
-    except (ValueError, KeyError): abort(400)
-    where += ' AND geom && ST_MakeEnvelope(%s,%s,%s,%s,4326)'
-    values += [max(-180,west),max(-90,south),min(180,east),min(90,north)]
-    grid = max(.0005, 20 / 2 ** zoom) if zoom <= 17 else None
-    if grid:
-        query = 'SELECT min(id) AS id,avg(ST_Y(geom)) AS lat,avg(ST_X(geom)) AS lng,count(*) AS count FROM public.photos_4326 WHERE ' + where + ' GROUP BY ST_SnapToGrid(geom,%s) LIMIT 5000'
-        values.append(grid)
-    else:
-        query = 'SELECT id,ST_Y(geom) AS lat,ST_X(geom) AS lng,1 AS count FROM public.photos_4326 WHERE ' + where + ' ORDER BY id DESC LIMIT 5000'
-    with database.cursor() as cur:
-        cur.execute(query, values); rows = cur.fetchall()
-    return jsonify(rows)
+    from services.panorama_index import markers as viewport_markers
+    where,values=filters()
+    return viewport_markers(database,where,values)
+
+
+@media_blueprint.get('/media/coverage')
+def coverage():
+    from services.panorama_coverage import coverage as track_coverage
+    where,values=filters()
+    return track_coverage(database,where,values)
 
 
 @media_blueprint.route('/media/imports', methods=['GET','POST'])
@@ -185,7 +242,7 @@ def media_imports():
         body=request.get_json(silent=True) or {}
         if not isinstance(body,dict):abort(400)
         root,key=body.get('root_id'),body.get('key','')
-        if type(body.get('only_360',True)) is not bool:abort(400)
+        if type(body.get('only_360',True)) is not bool or not isinstance(root,str) or root.startswith('__'):abort(400)
         try:source_path(root,key)
         except (ValueError,OSError) as e:abort(400,description=str(e) if isinstance(e,ValueError) else 'Источник недоступен.')
         source={'root_id':root,'key':key,'only_360':body.get('only_360',True)}
@@ -207,6 +264,14 @@ def media_action(job_id,action):
         if action=='cancel' and row['status'] in {'queued','running'}:
             c.execute("UPDATE media_import_jobs SET cancel_requested=TRUE,status=CASE WHEN status='queued' THEN 'cancelled' ELSE status END WHERE id=%s",(str(job_id),))
         elif action=='retry' and row['status'] in {'failed','cancelled','succeeded'}:
-            c.execute("UPDATE media_import_jobs SET status='queued',cancel_requested=FALSE,lease_until=NULL,lease_token=NULL WHERE id=%s",(str(job_id),))
+            c.execute("UPDATE media_import_jobs SET status='queued',cancel_requested=FALSE,lease_until=NULL,lease_token=NULL,attempts=0,updated_at=NOW() WHERE id=%s",(str(job_id),))
         else:abort(409)
     return jsonify(status='ok')
+
+
+@media_blueprint.post('/media/coverage/rebuild')
+def rebuild_coverage():
+    if g.current_user['role']=='viewer':abort(403)
+    from import_jobs import enqueue_operation,serialize
+    job=enqueue_operation(g.current_user_id,'panorama-coverage','Перестроение покрытия панорам',{},database)
+    return jsonify(job=serialize(job)),202
